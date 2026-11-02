@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Dustpan's icon: the orange dustpan from dustpan-v1.vectorcraft (VectorCraft), cropped to its square. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="422.362 79.370 238.110 238.110">
+  <title>Dustpan</title>
+  <defs>
+    <linearGradient id="body" x1="691.654" y1="309.807" x2="691.654" y2="106.889" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.2474" stop-color="#f3b693"/>
+      <stop offset="1" stop-color="#e66d28"/>
+    </linearGradient>
+    <linearGradient id="glow-pan" x1="685.984" y1="93.543" x2="685.984" y2="319.515" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.4976" stop-color="#ffffff" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="glow-handle" x1="683.15" y1="56.693" x2="683.15" y2="145.993" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.4976" stop-color="#ffffff" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="lip" x1="541.417" y1="297.638" x2="541.417" y2="311.811" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.5"/>
+      <stop offset="0.55" stop-color="#f3b693" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#e66d28" stop-opacity="0.5"/>
+    </linearGradient>
+  </defs>
+  <path d="M541.417 85.039 C569.764 85.039 558.425 113.386 558.425 141.732 C558.425 195.591 569.764 198.425 575.433 198.425 C592.615 198.425 654.803 204.204 654.803 232.441 C654.803 260.678 654.803 311.811 654.803 311.811 L428.031 311.811 C428.031 311.811 428.031 260.804 428.031 232.441 C428.031 204.077 478.867 198.425 507.402 198.425 C515.906 198.425 524.409 195.591 524.409 141.732 C524.409 113.386 513.071 85.039 541.417 85.039 Z" fill="url(#body)" stroke="#000000" stroke-width="11.339" stroke-miterlimit="10"/>
+  <path d="M541.417 198.425 C555.591 198.425 547.087 209.764 569.764 209.764 C586.086 209.764 643.465 211.285 643.465 238.11 C643.465 264.936 643.465 300.472 643.465 300.472 L439.37 300.472 C439.37 300.472 439.37 265.056 439.37 238.11 C439.37 211.165 485.963 209.764 513.071 209.764 C535.748 209.764 527.244 198.425 541.417 198.425 Z" fill="url(#glow-pan)"/>
+  <path d="M541.417 96.378 C558.425 96.378 547.087 122.484 547.087 138.898 C547.087 165.723 555.591 192.756 555.591 192.756 L527.244 192.756 C527.244 192.756 535.748 165.843 535.748 138.898 C535.748 124.253 524.409 96.378 541.417 96.378 Z" fill="url(#glow-handle)"/>
+  <path d="M433.701 297.638 L649.134 297.638 L649.134 311.811 L433.701 311.811 Z" fill="url(#lip)"/>
+</svg>

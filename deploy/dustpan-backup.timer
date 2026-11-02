@@ -1,0 +1,11 @@
+[Unit]
+Description=Copy Dustpan's backups to this PC daily
+
+[Timer]
+OnCalendar=daily
+# Catch up after the PC was off.
+Persistent=true
+RandomizedDelaySec=30min
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,10 @@
+# Local dev server: downloaded binary, its data and credentials
+dev/bin/
+dev/data/
+dev/credentials
+
+# Python
+__pycache__/
+
+# Where the server is: kept out of git
+deploy/deploy.env

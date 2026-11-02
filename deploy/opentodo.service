@@ -1,0 +1,49 @@
+# The OpenTodo server behind Dustpan. Caddy proxies the public https address to it.
+# deploy.sh installs this as /etc/systemd/system/opentodo.service.
+[Unit]
+Description=OpenTodo server for Dustpan
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# deploy.sh points this link at the pinned release.
+ExecStart=/opt/opentodo/current/opentodo-linux-amd64
+Restart=on-failure
+
+# A throwaway user. Data lives in /var/lib/opentodo, readable by that user only.
+DynamicUser=yes
+StateDirectory=opentodo
+StateDirectoryMode=0700
+UMask=0077
+
+Environment=OPENTODO_ADDR=127.0.0.1:8080
+Environment=OPENTODO_DATA_DIR=/var/lib/opentodo
+# No web push: the desktop client notifies on its own, and nothing leaves the box.
+Environment=OPENTODO_PUSH=off
+# Daily archives in /var/lib/opentodo/backups. These seed the settings once; Settings → Server wins after that.
+Environment=OPENTODO_BACKUP_DESTINATION=local
+Environment=OPENTODO_BACKUP_SCHEDULE=daily
+Environment=OPENTODO_BACKUP_TIME=03:00
+Environment=OPENTODO_BACKUP_KEEP=14
+# OPENTODO_BASE_URL and OPENTODO_SETUP_TOKEN. Root-only, created by deploy.sh --setup.
+EnvironmentFile=/etc/opentodo/env
+
+# Lock it down. It only needs its data folder and a local socket.
+ProtectHome=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

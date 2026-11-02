@@ -1,0 +1,6 @@
+[Unit]
+Description=Copy Dustpan's server archives and client database to this PC
+
+[Service]
+Type=oneshot
+ExecStart=@SCRIPT@

@@ -1,0 +1,6 @@
+# Dustpan's OpenTodo server. Naming the domain makes Caddy fetch and renew a Let's Encrypt certificate.
+# OpenTodo sets its own HSTS and security headers. The live update stream needs nothing special.
+# deploy.sh fills in the domain and installs this as /etc/caddy/sites/dustpan.caddy.
+DOMAIN {
+	reverse_proxy 127.0.0.1:8080
+}

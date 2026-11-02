@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Dustpan
+Comment=Tasks, synced with your own server
+Exec=@BIN@
+Icon=io.github.chizzler.Dustpan
+Terminal=false
+Categories=Office;ProjectManagement;GTK;
+Keywords=todo;tasks;reminders;
+StartupWMClass=io.github.chizzler.Dustpan
