@@ -1,6 +1,6 @@
 # Labels
 
-Status: built 2026-11-02 (slice 9).
+Status: built 2026-11-02 (slice 9), tried and approved. Dropping a task on a label added the same day.
 
 OpenTodo's rules are in `openspec/specs/labels/spec.md` and `docs/sync.md` ("Task labels"). The web app's code is
 `web/src/lib/labels.ts`. A label has `name`, `color`, `position`, `created_at` and `deleted_at`.
@@ -33,6 +33,14 @@ OpenTodo's rules are in `openspec/specs/labels/spec.md` and `docs/sync.md` ("Tas
 - **The menu** (right-click): Edit label…, Move up, Move down, Merge into…, Delete….
   The pencil on a label's page opens the editor, which also has Merge and Delete.
 
+## Dropping a task on a label
+
+- **Drag a task onto a label in the sidebar** to add that label (`dragdrop.ToLabel`). Its other labels, its place,
+  project and dates stay. The toast says "Added errand", with Undo.
+- **A task that already has the label** is left alone, and the toast says "It already has errand".
+- **Label rows don't open on hover** during a drag, as project rows do: a label's page has nowhere to place a task.
+- `L` stays the keyboard way.
+
 ## Managing
 
 | Action | Writes | Undo |
@@ -52,6 +60,6 @@ OpenTodo's rules are in `openspec/specs/labels/spec.md` and `docs/sync.md` ("Tas
 
 ## Not done
 
-- Dropping a task on a label (slice 6c), and reordering labels by drag.
+- Reordering labels by drag.
 - Pinning labels to a Favourites group (`user_prefs.favourites`).
 - A labels overview page, and `@` completion in quick add.

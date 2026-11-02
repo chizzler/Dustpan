@@ -2,6 +2,7 @@
 
 import unittest
 
+from dustpan.dragdrop import ToLabel, describe
 from dustpan.labels import duplicates, find, picker_order, remember, shown
 from dustpan.store import Row
 from dustpan.writes import CannotEdit, LABEL_PALETTE
@@ -112,6 +113,23 @@ class LabelWritesTest(WriterCase):
         before = len(self.outbox())
         done = self.writer.change_task_labels("t1", add=["call"])  # already there: nothing written
         self.assertEqual((len(self.outbox()), done.undo), (before, []))
+
+    def test_dropping_on_a_label_adds_it_and_nothing_else(self):
+        self.seed("task", "t4", title="Four", labels=["call"], position=7, due={"date": "2026-11-09"})
+        done = self.writer.drop("t4", ToLabel("errand"))
+        self.assertEqual(self.labels_of("t4"), ["call", "errand"])
+        self.assertEqual({o["field"] for o in self.outbox() if o["entityId"] == "t4"}, {"labels"})
+        self.writer.revert(done.undo)
+        self.assertEqual(self.labels_of("t4"), ["call"])
+        self.assertEqual(describe(ToLabel("errand"), self.task("t4"), {"errand": "errand"}, str), "Added errand")
+
+    def test_dropping_on_a_label_it_has_writes_nothing(self):
+        before = len(self.outbox())
+        done = self.writer.drop("t1", ToLabel("errand"))
+        self.assertEqual((done.undo, len(self.outbox())), ([], before))
+        self.writer.delete_label("call")
+        with self.assertRaises(CannotEdit):
+            self.writer.drop("t1", ToLabel("call"))
 
     def test_edit_takes_ids_or_names(self):
         self.writer.edit("t1", {"labels": ["call", "errand", "New one"]})

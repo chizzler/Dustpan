@@ -42,6 +42,13 @@ class ToDay:
     day: str
 
 
+@dataclass(frozen=True)
+class ToLabel:
+    """The label added to the task's own. Its place, project and dates stay."""
+
+    label_id: str
+
+
 # ---- a list as the pointer sees it ----
 
 
@@ -196,6 +203,8 @@ def describe(target, task, names, day_text):
         return "Due " + day_text(target.day)
     if isinstance(target, ToProject):
         return "Moved to " + names.get(target.project_id, "Inbox")
+    if isinstance(target, ToLabel):
+        return "Added " + names.get(target.label_id, "the label")
     if target.parent_id and target.parent_id != task.get("parent_id"):
         return f"Moved under “{names.get(target.parent_id, 'a task')}”"
     if target.project_id != task.get("project_id"):

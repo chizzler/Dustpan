@@ -17,7 +17,7 @@ from .api import Api, ApiError, Offline  # noqa: E402
 from .clock import wall_ms  # noqa: E402
 from .dates import day_heading, day_start_minutes, format_due, format_minutes  # noqa: E402
 from .dialogs import LabelDialog, ProjectDialog, TaskDialog, ViewDialog, ask_name  # noqa: E402
-from .dragdrop import MOVES, Place, Slot, ToDay, ToProject, describe as describe_drop, nudge  # noqa: E402
+from .dragdrop import MOVES, Place, Slot, ToDay, ToLabel, ToProject, describe as describe_drop, nudge  # noqa: E402
 from .dragging import Autoscroll, Drag, PageDrop, SidebarDrop  # noqa: E402
 from .events import EventStream  # noqa: E402
 from .filters import Context, FilterError, shift  # noqa: E402
@@ -80,7 +80,8 @@ class Window(Adw.ApplicationWindow):
         self.sidebar = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         self.sidebar.add_css_class("navigation-sidebar")
         self.sidebar.connect("row-selected", self.on_row_selected)
-        self.sidebar_drop = SidebarDrop(self.sidebar, self.drag, self.sidebar_target, self.drop_task, self.sidebar.select_row)
+        self.sidebar_drop = SidebarDrop(self.sidebar, self.drag, self.sidebar_target, self.drop_task, self.sidebar.select_row,
+                                        springs=lambda row: not getattr(row, "key", "").startswith(LABEL))
         sidebar_scroll = Gtk.ScrolledWindow(child=self.sidebar, vexpand=True)
         sidebar_view = Adw.ToolbarView(content=sidebar_scroll)
         sidebar_view.add_top_bar(Adw.HeaderBar(title_widget=Adw.WindowTitle(title="Dustpan")))
@@ -555,8 +556,11 @@ class Window(Adw.ApplicationWindow):
     # ---- dragging ----
 
     def sidebar_target(self, row):
-        """What a task dropped on a sidebar row gets: a date for Today, a new home for the Inbox or a project."""
+        """What a task dropped on a sidebar row gets: a date for Today, a new home for the Inbox or a project,
+        or a label."""
         key = getattr(row, "key", None)
+        if key and key.startswith(LABEL):
+            return ToLabel(key[len(LABEL):])
         if key == TODAY:
             return ToDay(self.today)
         if key == INBOX:
@@ -578,6 +582,8 @@ class Window(Adw.ApplicationWindow):
                        undo=lambda: self.run(self.writer.revert, done.undo))
         else:
             self.flash_task = self.focus_task = None
+            if done and isinstance(target, ToLabel):
+                self.toast(f"It already has {self.label_name(target.label_id)}")
         return GLib.SOURCE_REMOVE
 
     # ---- keys and the row menu (rowactions.py) ----
@@ -640,10 +646,11 @@ class Window(Adw.ApplicationWindow):
             self.refresh_view()
 
     def names(self):
-        """Ids of tasks, sections and projects to what the user calls them."""
+        """Ids of tasks, sections, projects and labels to what the user calls them."""
         names = {t.id: t.get("title", "") for t in self.snap.all_tasks.values()}
         names.update((s.id, s.get("name", "")) for s in self.store.rows("section").values())
         names.update(self.project_paths)
+        names.update((label.id, label.get("name", "")) for label in self.snap.labels.values())
         return names
 
     # ---- rows ----

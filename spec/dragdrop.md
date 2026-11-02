@@ -217,7 +217,7 @@ Built 2026-11-01 as planned, plus ↑ ↓ (j k), Enter, c and Delete on a focuse
 **6c, later.**
 - Drag projects in the sidebar to reorder or nest them, with the same zones.
 - Saved-view group headings, and `view.manual_order`.
-- Labels in the sidebar as drop targets.
+- ~~Labels in the sidebar as drop targets.~~ Done 2026-11-02, with slice 9 (see labels.md).
 - Several selected tasks dragged together, with a count.
 - `view.on_drop` rules, once boards exist.
 

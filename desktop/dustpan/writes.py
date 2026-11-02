@@ -12,7 +12,7 @@ from datetime import date, datetime, time
 from . import labels as label_rules, quickadd
 from .clock import HybridClock, wall_ms
 from .dates import day_start_minutes, due_instant, logical_today
-from .dragdrop import Place, ToDay, ToProject
+from .dragdrop import Place, ToDay, ToLabel, ToProject
 from .filters import FilterError, parse as parse_query
 from .model import build_tree
 from .ordering import GAP, plan_move
@@ -589,7 +589,7 @@ class Writer:
         return changes + out
 
     def drop(self, task_id, target):
-        """Apply a drag-and-drop target (dragdrop.Place, ToProject or ToDay) to an open task, as one batch.
+        """Apply a drag-and-drop target (dragdrop.Place, ToProject, ToDay or ToLabel) to an open task, as one batch.
 
         Returns Done whose undo restores every field written. Nothing changed: an empty undo.
         """
@@ -608,6 +608,10 @@ class Writer:
                 if due and due.get("date") == target.day:
                     return []
                 return self._plan_edit(task_id, {"due": {**(due or {}), "date": target.day}})
+            if isinstance(target, ToLabel):
+                self._label(target.label_id)
+                labels = list(task.get("labels") or [])
+                return [] if target.label_id in labels else [("task", task_id, {"labels": labels + [target.label_id]})]
             raise ValueError(f"not a drop target: {target!r}")
 
         return self.commit(self._undoable(plan))

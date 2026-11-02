@@ -232,10 +232,12 @@ class SidebarDrop:
     """Drops on sidebar rows. Holding a drag over a row opens its page, so a task can be placed exactly.
 
     target_of(row) gives a dragdrop target or None. open_row(row) shows that row's page.
+    springs(row): whether holding over the row opens it. A label's page has nowhere to place a task.
     """
 
-    def __init__(self, listbox, drag, target_of, on_drop, open_row):
+    def __init__(self, listbox, drag, target_of, on_drop, open_row, springs=lambda row: True):
         self.listbox, self.drag, self.target_of, self.on_drop, self.open_row = listbox, drag, target_of, on_drop, open_row
+        self.springs = springs
         self.row = None
         self.timer = 0
         target = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
@@ -254,7 +256,7 @@ class SidebarDrop:
                 GLib.source_remove(self.timer)
                 self.timer = 0
             self.row = row
-            if row is not None and row.get_selectable() and not row.is_selected():
+            if row is not None and row.get_selectable() and not row.is_selected() and self.springs(row):
                 self.timer = GLib.timeout_add(SPRING_MS, self.spring, row)
         target = self.target_of(row) if row is not None else None
         if row is not None:
