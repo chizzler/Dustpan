@@ -155,6 +155,37 @@ def at_gap(rows, project_id, section_id, gap, depth):
     return Drop(target, prev=prev and prev.id, next=nxt and nxt.id, depth=depth)
 
 
+# ---- sidebar rows: projects, labels and views ----
+
+
+@dataclass(frozen=True)
+class ItemPlace:
+    """Where a dragged sidebar item lands among its own kind: under parent_id (projects only),
+    right before or after a sibling, or last when neither is named."""
+
+    parent_id: str | None = None
+    before: str | None = None
+    after: str | None = None
+
+
+def place_item(row_id, row_parent, row_children, where, moving, below=()):
+    """The ItemPlace for a drop on a sidebar row, or None.
+
+    row_children: the row's shown children, in order (projects). where: BEFORE, AFTER, or INSIDE to nest.
+    below: the ids under the dragged item. It can't land on itself or inside its own subtree.
+    After a row whose children are shown means above its first child, where the line is drawn.
+    """
+    if row_id == moving or row_id in below:
+        return None
+    if where == INSIDE:
+        return ItemPlace(parent_id=row_id)
+    if where == AFTER and row_children:
+        first = next((c for c in row_children if c != moving), None)
+        return ItemPlace(parent_id=row_id, before=first)
+    side = "before" if where == BEFORE else "after"
+    return ItemPlace(parent_id=row_parent, **{side: row_id})
+
+
 # ---- the same moves by keyboard ----
 
 UP, DOWN, TOP, BOTTOM, INDENT, OUTDENT = "up", "down", "top", "bottom", "indent", "outdent"

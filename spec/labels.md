@@ -31,6 +31,7 @@ OpenTodo's rules are in `openspec/specs/labels/spec.md` and `docs/sync.md` ("Tas
 - **A label's page** lists its open tasks across projects. They're grouped by project unless the label's own
   `group_by`, `sort_by` and `sort_dir` say otherwise, as the web app reads them. An empty page says how to add tasks.
 - **The menu** (right-click): Edit label…, Move up, Move down, Merge into…, Delete….
+- **Reorder** by dragging a label in the sidebar, or Alt+↑ / Alt+↓ on a focused one (dragdrop.md, "In the sidebar").
   The pencil on a label's page opens the editor, which also has Merge and Delete.
 
 ## Dropping a task on a label
@@ -60,6 +61,5 @@ OpenTodo's rules are in `openspec/specs/labels/spec.md` and `docs/sync.md` ("Tas
 
 ## Not done
 
-- Reordering labels by drag.
 - Pinning labels to a Favourites group (`user_prefs.favourites`).
 - A labels overview page, and `@` completion in quick add.

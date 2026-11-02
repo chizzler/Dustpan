@@ -14,14 +14,14 @@ from .clock import HybridClock, wall_ms
 from .dates import day_start_minutes, due_instant, logical_today
 from .dragdrop import Place, ToDay, ToLabel, ToProject
 from .filters import FilterError, parse as parse_query
-from .model import build_tree
+from .model import build_tree, order_key
 from .ordering import GAP, plan_move
 from .recurrence import RuleError, canonical, first_occurrence, parse
 from .recurring import plan_completion, plan_detach, plan_skip, series_rule
 from .quickadd.settings import context_for
 from .reminders import MAX_OFFSET, deadline_fire_at, plan_default_reminder, read_defaults, relative_fire_at
 from .store import Row
-from .views import DEFAULTS as VIEW_DEFAULTS, GROUP_BY, SORT_BY, SORT_DIR
+from .views import DEFAULTS as VIEW_DEFAULTS, GROUP_BY, SORT_BY, SORT_DIR, is_list_view, view_order
 
 EDITABLE = ("title", "description", "priority", "due", "recurrence", "project_id", "section_id", "labels",
             "estimate_minutes", "deadline")
@@ -941,6 +941,83 @@ class Writer:
 
         return self.commit(self._undoable(plan))
 
+    # ---- the sidebar's order: projects, labels, views (spec/dragdrop.md, "In the sidebar") ----
+
+    def _reorder(self, entity, rows, moved_id, index):
+        """The position writes that put moved_id at index of rows (live, in sidebar order), counted without it."""
+        siblings = [(r.id, number(r.get("position")) or 0) for r in rows]
+        return [(entity, i, {"position": p}) for i, p in plan_move(siblings, moved_id, index, self.now())]
+
+    def _step(self, entity, rows, moved_id, step):
+        """One place up (-1) or down (+1) among rows. Nothing at an edge."""
+        index = [r.id for r in rows].index(moved_id) + step
+        return self._reorder(entity, rows, moved_id, index) if 0 <= index < len(rows) else []
+
+    def _place(self, entity, rows, moved_id, before=None, after=None):
+        """Right before or after a sibling in rows, or last when neither is named or found."""
+        order = [r.id for r in rows if r.id != moved_id]
+        index = order.index(before) if before in order else order.index(after) + 1 if after in order else len(order)
+        return self._reorder(entity, rows, moved_id, index)
+
+    def _project_siblings(self, parent_id):
+        """The live, unarchived projects under parent_id, in sidebar order."""
+        return sorted((p for p in self.store.rows("project").values()
+                       if live(p) and not p.get("archived") and p.get("parent_id") == parent_id), key=order_key)
+
+    def place_project(self, project_id, parent_id=None, before=None, after=None):
+        """Put a project under parent_id (None: the top level), right before or after a sibling, or last.
+
+        One batch: the parent when it changes, and the positions. Never under itself or below it.
+        """
+
+        def plan():
+            projects = self.store.rows("project")
+            project = self._project(projects, project_id)
+            changes = self._place("project", self._project_siblings(parent_id), project_id, before, after)
+            if parent_id != project.get("parent_id"):
+                self._check_parent(projects, parent_id, project_id)
+                changes = [("project", project_id, {"parent_id": parent_id})] + changes
+            return changes
+
+        return self.commit(self._undoable(plan))
+
+    def move_project(self, project_id, step):
+        """Move a project one place up (-1) or down (+1) among its siblings."""
+
+        def plan():
+            project = self._project(self.store.rows("project"), project_id)
+            return self._step("project", self._project_siblings(project.get("parent_id")), project_id, step)
+
+        return self.commit(self._undoable(plan))
+
+    def _list_views(self):
+        """The views the sidebar lists, in its order. Dashboards keep their positions."""
+        return sorted((v for v in self.store.rows("view").values() if is_list_view(v)), key=view_order)
+
+    def _view(self, view_id):
+        view = self.store.rows("view").get(view_id)
+        if not live(view):
+            raise CannotEdit("That view no longer exists")
+        return view
+
+    def place_view(self, view_id, before=None, after=None):
+        """Put a view right before or after another in the sidebar (a drag)."""
+
+        def plan():
+            self._view(view_id)
+            return self._place("view", self._list_views(), view_id, before, after)
+
+        return self.commit(self._undoable(plan))
+
+    def move_view(self, view_id, step):
+        """Move a view one place up (-1) or down (+1) in the sidebar."""
+
+        def plan():
+            self._view(view_id)
+            return self._step("view", self._list_views(), view_id, step)
+
+        return self.commit(self._undoable(plan))
+
     # ---- labels (spec/labels.md) ----
 
     def _live_labels(self):
@@ -1001,11 +1078,16 @@ class Writer:
 
         def plan():
             self._label(label_id)
-            siblings = [(r.id, number(r.get("position")) or 0) for r in label_rules.in_order(self._live_labels())]
-            index = [i for i, _ in siblings].index(label_id) + step
-            if not 0 <= index < len(siblings):
-                return []
-            return [("label", i, {"position": p}) for i, p in plan_move(siblings, label_id, index, self.now())]
+            return self._step("label", label_rules.in_order(self._live_labels()), label_id, step)
+
+        return self.commit(self._undoable(plan))
+
+    def place_label(self, label_id, before=None, after=None):
+        """Put a label right before or after another in the sidebar (a drag)."""
+
+        def plan():
+            self._label(label_id)
+            return self._place("label", label_rules.in_order(self._live_labels()), label_id, before, after)
 
         return self.commit(self._undoable(plan))
 

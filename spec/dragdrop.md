@@ -215,11 +215,34 @@ Built 2026-11-01 as planned, with these additions:
 Built 2026-11-01 as planned, plus ↑ ↓ (j k), Enter, c and Delete on a focused task, and Due tomorrow in the menu.
 
 **6c, later.**
-- Drag projects in the sidebar to reorder or nest them, with the same zones.
+- ~~Drag projects in the sidebar to reorder or nest them, with the same zones.~~ Done 2026-11-02, with labels and views:
+  see "In the sidebar" below.
 - Saved-view group headings, and `view.manual_order`.
 - ~~Labels in the sidebar as drop targets.~~ Done 2026-11-02, with slice 9 (see labels.md).
 - Several selected tasks dragged together, with a count.
 - `view.on_drop` rules, once boards exist.
+
+## In the sidebar
+
+Built 2026-11-02. Projects, labels and views can be dragged within their own group. OpenTodo's specs:
+`project-organization` ("Move a project", "Cycle prevention"), `labels` ("Reorder labels by drag and by keyboard"),
+`custom-views` ("Pinned views in the sidebar").
+
+- **Projects** use the task zones: the top quarter of a row places before it, the bottom quarter after it,
+  the middle half nests inside, as the last sub-project. After a project whose sub-projects are shown
+  means above its first sub-project, where the line is drawn. A project never goes under itself or below it.
+- **Labels and views** use halves: before or after. They don't nest.
+- **Only its own kind.** A dragged project ignores label rows, and so on. A dragged row is never a task drop,
+  and a task is never a row drop: the row drag (`ItemDrag`) is separate from the task drag.
+- **Feedback** on the row under the pointer: a line along its top or bottom edge, or a ring for nesting.
+  The task drag's spring (holding a row opens its page) is off for row drags.
+- **One batch, with Undo.** A project's parent, when it changes, and the positions, with the shared midpoint rule
+  (`ordering.plan_move`). The toast says "Order changed", "Moved “Work” under “Home”" or "… to the top level".
+- **Without a pointer:** Move up and Move down in each row's menu (greyed at the ends), and Alt+↑ / Alt+↓ on a
+  focused row. Both stay among its siblings and keep the focus. A project's parent is changed in its editor.
+- Views got a menu for this: Edit view…, Move up, Move down, Delete. Dashboards aren't listed and keep their positions.
+- Rules: `dragdrop.place_item` (no GTK). Writes: `Writer.place_project`, `move_project`, `place_label`, `move_label`,
+  `place_view`, `move_view`. Tests: `tests/test_sidebar_order.py`.
 
 ## Tests
 

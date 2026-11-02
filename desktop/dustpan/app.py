@@ -17,8 +17,9 @@ from .api import Api, ApiError, Offline  # noqa: E402
 from .clock import wall_ms  # noqa: E402
 from .dates import day_heading, day_start_minutes, format_due, format_minutes  # noqa: E402
 from .dialogs import LabelDialog, ProjectDialog, TaskDialog, ViewDialog, ask_name  # noqa: E402
-from .dragdrop import MOVES, Place, Slot, ToDay, ToLabel, ToProject, describe as describe_drop, nudge  # noqa: E402
-from .dragging import Autoscroll, Drag, PageDrop, SidebarDrop  # noqa: E402
+from .dragdrop import (AFTER, BEFORE, INSIDE, MOVES, Place, Slot, ToDay, ToLabel, ToProject,  # noqa: E402
+                       describe as describe_drop, nudge, place_item, zone)
+from .dragging import Autoscroll, Drag, ItemDrag, PageDrop, SidebarDrop  # noqa: E402
 from .events import EventStream  # noqa: E402
 from .filters import Context, FilterError, shift  # noqa: E402
 from .labelpicker import LabelPicker  # noqa: E402
@@ -33,7 +34,7 @@ from .views import (WEEK_START, compare_tasks, group_tasks, in_today, manual_ord
                     run_view, sorted_tasks, today_groups, upcoming_groups, view_options)
 from .widgets import (CSS, INDENT_PX, Dot, ThemeFollower, escape, flash, label_chip, on_right_click, popup_menu,  # noqa: E402
                       save_screenshot, scroll_into_view)
-from .writes import CannotEdit, Writer, descendants, live  # noqa: E402
+from .writes import CannotEdit, Writer, descendants, live, project_descendants  # noqa: E402
 
 SYNC_INTERVAL_S = 30
 LIVE_SYNC_INTERVAL_S = 5 * 60  # polling relaxes while the live stream is connected
@@ -67,6 +68,7 @@ class Window(Adw.ApplicationWindow):
         self.add_text = ""
         # Dragging: a refresh would rebuild the page under the pointer, so it waits for the drop.
         self.drag = Drag(on_end=self.after_drag)
+        self.item_drag = ItemDrag(on_end=self.after_drag)  # a sidebar row being reordered
         self.refresh_waiting = False
         self.page_stale = False  # changes came in while hidden; rebuild when shown
         self.page_drop = None
@@ -81,7 +83,11 @@ class Window(Adw.ApplicationWindow):
         self.sidebar.add_css_class("navigation-sidebar")
         self.sidebar.connect("row-selected", self.on_row_selected)
         self.sidebar_drop = SidebarDrop(self.sidebar, self.drag, self.sidebar_target, self.drop_task, self.sidebar.select_row,
-                                        springs=lambda row: not getattr(row, "key", "").startswith(LABEL))
+                                        springs=lambda row: not getattr(row, "key", "").startswith(LABEL),
+                                        items=self.item_drag, place_of=self.sidebar_place, on_place=self.drop_item)
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self.on_sidebar_key)
+        self.sidebar.add_controller(keys)
         sidebar_scroll = Gtk.ScrolledWindow(child=self.sidebar, vexpand=True)
         sidebar_view = Adw.ToolbarView(content=sidebar_scroll)
         sidebar_view.add_top_bar(Adw.HeaderBar(title_widget=Adw.WindowTitle(title="Dustpan")))
@@ -249,7 +255,7 @@ class Window(Adw.ApplicationWindow):
     # ---- sidebar ----
 
     def refresh_view(self):
-        if self.drag.active:
+        if self.drag.active or self.item_drag.active:
             self.refresh_waiting = True
             return
         if not self.get_mapped() and hasattr(self, "snap"):
@@ -288,16 +294,17 @@ class Window(Adw.ApplicationWindow):
         new_project.connect("clicked", lambda _b: self.open_project_dialog(None))
         self.add_sidebar_heading("Projects", new_project)
 
-        def walk(nodes, depth, path):
+        def walk(nodes, depth, path, parent_id):
             for node in nodes:
                 name = node.row.get("name", "")
                 self.project_paths.append((node.id, " › ".join(path + [name])))
                 self.add_sidebar_row(node.id, name, depth, color=node.row.get("color"),
                                      count=count_open(self.snap, node.id, self.today),
-                                     menu=lambda pid=node.id: self.project_menu(pid))
-                walk(node.children, depth + 1, path + [name])
+                                     menu=lambda pid=node.id: self.project_menu(pid),
+                                     item=("project", node.id, parent_id, [c.id for c in node.children]))
+                walk(node.children, depth + 1, path + [name], node.id)
 
-        walk(self.snap.projects, 0, [])
+        walk(self.snap.projects, 0, [], None)
 
         new_label = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="New label", css_classes=["flat"])
         new_label.connect("clicked", lambda _b: self.open_label_dialog(None))
@@ -311,6 +318,7 @@ class Window(Adw.ApplicationWindow):
         for label in in_order(self.snap.labels.values()):
             self.add_sidebar_row(LABEL + label.id, label.get("name", ""), 0, color=label.get("color"),
                                  count=counts.get(label.id, 0), menu=lambda lid=label.id: self.label_menu(lid),
+                                 item=("label", label.id, None, []),
                                  warning="Another label has this name. Merge them from this label's menu."
                                  if label.id in twins else None)
 
@@ -322,7 +330,8 @@ class Window(Adw.ApplicationWindow):
                 count = run_query(view.get("query") or "", self.filter_context, self.snap.tasks)[1]
             except FilterError:
                 count = 0
-            self.add_sidebar_row(VIEW + view.id, view.get("name", ""), 0, icon="view-list-symbolic", count=count)
+            self.add_sidebar_row(VIEW + view.id, view.get("name", ""), 0, icon="view-list-symbolic", count=count,
+                                 menu=lambda vid=view.id: self.view_menu(vid), item=("view", view.id, None, []))
 
         projects = {p.id: p for p in self.snap.live_projects}
         archived = sorted(((project_path(p.id, projects), p) for p in self.snap.live_projects if p.get("archived")),
@@ -346,8 +355,11 @@ class Window(Adw.ApplicationWindow):
             box.append(button)
         self.sidebar.append(Gtk.ListBoxRow(child=box, selectable=False, activatable=False))
 
-    def add_sidebar_row(self, key, name, depth, icon=None, color=None, count=0, menu=None, warning=None):
-        """menu() gives the sections of the row's right-click menu, for popup_menu. warning: a marker's tooltip."""
+    def add_sidebar_row(self, key, name, depth, icon=None, color=None, count=0, menu=None, warning=None, item=None):
+        """menu() gives the sections of the row's right-click menu, for popup_menu. warning: a marker's tooltip.
+
+        item: (kind, id, parent id, child ids) for a row that can be dragged to reorder it among its kind.
+        """
         box = Gtk.Box(spacing=10, margin_start=6 + depth * INDENT_PX // 2)
         box.append(Gtk.Image(icon_name=icon) if icon else Dot(color))
         box.append(Gtk.Label(label=name, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END))
@@ -362,6 +374,9 @@ class Window(Adw.ApplicationWindow):
         row.name = name
         if menu:
             on_right_click(row, lambda x, y: popup_menu(row, menu(), x, y))
+        row.item = item
+        if item:
+            self.item_drag.source(row, item[0], item[1], name)
         self.rows_by_key[key] = row
         self.sidebar.append(row)
 
@@ -568,6 +583,75 @@ class Window(Adw.ApplicationWindow):
         if key and key != UPCOMING and not key.startswith((VIEW, ARCHIVED, LABEL)):
             return ToProject(key)
         return None
+
+    # ---- reordering the sidebar (spec/dragdrop.md, "In the sidebar") ----
+
+    def sidebar_place(self, row, offset, height):
+        """(ItemPlace, css class) for the dragged sidebar row over row, offset pixels down it. Only its own kind."""
+        info, kind, item_id = getattr(row, "item", None), self.item_drag.kind, self.item_drag.item_id
+        if not info or info[0] != kind:
+            return None
+        where = zone(offset, height, inside=kind == "project")
+        below = {p.id for p in project_descendants(item_id, self.store.rows("project"))} if kind == "project" else ()
+        place = place_item(info[1], info[2], info[3], where, item_id, below)
+        if place is None:
+            return None
+        return place, {BEFORE: "drop-before", AFTER: "drop-after", INSIDE: "drop-inside"}[where]
+
+    def drop_item(self, kind, item_id, place):
+        # Not inside the drop signal: the write rebuilds the sidebar that sent it.
+        GLib.idle_add(lambda: self.place_sidebar_item(kind, item_id, place) and False)
+
+    def place_sidebar_item(self, kind, item_id, place):
+        if kind == "project":
+            before = self.store.rows("project").get(item_id)
+            old_parent = before.get("parent_id") if before else None
+            done = self.run(self.writer.place_project, item_id, place.parent_id, place.before, place.after)
+            if place.parent_id == old_parent:
+                text = "Order changed"
+            elif place.parent_id is None:
+                text = f"Moved “{self.own_name(item_id)}” to the top level"
+            else:
+                text = f"Moved “{self.own_name(item_id)}” under “{self.own_name(place.parent_id)}”"
+        else:
+            write = self.writer.place_label if kind == "label" else self.writer.place_view
+            done, text = self.run(write, item_id, place.before, place.after), "Order changed"
+        if done and done.undo:
+            self.toast(text, undo=lambda: self.run(self.writer.revert, done.undo))
+
+    def own_name(self, project_id):
+        """A project's name without its path, for toasts."""
+        project = self.store.rows("project").get(project_id)
+        return project.get("name", "") if project else ""
+
+    def on_sidebar_key(self, _controller, keyval, _code, state):
+        """Alt+↑ and Alt+↓ move the focused project, label or view among its own kind, as the menus do."""
+        mods = state & (Gdk.ModifierType.ALT_MASK | Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.SHIFT_MASK)
+        if keyval not in (Gdk.KEY_Up, Gdk.KEY_Down) or mods != Gdk.ModifierType.ALT_MASK:
+            return False
+        row = self.get_focus()
+        while row is not None and not isinstance(row, Gtk.ListBoxRow):
+            row = row.get_parent()
+        info = getattr(row, "item", None)
+        if not info:
+            return False
+        self.move_sidebar_item(info[0], info[1], -1 if keyval == Gdk.KEY_Up else 1)
+        return True
+
+    def move_sidebar_item(self, kind, item_id, step):
+        """One place up or down among its siblings. The row keeps the keyboard focus."""
+        write = {"project": self.writer.move_project, "label": self.writer.move_label, "view": self.writer.move_view}[kind]
+        key = {"project": "", "label": LABEL, "view": VIEW}[kind] + item_id
+        if self.run(write, item_id, step):
+            GLib.idle_add(lambda: (row := self.rows_by_key.get(key)) is not None and row.grab_focus() and False)
+
+    def sibling_moves(self, kind, item_id):
+        """Move up and Move down for a sidebar menu, greyed out at the ends of its siblings."""
+        info = self.rows_by_key[{"project": "", "label": LABEL, "view": VIEW}[kind] + item_id].item
+        siblings = [r.item[1] for r in self.rows_by_key.values() if r.item and r.item[0] == kind and r.item[2] == info[2]]
+        index = siblings.index(item_id)
+        return [("Move up", lambda: self.move_sidebar_item(kind, item_id, -1), index > 0),
+                ("Move down", lambda: self.move_sidebar_item(kind, item_id, 1), index < len(siblings) - 1)]
 
     def drop_task(self, task_id, target):
         # Not inside the drop signal: the drop rebuilds the page that sent it.
@@ -860,6 +944,19 @@ class Window(Adw.ApplicationWindow):
         view = next((v for v in self.snap.views if v.id == view_id), None)
         ViewDialog(self, view).present(self)
 
+    def view_menu(self, view_id):
+        return [[("Edit view…", lambda: self.open_view_dialog(view_id), True)],
+                self.sibling_moves("view", view_id),
+                [("Delete", lambda: self.delete_view(view_id), True)]]
+
+    def delete_view(self, view_id):
+        try:
+            self.writer.delete_view(view_id)
+        except CannotEdit as err:
+            self.toast(str(err))
+            return
+        self.view_deleted(view_id)
+
     def show_view(self, view_id):
         self.selected = VIEW + view_id
         self.after_edit()
@@ -905,6 +1002,7 @@ class Window(Adw.ApplicationWindow):
             [("Edit project…", lambda: self.open_project_dialog(project_id), True),
              ("New sub-project…", lambda: self.open_project_dialog(None, project_id), True),
              ("Add section…", lambda: self.add_section(project_id), True)],
+            self.sibling_moves("project", project_id),
             [("Archive", lambda: self.archive_project(project_id), True)],
             [("Delete", lambda: self.delete_project(project_id), True)],
         ]
@@ -987,13 +1085,10 @@ class Window(Adw.ApplicationWindow):
         return label.get("name", "") if label else ""
 
     def label_menu(self, label_id):
-        order = [label.id for label in in_order(self.snap.labels.values())]
-        index = order.index(label_id)
         return [
             [("Edit label…", lambda: self.open_label_dialog(label_id), True)],
-            [("Move up", lambda: self.run(self.writer.move_label, label_id, -1), index > 0),
-             ("Move down", lambda: self.run(self.writer.move_label, label_id, 1), index < len(order) - 1)],
-            [("Merge into…", lambda: self.merge_label(label_id), len(order) > 1)],
+            self.sibling_moves("label", label_id),
+            [("Merge into…", lambda: self.merge_label(label_id), len(self.snap.labels) > 1)],
             [("Delete…", lambda: self.delete_label(label_id), True)],
         ]
 

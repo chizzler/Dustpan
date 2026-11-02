@@ -72,5 +72,7 @@ A `view` is a query with display options. The client reads and writes these fiel
 - A query this client can't parse shows the error and no results.
 - **Delete** writes `deleted_at`, with Undo.
 
-**Not yet:** dashboards and boards, `layout`, `hidden_props`, `on_drop`, `icon`, pinning, reordering views,
-and a start view.
+**Reordering** (2026-11-02): drag a view in the sidebar, Move up or down in its menu, or Alt+↑ / Alt+↓.
+See "In the sidebar" in dragdrop.md.
+
+**Not yet:** dashboards and boards, `layout`, `hidden_props`, `on_drop`, `icon`, pinning, and a start view.

@@ -45,6 +45,8 @@ button.task-check.done image { opacity: 0.7; }
 .drop-stroke { min-height: 2px; background: var(--accent-bg-color); }
 .drop-inside { box-shadow: inset 0 0 0 2px var(--accent-bg-color); border-radius: 6px; }
 .drop-onto { background: alpha(var(--accent-bg-color), 0.2); border-radius: 6px; }
+.drop-before { box-shadow: inset 0 2px 0 var(--accent-bg-color); }
+.drop-after { box-shadow: inset 0 -2px 0 var(--accent-bg-color); }
 @keyframes flash { from { background-color: alpha(var(--accent-bg-color), 0.3); } to { background-color: transparent; } }
 .flash { animation: flash 700ms ease-out; }
 .task-meta { font-size: 0.85em; }

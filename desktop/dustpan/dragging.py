@@ -68,6 +68,46 @@ class Drag:
         return self.active and value in (None, self.task_id)
 
 
+class ItemDrag:
+    """A sidebar row being dragged to reorder it: its kind ("project", "label" or "view") and id.
+
+    Separate from the task Drag, so a task never lands in a list of projects, nor a project on a page.
+    """
+
+    def __init__(self, on_end):
+        self.kind = self.item_id = None
+        self.on_end = on_end
+
+    @property
+    def active(self):
+        return self.item_id is not None
+
+    def value(self):
+        return f"{self.kind}:{self.item_id}"
+
+    def source(self, row, kind, item_id, title):
+        source = Gtk.DragSource(actions=Gdk.DragAction.MOVE)
+        source.connect("prepare", lambda *_a: Gdk.ContentProvider.new_for_value(f"{kind}:{item_id}"))
+
+        def begin(_source, drag):
+            self.kind, self.item_id = kind, item_id
+            Gtk.DragIcon.get_for_drag(drag).set_child(preview(title, 0))
+            drag.set_hotspot(-16, -8)
+            row.add_css_class("dragging")
+
+        def end(*_args):
+            row.remove_css_class("dragging")
+            self.kind = self.item_id = None
+            self.on_end()
+
+        source.connect("drag-begin", begin)
+        source.connect("drag-end", end)
+        row.add_controller(source)
+
+    def accepts(self, value):
+        return self.active and value in (None, self.value())
+
+
 def preview(title, subtasks):
     """The drag image: a small pill with the title, and "+N" for the subtasks that come along."""
     pill = Gtk.Box(spacing=8, css_classes=["drag-pill"])
@@ -229,16 +269,22 @@ class PageDrop:
 
 
 class SidebarDrop:
-    """Drops on sidebar rows. Holding a drag over a row opens its page, so a task can be placed exactly.
+    """Drops on sidebar rows. Holding a task over a row opens its page, so the task can be placed exactly.
 
     target_of(row) gives a dragdrop target or None. open_row(row) shows that row's page.
     springs(row): whether holding over the row opens it. A label's page has nowhere to place a task.
+
+    A dragged sidebar row (items, an ItemDrag) is placed among its own kind instead:
+    place_of(row, y, height) gives (ItemPlace, css class) for a pointer y pixels into row, or None,
+    and on_place(kind, id, ItemPlace) writes it.
     """
 
-    def __init__(self, listbox, drag, target_of, on_drop, open_row, springs=lambda row: True):
+    def __init__(self, listbox, drag, target_of, on_drop, open_row, springs=lambda row: True,
+                 items=None, place_of=None, on_place=None):
         self.listbox, self.drag, self.target_of, self.on_drop, self.open_row = listbox, drag, target_of, on_drop, open_row
-        self.springs = springs
+        self.springs, self.items, self.place_of, self.on_place = springs, items, place_of, on_place
         self.row = None
+        self.marked = None  # (row, css class) showing where a dragged row will land
         self.timer = 0
         target = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
         target.connect("motion", lambda _t, _x, y: Gdk.DragAction.MOVE if self.hover(y) else 0)
@@ -248,6 +294,8 @@ class SidebarDrop:
 
     def hover(self, y):
         """The target under y (None leaves). Starts the spring for a new row."""
+        if self.items is not None and self.items.active:
+            return self.hover_item(y)
         row = self.listbox.get_row_at_y(round(y)) if y is not None and self.drag.active else None
         if row is not self.row:
             if self.row is not None:
@@ -263,6 +311,21 @@ class SidebarDrop:
             (row.add_css_class if target else row.remove_css_class)("drop-onto")
         return target
 
+    def hover_item(self, y):
+        """Where a dragged sidebar row would land, shown on the row under y. Returns the ItemPlace, or None."""
+        if self.marked:
+            self.marked[0].remove_css_class(self.marked[1])
+            self.marked = None
+        row = self.listbox.get_row_at_y(round(y)) if y is not None else None
+        box = bounds(row, self.listbox) if row is not None else None
+        found = self.place_of(row, y - box[1], box[3]) if box else None
+        if found is None:
+            return None
+        place, css = found
+        row.add_css_class(css)
+        self.marked = (row, css)
+        return place
+
     def spring(self, row):
         self.timer = 0
         if row is self.row and self.drag.active:
@@ -270,6 +333,14 @@ class SidebarDrop:
         return GLib.SOURCE_REMOVE
 
     def drop(self, y, value=None):
+        if self.items is not None and self.items.active:
+            place = self.hover_item(y) if self.items.accepts(value) else None
+            kind, item_id = self.items.kind, self.items.item_id
+            self.hover_item(None)
+            if place is None:
+                return False
+            self.on_place(kind, item_id, place)
+            return True
         target = self.hover(y) if self.drag.accepts(value) else None
         task_id = self.drag.task_id
         self.hover(None)
