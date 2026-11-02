@@ -10,6 +10,7 @@ from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 from .filters import FilterError  # noqa: E402
 from .labelpicker import NEW_LABEL_COLOUR, LabelPicker  # noqa: E402
+from .querybar import QueryBar  # noqa: E402
 from .noteview import NotesEditor  # noqa: E402
 from .quickadd.attributes import match_duration  # noqa: E402
 from .recurrence import RuleError, parse, preview_occurrences  # noqa: E402
@@ -439,14 +440,15 @@ class ViewDialog(Adw.Dialog):
              ("deadline", "Deadline"), ("title", "Title")]
     DIRECTIONS = [("asc", "Ascending"), ("desc", "Descending")]
 
-    def __init__(self, window, view=None):
-        super().__init__(title="Edit view" if view else "New view", content_width=460)
+    def __init__(self, window, view=None, query=""):
+        """query: a new view's query, from the Filter page."""
+        super().__init__(title="Edit view" if view else "New view", content_width=520)
         self.window = window
         self.view = view
         group_by, sort_by, sort_dir = view_options(view or {})
         # What the dialog shows. Only fields the user changes are written, so a value
         # from a newer client that reads here as a default survives.
-        self.shown = {"name": view.get("name", "") if view else "", "query": view.get("query", "") if view else "",
+        self.shown = {"name": view.get("name", "") if view else "", "query": view.get("query", "") if view else query,
                       "group_by": group_by, "sort_by": sort_by, "sort_dir": sort_dir,
                       "show_completed": bool(view and view.get("show_completed") is True)}
 
@@ -463,14 +465,14 @@ class ViewDialog(Adw.Dialog):
         self.name_row = Adw.EntryRow(title="Name", text=self.shown["name"])
         self.name_row.connect("entry-activated", lambda _r: self.save())
         main.add(self.name_row)
-        self.query_row = Adw.EntryRow(title="Query, like “@work & due <= tomorrow”", text=self.shown["query"],
-                                      use_markup=False)
-        self.query_row.connect("changed", lambda _r: self.show_matches())
-        self.query_row.connect("entry-activated", lambda _r: self.save())
-        main.add(self.query_row)
-        self.hint = Adw.ActionRow(subtitle_selectable=True, use_markup=False)
-        main.add(self.hint)
         page.add(main)
+        query = Adw.PreferencesGroup(title="Query")
+        self.query_bar = QueryBar(window.query_names, lambda _q: self.show_matches(), on_enter=lambda _q: self.save(),
+                                  text=self.shown["query"])
+        query.add(self.query_bar)
+        self.hint = Gtk.Label(xalign=0, wrap=True, selectable=True, margin_top=6, css_classes=["dim-label"])
+        query.add(self.hint)
+        page.add(query)
 
         options = Adw.PreferencesGroup(title="Display")
         self.choices = {}
@@ -491,27 +493,24 @@ class ViewDialog(Adw.Dialog):
         toolbar.add_top_bar(header)
         self.toasts = Adw.ToastOverlay(child=toolbar)
         self.set_child(self.toasts)
-        self.set_focus(self.query_row if view else self.name_row)
+        self.set_focus(self.query_bar.entry if view else self.name_row)
         self.show_matches()
 
     def show_matches(self):
-        query = self.query_row.get_text().strip()
+        query = self.query_bar.text().strip()
         if not query:
-            self.hint.set_title("Type a query")
-            self.hint.set_subtitle("Combine terms like @label, #project, p1 and due <= today with &, | and !")
+            self.hint.set_text("Type a query, or add conditions. @ suggests labels, # projects.")
             return
         window = self.window
         try:
             _, count, warnings = run_query(query, window.filter_context, window.snap.tasks)
         except FilterError as err:
-            self.hint.set_title("Not a query yet")
-            self.hint.set_subtitle(str(err))
+            self.hint.set_text(f"Not a query yet: {err}")
             return
-        self.hint.set_title(f"{count} open task{'' if count == 1 else 's'} match")
-        self.hint.set_subtitle(" · ".join(warnings))
+        self.hint.set_text(" · ".join([f"{count} open task{'' if count == 1 else 's'} match", *warnings]))
 
     def read(self):
-        values = {"name": self.name_row.get_text().strip(), "query": self.query_row.get_text().strip(),
+        values = {"name": self.name_row.get_text().strip(), "query": self.query_bar.text().strip(),
                   "show_completed": self.completed_row.get_active()}
         for name, (row, items) in self.choices.items():
             values[name] = items[row.get_selected()][0]
@@ -536,13 +535,9 @@ class ViewDialog(Adw.Dialog):
         window.show_view(view_id)
 
     def delete(self):
-        try:
-            self.window.writer.delete_view(self.view.id)
-        except CannotEdit as err:
-            self.toasts.add_toast(Adw.Toast(title=escape(str(err)), timeout=5))
-            return
+        """Close, then ask: the window confirms before deleting."""
         self.close()
-        self.window.view_deleted(self.view.id)
+        self.window.delete_view(self.view.id)
 
 
 class ProjectDialog(Adw.Dialog):

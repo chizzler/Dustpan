@@ -45,9 +45,35 @@ just because this client lacks a feature.
 - **Upcoming:** due after today, or only a deadline ahead, grouped by day. Deferred and parked tasks stay out,
   except a deferred one with no project and no due, listed on its start day. On each day, tasks due then come
   before ones with only a deadline. Adding here makes a task due tomorrow.
+- **Anytime** (2026-11-02): open, active tasks with no due date, no deadline and no start, by project
+  (`views.in_anytime`, the web app's `inAnytime`). Adding here adds an undated task to the Inbox.
+- **Completed** (2026-11-02): completed tasks newest first, under a heading per day: Today, Yesterday,
+  then the weekday and date (`views.logbook`, the web app's `logbookGroups`). The day follows the user's day start.
+  100 at first; **Show more** adds 100, and says how many are older. A task reopens from its check button.
+  Tasks in archived or deleted projects are left out, as everywhere.
+- **Filter** (2026-11-02, tried and approved): the query helper. See "The Filter page" below.
 - **Sidebar counts** leave out parked and deferred tasks.
 
 Today and Upcoming list subtasks on their own, with their project and parent named on the row.
+
+**Anytime, Completed and Filter can be hidden, never deleted.** They're part of the app, not saved views,
+so they're the same on every device and match the web app's built-in pages. "Hide from sidebar" in a page's menu
+hides it on this device (store meta `hidden_pages`), with Undo. The ⋯ button above the sidebar shows or hides each.
+A hidden page that's open stays listed until you leave it.
+
+## The Filter page
+
+Built 2026-11-02. Ctrl+F opens it with the query focused. The view editor uses the same query box (`querybar.py`).
+
+- **Results as you type,** grouped by project and sorted by due date, with the open match count, the parse error,
+  or the warnings for terms this client can't evaluate. Only the results are redrawn, so typing keeps its place.
+- **Suggestions** for the word at the cursor, when it's at the end: after `@` the labels, after `#` or `##` the
+  projects, otherwise the keywords with what they mean (`querytools.suggest`). Accents don't matter when typing;
+  the name is written as stored. ↑ ↓ pick, Enter or Tab take, Esc hides. Names that need it are quoted.
+- **+ Condition** adds a term with `&`: When, Priority, State, Label, Project (each also with its sub-projects).
+  **Not** adds the opposite of the next one. A query whose top level is an `|` is bracketed first, so it keeps
+  its meaning. Terms are written as the web builder writes them, and every one is tested to parse.
+- **Save as view…** opens the view editor with the query filled in. It's off while the query doesn't parse.
 
 ## Saved views
 
@@ -70,7 +96,7 @@ A `view` is a query with display options. The client reads and writes these fiel
   By due: Earlier, Today, Tomorrow, each later day, No date. By label: a task is listed under each of its labels.
 - **Show completed** lists completed matches too, unless the query names a state itself. The sidebar counts open matches only.
 - A query this client can't parse shows the error and no results.
-- **Delete** writes `deleted_at`, with Undo.
+- **Delete** asks first ("The view goes from every device. Your tasks stay."), then writes `deleted_at`, with Undo.
 
 **Reordering** (2026-11-02): drag a view in the sidebar, Move up or down in its menu, or Alt+↑ / Alt+↓.
 See "In the sidebar" in dragdrop.md.

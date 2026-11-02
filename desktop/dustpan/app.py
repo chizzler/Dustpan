@@ -25,13 +25,15 @@ from .filters import Context, FilterError, shift  # noqa: E402
 from .labelpicker import LabelPicker  # noqa: E402
 from .labels import ROW_CHIPS, carrying, duplicates, in_order, picker_order, remember, shown  # noqa: E402
 from .markdown import first_line  # noqa: E402
+from .querybar import QueryBar  # noqa: E402
 from .model import count_open, order_key, project_path, project_sections, snapshot  # noqa: E402
 from .reminders import describe, is_due, snooze_until  # noqa: E402
 from .rowactions import RowActions, TaskRow  # noqa: E402
 from .store import Store  # noqa: E402
 from .sync import ClockSkew, Syncer, UnsupportedAccount  # noqa: E402
-from .views import (WEEK_START, compare_tasks, group_tasks, in_today, manual_order, open_count, run_query,  # noqa: E402
-                    run_view, sorted_tasks, today_groups, upcoming_groups, view_options)
+from .views import (LOGBOOK_PAGE, WEEK_START, compare_tasks, group_tasks, in_anytime, in_today,  # noqa: E402
+                    logbook, manual_order, open_count, run_query, run_view, sorted_tasks, today_groups,
+                    upcoming_groups, view_options)
 from .widgets import (CSS, INDENT_PX, Dot, ThemeFollower, escape, flash, label_chip, on_right_click, popup_menu,  # noqa: E402
                       save_screenshot, scroll_into_view)
 from .writes import CannotEdit, Writer, descendants, live, project_descendants  # noqa: E402
@@ -42,6 +44,13 @@ EDIT_SYNC_DELAY_MS = 250
 # Sidebar keys. A project's key is its id; a saved view's is VIEW + its id; an archived project's ARCHIVED + its id;
 # a label's LABEL + its id.
 INBOX, TODAY, UPCOMING, VIEW, ARCHIVED, LABEL = "inbox", "today", "upcoming", "view:", "archived:", "label:"
+ANYTIME, COMPLETED, FILTER = "anytime", "completed", "filter"
+BUILT_IN = (TODAY, UPCOMING, INBOX, ANYTIME, COMPLETED, FILTER)
+# Built-in pages that can be hidden from the sidebar, and brought back from its ⋯ menu: (key, name, icon).
+OPTIONAL_PAGES = ((ANYTIME, "Anytime", "task-due-symbolic"), (COMPLETED, "Completed", "object-select-symbolic"),
+                  (FILTER, "Filter", "edit-find-symbolic"))
+HIDDEN_PAGES = "hidden_pages"  # store meta: the optional pages hidden on this device
+FILTER_DELAY_MS = 150  # the Filter page's results wait for a pause in typing
 RECENT_LABELS = "recent_labels"  # store meta: labels assigned lately on this device, newest first
 # On first start, reminders that fired longer ago than this are not shown.
 STALE_REMINDER_MS = 24 * 60 * 60_000
@@ -76,6 +85,11 @@ class Window(Adw.ApplicationWindow):
         self.flash_task = None  # the task to highlight once the page is rebuilt
         self.focus_task = None  # the task row to focus once the page is rebuilt
         self.row_actions = RowActions(self)
+        self.completed_limit = LOGBOOK_PAGE  # how much of the Completed page is shown
+        self.filter_query = ""  # the Filter page's query, kept across rebuilds
+        self.filter_bar = None
+        self.filter_results = None
+        self.filter_timer = 0
         self.last_toast = None
         self.toast_undo = None
 
@@ -90,7 +104,11 @@ class Window(Adw.ApplicationWindow):
         self.sidebar.add_controller(keys)
         sidebar_scroll = Gtk.ScrolledWindow(child=self.sidebar, vexpand=True)
         sidebar_view = Adw.ToolbarView(content=sidebar_scroll)
-        sidebar_view.add_top_bar(Adw.HeaderBar(title_widget=Adw.WindowTitle(title="Dustpan")))
+        sidebar_header = Adw.HeaderBar(title_widget=Adw.WindowTitle(title="Dustpan"))
+        pages = Gtk.Button(icon_name="view-more-symbolic", tooltip_text="Show or hide pages", css_classes=["flat"])
+        pages.connect("clicked", lambda b: popup_menu(b, self.pages_menu()))
+        sidebar_header.pack_start(pages)
+        sidebar_view.add_top_bar(sidebar_header)
 
         self.title = Adw.WindowTitle(title="Today")
         refresh = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Sync now")
@@ -128,6 +146,9 @@ class Window(Adw.ApplicationWindow):
         shortcuts.add_shortcut(Gtk.Shortcut(
             trigger=Gtk.ShortcutTrigger.parse_string("<Control>n"),
             action=Gtk.CallbackAction.new(lambda *_a: self.start_adding(None) or True)))
+        shortcuts.add_shortcut(Gtk.Shortcut(
+            trigger=Gtk.ShortcutTrigger.parse_string("<Control>f"),
+            action=Gtk.CallbackAction.new(lambda *_a: self.open_filter() or True)))
         shortcuts.add_shortcut(Gtk.Shortcut(
             trigger=Gtk.ShortcutTrigger.parse_string("<Control>z"),
             action=Gtk.CallbackAction.new(lambda *_a: self.undo_last())))
@@ -289,6 +310,11 @@ class Window(Adw.ApplicationWindow):
                              count=sum(in_today(t, self.today) for t in self.snap.tasks))
         self.add_sidebar_row(UPCOMING, "Upcoming", 0, icon="x-office-calendar-symbolic")
         self.add_sidebar_row(INBOX, "Inbox", 0, icon="mail-inbox-symbolic", count=count_open(self.snap, None, self.today))
+        hidden = self.store.get_meta(HIDDEN_PAGES) or []
+        for key, name, icon in OPTIONAL_PAGES:
+            if key not in hidden or key == self.selected:
+                self.add_sidebar_row(key, name, 0, icon=icon,
+                                     menu=lambda k=key: [[("Hide from sidebar", lambda: self.hide_page(k), True)]])
 
         new_project = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="New project", css_classes=["flat"])
         new_project.connect("clicked", lambda _b: self.open_project_dialog(None))
@@ -386,6 +412,7 @@ class Window(Adw.ApplicationWindow):
         if row.key != self.selected:
             self.selected = row.key
             self.adding = None
+            self.completed_limit = LOGBOOK_PAGE
             self.show_page(row.key)
         if not self.rebuilding:
             self.split.set_show_content(True)
@@ -400,16 +427,19 @@ class Window(Adw.ApplicationWindow):
             self.adding = None
         self.title.set_title(row.name)
         is_view, is_archived, is_label = key.startswith(VIEW), key.startswith(ARCHIVED), key.startswith(LABEL)
-        self.add_button.set_visible(not is_view and not is_archived)
+        self.add_button.set_visible(not is_view and not is_archived and key not in (COMPLETED, FILTER))
         self.edit_button.set_visible(is_view or is_label or self.page_project() is not None)
         self.edit_button.set_tooltip_text("Edit view" if is_view else "Edit label" if is_label else "Edit project")
         if self.add_entry is not None:
             self.add_text = self.add_entry.get_text()
             self.add_entry = None
+        filter_focused = self.filter_bar is not None and self.filter_bar.entry.get_focus_child() is not None
+        self.filter_bar = self.filter_results = None
         # Redrawing the same list keeps its scroll position, and the focused task.
         scroll = self.content.get_vadjustment().get_value() if key == self.shown else 0
         if key == self.shown and self.focus_task is None:
             self.focus_task = self.focused_task()
+        opened = key != self.shown
         self.shown = key
 
         column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin_top=12, margin_bottom=24,
@@ -424,6 +454,12 @@ class Window(Adw.ApplicationWindow):
             self.fill_groups(column, upcoming_groups(self.snap.tasks, self.today, self.day_heading),
                              lambda group: ToDay(group.key))
             column.append(self.add_task_row(None))
+        elif key == ANYTIME:
+            self.fill_anytime(column)
+        elif key == COMPLETED:
+            self.fill_completed(column)
+        elif key == FILTER:
+            self.fill_filter(column, focus=filter_focused or opened)
         elif is_view:
             self.fill_view(column, next(v for v in self.snap.views if v.id == key[len(VIEW):]))
         elif is_archived:
@@ -554,6 +590,127 @@ class Window(Adw.ApplicationWindow):
             self.fill_groups(column, groups)
         column.append(self.add_task_row(None))
 
+    def fill_anytime(self, column):
+        """Open tasks with no date, no deadline and no start, by project. Quick add here adds an undated task."""
+        tasks = sorted_tasks([t for t in self.snap.tasks if in_anytime(t, self.today)], compare_tasks("due", "asc"))
+        if not tasks and self.adding is None:
+            self.note(column, "Nothing undated. Tasks with no date, deadline or start show here.")
+        self.fill_groups(column, group_tasks(tasks, "project", self.today, self.labels_in_order(), self.project_paths,
+                                             self.day_heading))
+        column.append(self.add_task_row(None))
+
+    def fill_completed(self, column):
+        """What was finished, newest first, by day. Show more reaches older days."""
+        groups, total = logbook(self.snap.tasks, self.completed_limit, self.today, self.filter_context.day_start)
+        if not total:
+            self.note(column, "Nothing completed yet.")
+            return
+        self.fill_groups(column, groups)
+        shown = sum(len(g.tasks) for g in groups)
+        if shown < total:
+            more = Gtk.Button(label=f"Show {min(LOGBOOK_PAGE, total - shown)} more ({total - shown} older)",
+                              halign=Gtk.Align.CENTER, margin_top=16, css_classes=["pill"])
+            more.connect("clicked", lambda _b: self.show_more_completed())
+            column.append(more)
+
+    def show_more_completed(self):
+        self.completed_limit += LOGBOOK_PAGE
+        self.show_page(COMPLETED)
+
+    def fill_filter(self, column, focus):
+        """A query with help, its results as you type, and Save as view."""
+        self.filter_bar = QueryBar(self.query_names, self.filter_changed, text=self.filter_query)
+        column.append(self.filter_bar)
+        line = Gtk.Box(spacing=12, margin_top=8, margin_bottom=8)
+        self.filter_status = Gtk.Label(xalign=0, hexpand=True, wrap=True, css_classes=["dim-label"])
+        line.append(self.filter_status)
+        save = Gtk.Button(label="Save as view…", css_classes=["pill", "suggested-action"], valign=Gtk.Align.CENTER)
+        save.connect("clicked", lambda _b: ViewDialog(self, None, query=self.filter_query).present(self))
+        self.filter_save = save
+        line.append(save)
+        column.append(line)
+        self.filter_results = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        column.append(self.filter_results)
+        self.show_filter_results()
+        if focus:
+            GLib.idle_add(lambda: self.filter_bar is not None and self.filter_bar.focus() and False)
+
+    def query_names(self):
+        """Label and project names for the query helper, in sidebar order."""
+        names = {p.id: p.get("name", "") for p in self.snap.live_projects}
+        return ([label.get("name", "") for label in self.labels_in_order()],
+                [names[pid] for pid, _ in self.project_paths if pid in names])
+
+    def filter_changed(self, query):
+        self.filter_query = query
+        if self.filter_timer:
+            GLib.source_remove(self.filter_timer)
+        self.filter_timer = GLib.timeout_add(FILTER_DELAY_MS, self.filter_settled)
+
+    def filter_settled(self):
+        self.filter_timer = 0
+        self.show_filter_results()
+        return GLib.SOURCE_REMOVE
+
+    def show_filter_results(self):
+        """Only the results are redrawn, so typing keeps its place."""
+        if self.filter_results is None:
+            return
+        self.task_widgets = {}  # the page holds only results
+        child = self.filter_results.get_first_child()
+        while child is not None:
+            self.filter_results.remove(child)
+            child = self.filter_results.get_first_child()
+        query = self.filter_query.strip()
+        self.filter_save.set_sensitive(False)
+        if not query:
+            self.filter_status.set_text("Type a query, or add conditions. @ suggests labels, # projects.")
+            return
+        try:
+            matches, count, warnings = run_query(query, self.filter_context, self.snap.tasks)
+        except FilterError as err:
+            self.filter_status.set_text(str(err))
+            return
+        self.filter_save.set_sensitive(True)
+        self.filter_status.set_text(" · ".join([f"{count} open task{'' if count == 1 else 's'} match", *warnings]))
+        groups = group_tasks(sorted_tasks(matches, compare_tasks("due", "asc")), "project", self.today,
+                             self.labels_in_order(), self.project_paths, self.day_heading)
+        self.fill_groups(self.filter_results, groups)
+
+    def open_filter(self, query=None):
+        """The Filter page, with its query focused. query replaces the one there."""
+        if query is not None:
+            self.filter_query = query
+        if self.selected == FILTER and self.filter_bar is not None:
+            if query is not None:
+                self.filter_bar.entry.set_text(query)
+            self.filter_bar.focus()
+            return
+        self.selected = FILTER
+        self.adding = None
+        self.split.set_show_content(True)
+        self.refresh_view()
+
+    def pages_menu(self):
+        hidden = self.store.get_meta(HIDDEN_PAGES) or []
+        return [[(("Show " if key in hidden else "Hide ") + name,
+                   lambda k=key: (self.show_hidden_page if k in hidden else self.hide_page)(k), True)
+                  for key, name, _ in OPTIONAL_PAGES]]
+
+    def hide_page(self, key):
+        """Hide a built-in page from the sidebar on this device. It can't be deleted."""
+        hidden = self.store.get_meta(HIDDEN_PAGES) or []
+        self.store.set_meta(HIDDEN_PAGES, [*hidden, key])
+        if self.selected == key:
+            self.selected = TODAY
+        self.refresh_view()
+        name = next(n for k, n, _ in OPTIONAL_PAGES if k == key)
+        self.toast(f"{name} is hidden. Bring it back from ⋯ above the sidebar.", undo=lambda: self.show_hidden_page(key))
+
+    def show_hidden_page(self, key):
+        self.store.set_meta(HIDDEN_PAGES, [k for k in self.store.get_meta(HIDDEN_PAGES) or [] if k != key])
+        self.refresh_view()
+
     def labels_in_order(self):
         return sorted(self.snap.labels.values(), key=order_key)
 
@@ -580,7 +737,7 @@ class Window(Adw.ApplicationWindow):
             return ToDay(self.today)
         if key == INBOX:
             return ToProject(None)
-        if key and key != UPCOMING and not key.startswith((VIEW, ARCHIVED, LABEL)):
+        if key and key not in BUILT_IN and not key.startswith((VIEW, ARCHIVED, LABEL)):
             return ToProject(key)
         return None
 
@@ -856,7 +1013,7 @@ class Window(Adw.ApplicationWindow):
         preview.set_visible(bool(text))
 
     def start_adding(self, section_id):
-        if self.selected.startswith((VIEW, ARCHIVED)):
+        if self.selected.startswith((VIEW, ARCHIVED)) or self.selected in (COMPLETED, FILTER):
             return
         self.adding = (self.selected, section_id)
         self.add_text = ""
@@ -884,7 +1041,7 @@ class Window(Adw.ApplicationWindow):
         """Quick add. Today adds tasks due today, Upcoming due tomorrow, unless the line says otherwise."""
         page, section_id = self.adding
         where = {TODAY: {"due": {"date": self.today}}, UPCOMING: {"due": {"date": shift(self.today, 1)}},
-                 INBOX: {}}.get(page, {"project_id": page, "section_id": section_id})
+                 INBOX: {}, ANYTIME: {}}.get(page, {"project_id": page, "section_id": section_id})
         if page.startswith(LABEL):
             where = {"labels": [page[len(LABEL):]]}
         try:
@@ -950,12 +1107,20 @@ class Window(Adw.ApplicationWindow):
                 [("Delete", lambda: self.delete_view(view_id), True)]]
 
     def delete_view(self, view_id):
-        try:
-            self.writer.delete_view(view_id)
-        except CannotEdit as err:
-            self.toast(str(err))
-            return
-        self.view_deleted(view_id)
+        """Asks first. Undo brings it back."""
+        view = self.store.rows("view").get(view_id)
+        name = view.get("name", "") if view else ""
+
+        def delete():
+            try:
+                self.writer.delete_view(view_id)
+            except CannotEdit as err:
+                self.toast(str(err))
+                return
+            self.view_deleted(view_id)
+
+        confirm(self, f"Delete “{name}”?", "The view goes from every device. Your tasks stay.", "Delete view",
+                delete, destructive=True)
 
     def show_view(self, view_id):
         self.selected = VIEW + view_id
@@ -975,7 +1140,7 @@ class Window(Adw.ApplicationWindow):
     def page_project(self):
         """The id of the live project whose page is shown, or None."""
         key = self.selected
-        return key if key not in (TODAY, UPCOMING, INBOX) and not key.startswith((VIEW, ARCHIVED, LABEL)) else None
+        return key if key not in BUILT_IN and not key.startswith((VIEW, ARCHIVED, LABEL)) else None
 
     def edit_page(self):
         if self.selected.startswith(VIEW):

@@ -42,6 +42,7 @@ The client keeps its dev data in `dev/data/client`.
 | `dustpan/views.py` | What the Inbox, Today, Upcoming and saved views list, and in what order |
 | `dustpan/quickadd/` | Quick add: read a line into task fields, in six languages |
 | `dustpan/model.py` | Display rules: trees, sections, what's hidden |
+| `dustpan/querytools.py` | The query helper without GTK: suggestions, and the conditions the builder adds |
 | `dustpan/labels.py` | Labels without GTK: matching as you type, the picker's order, duplicates, chips |
 | `dustpan/markdown.py` | Notes: the web app's Markdown subset, parsed, and as Pango markup |
 | `dustpan/dates.py` | Due date display, and the instant a due denotes |
@@ -50,6 +51,7 @@ The client keeps its dev data in `dev/data/client`.
 | `dustpan/app.py` | The GTK window and its pages |
 | `dustpan/dialogs.py` | The task and view editors |
 | `dustpan/dragging.py` | Drag and drop in GTK: sources, page and sidebar targets, the drop line, autoscroll |
+| `dustpan/querybar.py` | The query box: suggestions as you type, Not, and + Condition |
 | `dustpan/labelpicker.py` | The label picker: type to find, Enter to add, remove or create |
 | `dustpan/noteview.py` | Notes in GTK: the formatted view, and the Write and Preview editor |
 | `dustpan/rowactions.py` | Keys and the right-click menu on each task row |

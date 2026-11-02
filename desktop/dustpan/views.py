@@ -4,9 +4,10 @@ Ports web/src/lib/inbox.ts and views.ts (v0.18.0). See spec/views.md.
 """
 
 from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from functools import cmp_to_key
 
-from .dates import local_due
+from .dates import local_due, logical_today
 from .filters import Context, FilterError, compile_query, due_day, parse, shift, with_completed
 
 GROUP_BY = ("project", "due", "priority", "label", "none")
@@ -240,6 +241,44 @@ def group_tasks(tasks, group_by, today, labels, projects, day_heading):
         pid = task.get("project_id")
         put("inbox" if pid is None else pid if pid in known else "other", task)
     return emit([("inbox", "Inbox"), *projects, ("other", "Other")])
+
+
+# ---- Anytime and Completed (web/src/lib/views.ts inAnytime, lib/logbook.ts) ----
+
+LOGBOOK_PAGE = 100  # completions shown at first, and added by each "Show more"
+
+
+def in_anytime(task, today):
+    """Open and active, with no date of any kind and no start: for whenever there's time."""
+    return (task.get("completed_at") is None and is_active(task, today) and not task.get("due")
+            and not task.get("deadline") and task.get("start") is None)
+
+
+def logbook_heading(iso, today):
+    """ "Today", "Yesterday", then the weekday and date, with the year outside this year."""
+    day, now = date.fromisoformat(iso), date.fromisoformat(today)
+    if day == now:
+        return "Today"
+    if day == now - timedelta(days=1):
+        return "Yesterday"
+    return day.strftime("%A %-d %B") + (f" {day.year}" if day.year != now.year else "")
+
+
+def logbook(tasks, limit, today, day_start=0):
+    """(Groups of the first limit completed tasks, newest first, by the day they were completed; how many in all).
+
+    The day follows the user's day start, so a 01:30 completion with a 04:00 start belongs to the day before.
+    """
+    done = sorted((t for t in tasks if isinstance(t.get("completed_at"), (int, float)) and t.get("deleted_at") is None),
+                  key=lambda t: (-t.get("completed_at"), t.id))
+    groups = []
+    for task in done[:max(0, limit)]:
+        day = logical_today(day_start, datetime.fromtimestamp(task.get("completed_at") / 1000))
+        if groups and groups[-1].key == day:
+            groups[-1].tasks.append(task)
+        else:
+            groups.append(Group(day, logbook_heading(day, today), [task]))
+    return groups, len(done)
 
 
 def today_groups(tasks, today):
