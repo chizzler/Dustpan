@@ -10,13 +10,14 @@ from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
 from .filters import FilterError  # noqa: E402
 from .labelpicker import NEW_LABEL_COLOUR, LabelPicker  # noqa: E402
+from .model import CLEARED_SUBTASKS, completed_subtask_visible  # noqa: E402
 from .querybar import QueryBar  # noqa: E402
 from .noteview import NotesEditor  # noqa: E402
 from .quickadd.attributes import match_duration  # noqa: E402
 from .recurrence import RuleError, parse, preview_occurrences  # noqa: E402
 from .reminders import DEADLINE_PRESETS, RELATIVE_PRESETS, describe  # noqa: E402
 from .views import run_query, view_options  # noqa: E402
-from .widgets import Dot, escape, label_chip  # noqa: E402
+from .widgets import Dot, broom_button, escape, label_chip  # noqa: E402
 from .writes import LABEL_COLOURS, PROJECT_COLOURS, CannotEdit, live, project_descendants  # noqa: E402
 
 PRIORITIES = ["Priority 1", "Priority 2", "Priority 3", "No priority"]
@@ -193,6 +194,9 @@ class TaskDialog(Adw.Dialog):
         page.add(place)
 
         self.subtask_group = Adw.PreferencesGroup(title="Subtasks")
+        self.subtask_broom = broom_button()
+        self.subtask_broom.connect("clicked", lambda _b: self.clear_completed_subtasks())
+        self.subtask_group.set_header_suffix(self.subtask_broom)
         self.subtask_rows = []
         self.subtask_entry = Adw.EntryRow(title="Add a subtask")
         self.subtask_entry.connect("entry-activated", lambda _r: self.add_subtask())
@@ -331,11 +335,31 @@ class TaskDialog(Adw.Dialog):
     def fill_subtasks(self):
         for row in self.subtask_rows:
             self.subtask_group.remove(row)
+        cleared = self.window.store.get_meta(CLEARED_SUBTASKS) or {}
         children = sorted((t for t in self.window.snap.tasks if t.get("parent_id") == self.task.id
-                           and t.get("completed_at") is None), key=lambda t: (t.get("position") or 0, t.id))
-        self.subtask_rows = [Adw.ActionRow(title=escape(t.get("title", ""))) for t in children] + [self.subtask_entry]
+                           and (t.get("completed_at") is None or completed_subtask_visible(t, cleared))),
+                          key=lambda t: (t.get("position") or 0, t.id))
+        self.completed_subtasks = [t for t in children if t.get("completed_at") is not None]
+        self.subtask_broom.set_visible(bool(self.completed_subtasks))
+        self.subtask_rows = [Adw.ActionRow(title=f"<s>{escape(t.get('title', ''))}</s>" if t.get("completed_at") is not None
+                                            else escape(t.get("title", "")), use_markup=True,
+                                           css_classes=["dim-label"] if t.get("completed_at") is not None else [])
+                             for t in children] + [self.subtask_entry]
         for row in self.subtask_rows:
             self.subtask_group.add(row)
+
+    def clear_completed_subtasks(self):
+        before = self.window.clear_completed_subtasks(self.completed_subtasks, notify=False)
+        self.fill_subtasks()
+        toast = Adw.Toast(title="Cleared completed subtasks", timeout=5)
+        toast.set_button_label("Undo")
+
+        def undo(_toast):
+            self.window.restore_cleared_subtasks(before)
+            self.fill_subtasks()
+
+        toast.connect("button-clicked", undo)
+        self.toasts.add_toast(toast)
 
     def add_subtask(self):
         """Subtasks are added at once, like reminders. The line is read with quick add."""

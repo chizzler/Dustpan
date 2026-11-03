@@ -54,5 +54,5 @@ The sidebar lists them under "Archived", flat, with their path. Their page offer
 
 - Reordering projects in the sidebar. That is slice 6c, by drag.
 - Project notes (`description`, `notes_doc`), view mode, flow, status and custom fields.
-- A Trash. Undo covers a delete until the next action.
+- Trash was added later; see [trash.md](trash.md).
 - Shared projects. This account has none. Deleting one would need the copy-to-Inbox rule.

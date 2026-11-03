@@ -21,6 +21,7 @@ from .recurring import plan_completion, plan_detach, plan_skip, series_rule
 from .quickadd.settings import context_for
 from .reminders import MAX_OFFSET, deadline_fire_at, plan_default_reminder, read_defaults, relative_fire_at
 from .store import Row
+from .trash import deleted_with
 from .views import DEFAULTS as VIEW_DEFAULTS, GROUP_BY, SORT_BY, SORT_DIR, is_list_view, view_order
 
 EDITABLE = ("title", "description", "priority", "due", "recurrence", "project_id", "section_id", "labels",
@@ -386,6 +387,50 @@ class Writer:
                     Done([("task", t.id, {"deleted_at": None}) for t in gone]))
 
         return self.commit(plan)
+
+    def restore_task(self, task_id):
+        """Bring a task back from the Trash, with the subtasks deleted with it.
+
+        Its project still in the Trash: it goes to the Inbox. Its parent still there: it goes to the top level.
+        The Done's task_id is set when it went to the Inbox.
+        """
+
+        def plan():
+            tasks = self.store.rows("task")
+            task = tasks.get(task_id)
+            if task is None or task.get("deleted_at") is None:
+                raise CannotEdit("That task isn't in the Trash")
+            project_id = task.get("project_id")
+            project = self.store.rows("project").get(project_id)
+            project_gone = project_id is not None and not live(project)
+            restored = [task] + deleted_with(task, tasks)
+            changes = [("task", t.id, {"deleted_at": None}) for t in restored]
+            if project_gone:
+                for _, _, patch in changes:
+                    patch.update(project_id=None, section_id=None)
+                changes[0][2]["parent_id"] = None
+            elif task.get("parent_id") is not None and not live(tasks.get(task.get("parent_id"))):
+                changes[0][2]["parent_id"] = None
+            section = self.store.rows("section").get(task.get("section_id"))
+            if task.get("section_id") is not None and (not live(section) or section.get("project_id") != project_id):
+                changes[0][2]["section_id"] = None
+            return changes
+
+        done = self.commit(self._undoable(plan))
+        if "project_id" in done.undo[0][2]:
+            done.task_id = task_id
+        return done
+
+    def restore_project(self, project_id):
+        """Bring a project back from the Trash. Its tasks kept project_id, so they come back with it."""
+
+        def plan():
+            project = self.store.rows("project").get(project_id)
+            if project is None or project.get("deleted_at") is None:
+                raise CannotEdit("That project isn't in the Trash")
+            return [("project", project_id, {"deleted_at": None})]
+
+        return self.commit(self._undoable(plan))
 
     def reopen(self, task_id):
         """Reopen one completed task. Its subtasks stay as they are."""

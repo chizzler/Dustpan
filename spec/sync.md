@@ -63,11 +63,14 @@ Only the tie-break between equal timestamps changes. **Report upstream.**
 
 ## Display rules (slice 1)
 
-- **Hidden:** entities with `deleted_at` set, archived projects, completed tasks, tasks whose project is deleted or unknown.
+- **Hidden:** entities with `deleted_at` set, archived projects, completed top-level tasks, tasks whose project is deleted or unknown.
 - **Order:** siblings sort by `(position, id)`.
 - **Project tree:** a project whose parent is missing, deleted or archived shows at the top level.
 - **Task tree:** a subtask nests under its parent when the parent is visible in the same project.
   Otherwise it shows at the top level. A subtask follows its parent's section.
+- **Completed subtasks:** completed children stay in project and Inbox trees under an open ancestor, dimmed and struck through.
+  A broom on a parent with completed children hides those finished subtrees from the local list, with Undo.
+  They remain in Completed. The local cleanup is remembered across restarts; reopening or moving a child makes it visible again.
 - **Cycles:** in a parent cycle, the member whose `parent_id` has the newest clock (`ts`, then device, then id) becomes a root.
 - **Sections:** a task whose `section_id` names a deleted, unknown or other-project section shows under "No section".
   "No section" comes first, then sections in order.

@@ -33,6 +33,9 @@ button.task-check.p2 { border-color: var(--dustpan-p2); background: alpha(var(--
 button.task-check.p3 { border-color: var(--dustpan-p3); background: alpha(var(--dustpan-p3), 0.12); }
 button.task-check.done { border-color: alpha(currentColor, 0.3); background: alpha(currentColor, 0.15); }
 button.task-check.done image { opacity: 0.7; }
+button.subtask-broom { min-width: 24px; min-height: 24px; padding: 0;
+  border: 1px solid alpha(currentColor, 0.12); background: alpha(currentColor, 0.02); }
+button.subtask-broom:hover { border-color: alpha(currentColor, 0.22); background: alpha(currentColor, 0.06); }
 .task-text { min-height: 20px; }
 .add-task { margin-top: 4px; }
 .task-row { padding: 8px 4px; border-bottom: 1px solid alpha(currentColor, 0.08); }
@@ -91,6 +94,37 @@ class Dot(Gtk.Widget):
         snap.push_rounded_clip(clip)
         snap.append_color(self.rgba, rect)
         snap.pop()
+
+
+def broom_button():
+    """Small, theme-coloured broom in a quiet circular button."""
+    size = 14
+    icon = Gtk.DrawingArea(content_width=size, content_height=size, can_target=False)
+
+    def draw(area, cr, width, height):
+        color = area.get_style_context().get_color()
+        cr.set_source_rgba(color.red, color.green, color.blue, color.alpha * 0.65)
+        cr.translate((width - size) / 2, (height - size) / 2)
+        cr.scale(size / 16, size / 16)
+        cr.set_line_cap(1)  # round
+        cr.set_line_join(1)
+        cr.set_line_width(1.5)
+        cr.move_to(8.7, 8.0)
+        cr.line_to(13.2, 2.5)
+        cr.stroke()
+        cr.move_to(6.7, 7.8)
+        cr.line_to(9.7, 10.2)
+        cr.stroke()
+        cr.move_to(6.2, 8.4)
+        cr.line_to(9.2, 10.8)
+        cr.line_to(6.8, 14.1)
+        cr.line_to(2.3, 11.0)
+        cr.close_path()
+        cr.fill()
+
+    icon.set_draw_func(draw)
+    return Gtk.Button(child=icon, tooltip_text="Clear completed subtasks from this list",
+                      valign=Gtk.Align.CENTER, css_classes=["flat", "circular", "subtask-broom"])
 
 
 def label_chip(name, color, on_remove=None):

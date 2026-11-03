@@ -9,6 +9,13 @@ from dataclasses import dataclass, field
 from .store import Clock, wins
 from .views import is_inbox_task, is_list_view, open_count, view_order
 
+CLEARED_SUBTASKS = "cleared_completed_subtasks"  # per-device display choice
+
+
+def completed_subtask_visible(task, cleared):
+    return (task.get("completed_at") is not None and task.get("parent_id") and
+            cleared.get(task.id) != [task.get("completed_at"), task.get("parent_id")])
+
 
 @dataclass
 class Node:
@@ -135,13 +142,24 @@ def snapshot(store):
     )
 
 
-def project_sections(snap, project_id):
+def project_sections(snap, project_id, cleared=None):
     """Sections of a project, each with its task trees. "No section" first.
 
     For the Inbox (None): its tasks, then the planned tasks without a project.
     """
-    rows = snap.tasks_by_project.get(project_id, [])
-    roots = build_tree(rows, lambda t: t.get("parent_id"))
+    # Completed subtasks stay beneath an open ancestor until the user sweeps
+    # them away. Completed top-level tasks still belong only in Completed.
+    cleared = cleared or {}
+    rows = [t for t in snap.tasks if t.get("project_id") == project_id and
+            (t.get("completed_at") is None or completed_subtask_visible(t, cleared))]
+    by_id = {t.id: t for t in rows}
+    def visible_parent(task):
+        parent = by_id.get(task.get("parent_id"))
+        if parent is None or (task.get("completed_at") is None and parent.get("completed_at") is not None):
+            return None
+        return parent.id
+
+    roots = [n for n in build_tree(rows, visible_parent) if n.row.get("completed_at") is None]
     if project_id is None:
         inbox = [n for n in roots if is_inbox_task(n.row, snap.all_tasks.get)]
         planned = [n for n in roots if not is_inbox_task(n.row, snap.all_tasks.get)]

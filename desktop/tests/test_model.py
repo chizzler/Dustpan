@@ -98,6 +98,32 @@ class SnapshotTest(unittest.TestCase):
         secs = project_sections(snapshot(self.store), "p")
         self.assertEqual(ids(secs[0].tasks), [("child", [])])
 
+    def test_completed_subtask_stays_until_cleared_and_reappears_after_recompletion(self):
+        self.put("project", "p", name="P")
+        self.put("task", "parent", title="Parent", project_id="p")
+        self.put("task", "done", title="Done", project_id="p", parent_id="parent", completed_at=10)
+        self.put("task", "nested", title="Nested", project_id="p", parent_id="done", completed_at=10)
+        self.put("task", "open", title="Open", project_id="p", parent_id="parent")
+        self.put("task", "top_done", title="Top done", project_id="p", completed_at=10)
+        snap = snapshot(self.store)
+        self.assertEqual(ids(project_sections(snap, "p")[0].tasks),
+                         [("parent", [("done", [("nested", [])]), ("open", [])])])
+        cleared = {"done": [10, "parent"], "nested": [10, "done"]}
+        self.assertEqual(ids(project_sections(snap, "p", cleared)[0].tasks),
+                         [("parent", [("open", [])])])
+        self.put("task", "done", completed_at=None)
+        self.assertEqual(ids(project_sections(snapshot(self.store), "p", cleared)[0].tasks),
+                         [("parent", [("done", []), ("open", [])])])
+        self.put("task", "done", completed_at=20)
+        self.assertEqual(ids(project_sections(snapshot(self.store), "p", cleared)[0].tasks),
+                         [("parent", [("done", []), ("open", [])])])
+
+    def test_open_child_of_completed_parent_is_top_level(self):
+        self.put("project", "p", name="P")
+        self.put("task", "done", title="Done", project_id="p", completed_at=10)
+        self.put("task", "open", title="Open", project_id="p", parent_id="done")
+        self.assertEqual(ids(project_sections(snapshot(self.store), "p")[0].tasks), [("open", [])])
+
 
 if __name__ == "__main__":
     unittest.main()

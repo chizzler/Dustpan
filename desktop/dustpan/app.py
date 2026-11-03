@@ -12,10 +12,10 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
-from . import config  # noqa: E402
+from . import config, trash  # noqa: E402
 from .api import Api, ApiError, Offline  # noqa: E402
 from .clock import wall_ms  # noqa: E402
-from .dates import day_heading, day_start_minutes, format_due, format_minutes  # noqa: E402
+from .dates import day_heading, day_start_minutes, format_due, format_minutes, format_time, uses_12h  # noqa: E402
 from .dialogs import LabelDialog, ProjectDialog, TaskDialog, ViewDialog, ask_name  # noqa: E402
 from .dragdrop import (AFTER, BEFORE, INSIDE, MOVES, Place, Slot, ToDay, ToLabel, ToProject,  # noqa: E402
                        describe as describe_drop, nudge, place_item, zone)
@@ -26,7 +26,7 @@ from .labelpicker import LabelPicker  # noqa: E402
 from .labels import ROW_CHIPS, carrying, duplicates, in_order, picker_order, remember, shown  # noqa: E402
 from .markdown import first_line  # noqa: E402
 from .querybar import QueryBar  # noqa: E402
-from .model import count_open, order_key, project_path, project_sections, snapshot  # noqa: E402
+from .model import CLEARED_SUBTASKS, count_open, order_key, project_path, project_sections, snapshot  # noqa: E402
 from .reminders import describe, is_due, snooze_until  # noqa: E402
 from .rowactions import RowActions, TaskRow  # noqa: E402
 from .store import Store  # noqa: E402
@@ -34,7 +34,7 @@ from .sync import ClockSkew, Syncer, UnsupportedAccount  # noqa: E402
 from .views import (LOGBOOK_PAGE, WEEK_START, compare_tasks, group_tasks, in_anytime, in_today,  # noqa: E402
                     logbook, manual_order, open_count, run_query, run_view, sorted_tasks, today_groups,
                     upcoming_groups, view_options)
-from .widgets import (CSS, INDENT_PX, Dot, ThemeFollower, escape, flash, label_chip, on_right_click, popup_menu,  # noqa: E402
+from .widgets import (CSS, INDENT_PX, Dot, ThemeFollower, broom_button, escape, flash, label_chip, on_right_click, popup_menu,  # noqa: E402
                       save_screenshot, scroll_into_view)
 from .writes import CannotEdit, Writer, descendants, live, project_descendants  # noqa: E402
 
@@ -44,11 +44,12 @@ EDIT_SYNC_DELAY_MS = 250
 # Sidebar keys. A project's key is its id; a saved view's is VIEW + its id; an archived project's ARCHIVED + its id;
 # a label's LABEL + its id.
 INBOX, TODAY, UPCOMING, VIEW, ARCHIVED, LABEL = "inbox", "today", "upcoming", "view:", "archived:", "label:"
-ANYTIME, COMPLETED, FILTER = "anytime", "completed", "filter"
-BUILT_IN = (TODAY, UPCOMING, INBOX, ANYTIME, COMPLETED, FILTER)
+ANYTIME, COMPLETED, FILTER, TRASH = "anytime", "completed", "filter", "trash"
+BUILT_IN = (TODAY, UPCOMING, INBOX, ANYTIME, COMPLETED, FILTER, TRASH)
+NO_ADDING = (COMPLETED, FILTER, TRASH)  # built-in pages without quick add
 # Built-in pages that can be hidden from the sidebar, and brought back from its ⋯ menu: (key, name, icon).
 OPTIONAL_PAGES = ((ANYTIME, "Anytime", "task-due-symbolic"), (COMPLETED, "Completed", "object-select-symbolic"),
-                  (FILTER, "Filter", "edit-find-symbolic"))
+                  (FILTER, "Filter", "edit-find-symbolic"), (TRASH, "Trash", "user-trash-symbolic"))
 HIDDEN_PAGES = "hidden_pages"  # store meta: the optional pages hidden on this device
 FILTER_DELAY_MS = 150  # the Filter page's results wait for a pause in typing
 RECENT_LABELS = "recent_labels"  # store meta: labels assigned lately on this device, newest first
@@ -266,7 +267,7 @@ class Window(Adw.ApplicationWindow):
         self.title.set_subtitle(message)
         if result and result.refused:
             self.toast(f"{result.refused} change{'s' if result.refused > 1 else ''} not accepted by the server")
-        if result and (result.received or result.refused):
+        if self.selected == TRASH or result and (result.received or result.refused or result.purged):
             self.refresh_view()
         if self.sync_again:
             self.sync_again = False
@@ -286,6 +287,7 @@ class Window(Adw.ApplicationWindow):
             return
         self.page_stale = False
         self.snap = snapshot(self.store)
+        self.trash = trash.items(self.snap.all_tasks, self.store.rows("project"))
         self.reminders_by_task = {}
         for reminder in self.store.rows("reminder").values():
             if live(reminder):
@@ -313,7 +315,7 @@ class Window(Adw.ApplicationWindow):
         hidden = self.store.get_meta(HIDDEN_PAGES) or []
         for key, name, icon in OPTIONAL_PAGES:
             if key not in hidden or key == self.selected:
-                self.add_sidebar_row(key, name, 0, icon=icon,
+                self.add_sidebar_row(key, name, 0, icon=icon, count=len(self.trash) if key == TRASH else 0,
                                      menu=lambda k=key: [[("Hide from sidebar", lambda: self.hide_page(k), True)]])
 
         new_project = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="New project", css_classes=["flat"])
@@ -427,7 +429,7 @@ class Window(Adw.ApplicationWindow):
             self.adding = None
         self.title.set_title(row.name)
         is_view, is_archived, is_label = key.startswith(VIEW), key.startswith(ARCHIVED), key.startswith(LABEL)
-        self.add_button.set_visible(not is_view and not is_archived and key not in (COMPLETED, FILTER))
+        self.add_button.set_visible(not is_view and not is_archived and key not in NO_ADDING)
         self.edit_button.set_visible(is_view or is_label or self.page_project() is not None)
         self.edit_button.set_tooltip_text("Edit view" if is_view else "Edit label" if is_label else "Edit project")
         if self.add_entry is not None:
@@ -460,6 +462,8 @@ class Window(Adw.ApplicationWindow):
             self.fill_completed(column)
         elif key == FILTER:
             self.fill_filter(column, focus=filter_focused or opened)
+        elif key == TRASH:
+            self.fill_trash(column)
         elif is_view:
             self.fill_view(column, next(v for v in self.snap.views if v.id == key[len(VIEW):]))
         elif is_archived:
@@ -516,7 +520,7 @@ class Window(Adw.ApplicationWindow):
 
     def fill_project(self, column, project_id):
         """A project's or the Inbox's sections. Each real list takes drops: between rows, inside one, at its ends."""
-        sections = project_sections(self.snap, project_id)
+        sections = project_sections(self.snap, project_id, self.store.get_meta(CLEARED_SUBTASKS) or {})
         if not any(s.tasks for s in sections) and len(sections) == 1 and self.adding is None:
             self.note(column, "Nothing to do here.")
         for sec in sections:
@@ -616,6 +620,46 @@ class Window(Adw.ApplicationWindow):
     def show_more_completed(self):
         self.completed_limit += LOGBOOK_PAGE
         self.show_page(COMPLETED)
+
+    def fill_trash(self, column):
+        """Deleted tasks and projects, newest first. Restore works offline; deleting for good waits for the server."""
+        retention = self.store.get_meta(trash.RETENTION, trash.DEFAULT_RETENTION_DAYS)
+        line = Gtk.Box(spacing=12, margin_bottom=8)
+        line.append(Gtk.Label(label=f"Deleted for good after {retention} days." if retention > 0
+                              else "Kept until you delete them for good.",
+                              xalign=0, hexpand=True, wrap=True, css_classes=["dim-label"]))
+        if self.trash:
+            empty = Gtk.Button(label="Empty Trash…", css_classes=["pill", "destructive-action"], valign=Gtk.Align.CENTER)
+            empty.connect("clicked", lambda _b: self.empty_trash())
+            line.append(empty)
+        column.append(line)
+        if not self.trash:
+            self.note(column, "The Trash is empty.")
+            return
+        waiting = trash.pending(self.store)
+        now = wall_ms()
+        rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
+        for item in self.trash:
+            gone = (item.entity, item.id) in waiting
+            deleted = datetime.fromtimestamp(item.deleted_at / 1000)
+            days = trash.remaining_days(item.deleted_at, retention, now)
+            parts = [
+                "Project" if item.entity == "project" else item.project_name or "Inbox",
+                f"with {item.subtasks} subtask{'s' if item.subtasks > 1 else ''}" if item.subtasks else None,
+                f"deleted {deleted:%a %-d %b}, {format_time(deleted, uses_12h(self.time_format))}",
+                "deleting for good…" if gone else None if days is None else f"{days} day{'' if days == 1 else 's'} left",
+            ]
+            row = Adw.ActionRow(title=item.title, subtitle=" · ".join(p for p in parts if p), use_markup=False)
+            row.add_prefix(Dot(item.color) if item.entity == "project" else Gtk.Image(icon_name="radio-symbolic"))
+            restore = Gtk.Button(label="Restore", valign=Gtk.Align.CENTER, sensitive=not gone, css_classes=["flat"])
+            restore.connect("clicked", lambda _b, i=item: self.restore_item(i))
+            row.add_suffix(restore)
+            purge = Gtk.Button(icon_name="user-trash-full-symbolic", tooltip_text="Delete for good", valign=Gtk.Align.CENTER,
+                               sensitive=not gone, css_classes=["flat", "error"])
+            purge.connect("clicked", lambda _b, i=item: self.purge_items([i]))
+            row.add_suffix(purge)
+            rows.append(row)
+        column.append(rows)
 
     def fill_filter(self, column, focus):
         """A query with help, its results as you type, and Save as view."""
@@ -721,9 +765,40 @@ class Window(Adw.ApplicationWindow):
         """A project's task trees. Each row is added to rows as (Slot, widget), in display order."""
         for node in nodes:
             row = self.task_row(node.row, depth)
-            rows.append((Slot(node.id, depth, parent_id), row))
+            completed = [child.row for child in node.children if child.row.get("completed_at") is not None]
+            if completed and node.row.get("completed_at") is None:
+                broom = broom_button()
+                broom.connect("clicked", lambda _b, tasks=completed: self.clear_completed_subtasks(tasks))
+                row.append(broom)
+            if node.row.get("completed_at") is None:
+                rows.append((Slot(node.id, depth, parent_id), row))
             column.append(row)
             self.add_tasks(column, node.children, depth + 1, node.id, rows)
+
+    def clear_completed_subtasks(self, tasks, notify=True):
+        """Hide finished subtrees in this device's project lists; keep the tasks in Completed."""
+        cleared = self.store.get_meta(CLEARED_SUBTASKS) or {}
+        before = dict(cleared)
+
+        def remember(task):
+            if task.get("completed_at") is None:
+                return
+            cleared[task.id] = [task.get("completed_at"), task.get("parent_id")]
+            for child in descendants(task.id, self.snap.all_tasks):
+                if child.get("completed_at") is not None:
+                    cleared[child.id] = [child.get("completed_at"), child.get("parent_id")]
+
+        for task in tasks:
+            remember(task)
+        self.store.set_meta(CLEARED_SUBTASKS, cleared)
+        self.refresh_view()
+        if notify:
+            self.toast("Cleared completed subtasks", undo=lambda: self.restore_cleared_subtasks(before))
+        return before
+
+    def restore_cleared_subtasks(self, cleared):
+        self.store.set_meta(CLEARED_SUBTASKS, cleared)
+        self.refresh_view()
 
     # ---- dragging ----
 
@@ -924,6 +999,9 @@ class Window(Adw.ApplicationWindow):
                           wrap_mode=Pango.WrapMode.WORD_CHAR)
         if done:
             title.add_css_class("dim-label")
+            attrs = Pango.AttrList()
+            attrs.insert(Pango.attr_strikethrough_new(True))
+            title.set_attributes(attrs)
         text.append(title)
         if note := first_line(task.get("description") or ""):
             text.append(Gtk.Label(label=note, xalign=0, ellipsize=Pango.EllipsizeMode.END,
@@ -1013,7 +1091,7 @@ class Window(Adw.ApplicationWindow):
         preview.set_visible(bool(text))
 
     def start_adding(self, section_id):
-        if self.selected.startswith((VIEW, ARCHIVED)) or self.selected in (COMPLETED, FILTER):
+        if self.selected.startswith((VIEW, ARCHIVED)) or self.selected in NO_ADDING:
             return
         self.adding = (self.selected, section_id)
         self.add_text = ""
@@ -1330,6 +1408,38 @@ class Window(Adw.ApplicationWindow):
         done = self.run(self.writer.delete_project, project_id)
         if done:
             self.toast(f"Deleted “{name}”", undo=lambda: self.revert_to(done.undo, page))
+
+    def restore_item(self, item):
+        if item.entity == "project":
+            done = self.run(self.writer.restore_project, item.id)
+            text = f"Restored “{item.title}” with its tasks"
+        else:
+            done = self.run(self.writer.restore_task, item.id)
+            text = f"Restored “{item.title}” to the Inbox" if done and done.task_id else f"Restored “{item.title}”"
+        if done:
+            self.toast(text, undo=lambda: self.revert_to(done.undo, TRASH))
+
+    def purge_items(self, items):
+        """Ask, then queue a permanent delete for each item. The next sync sends them."""
+        if len(items) == 1:
+            item = items[0]
+            heading = f"Delete “{item.title}” for good?"
+            body = ("Its tasks go with it. " if item.entity == "project" else
+                    "Any deleted subtasks go with it, including those deleted separately. ")
+        else:
+            heading = f"Delete all {len(items)} items for good?"
+            body = ""
+        body += "It's removed from every device and the server, and can't be undone."
+
+        def go():
+            trash.queue(self.store, [(i.entity, i.id) for i in items])
+            self.show_page(TRASH)
+            self.sync()
+
+        confirm(self, heading, body, "Delete for good", go, destructive=True)
+
+    def empty_trash(self):
+        self.purge_items(list(self.trash))
 
     def revert_to(self, undo, key):
         """Undo, then show the page the action left."""

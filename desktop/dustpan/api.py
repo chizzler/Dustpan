@@ -39,6 +39,9 @@ class Api:
             headers={**self._headers(), "Content-Type": "application/json"},
         ))
 
+    def delete(self, path):
+        return self._send(urllib.request.Request(self.base_url + path, method="DELETE", headers=self._headers()))
+
     def _headers(self):
         return {"Authorization": "Bearer " + self.token}
 
@@ -66,6 +69,10 @@ class Api:
 
     def sync(self, body):
         return self.post("/api/v1/sync", body)
+
+    def purge(self, entity, entity_id):
+        """Delete a task or project in the Trash for good. 409 not_deleted if it isn't there."""
+        return self.delete(f"/api/v1/{entity}s/{urllib.parse.quote(entity_id, safe='')}/purge")
 
     def events(self, device):
         """Open the live event stream. Returns a response to read lines from."""

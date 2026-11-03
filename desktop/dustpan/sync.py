@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from .clock import HybridClock
+from . import trash
 
 BATCH = 500
 FEATURES = ["backfill_ack", "clock_skew"]
@@ -30,6 +31,7 @@ class Result:
     received: int = 0  # ops pulled
     refused: int = 0  # local changes the server didn't accept
     held: int = 0  # ops a server limit held back, kept for later
+    purged: int = 0  # entities the server deleted for good
 
 
 def is_reserved_device(device):
@@ -62,6 +64,17 @@ class Syncer:
             self.store.set_meta("user_id", me["user"]["id"])
 
     def run(self):
+        """Push edits, pull changes, then send queued purges and pull their markers."""
+        result = self._exchange()
+        if trash.send(self.store, self.api):
+            again = self._exchange()
+            result.received += again.received
+            result.refused += again.refused
+            result.held = again.held
+            result.purged += again.purged
+        return result
+
+    def _exchange(self):
         """Exchange until the outbox is empty and nothing remains to pull.
 
         Returns a Result. Raises api.Offline, api.ApiError or ClockSkew.
@@ -109,10 +122,13 @@ class Syncer:
                     self.store.apply(op)
                 for marker in res.get("purged", []):
                     self.store.purge(marker["entity"], marker["entityId"])
+                if "trashRetentionDays" in res:
+                    self.store.set_meta(trash.RETENTION, res["trashRetentionDays"])
                 if "backfillSeq" in res:
                     self.store.set_meta("backfill_ack", res["backfillSeq"])
                 self.store.set_meta("cursor", res["cursor"])
             result.received += len(res.get("ops", []))
+            result.purged += len(res.get("purged", []))
             if not res.get("hasMore") and self.store.outbox_count() == 0:
                 return result
 

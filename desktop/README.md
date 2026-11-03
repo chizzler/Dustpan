@@ -31,6 +31,7 @@ The client keeps its dev data in `dev/data/client`.
 | `dustpan/clock.py` | Hybrid logical clock |
 | `dustpan/sync.py` | The sync exchange, refused ops, purge and re-seed |
 | `dustpan/writes.py` | Local edits: one stamped batch per action |
+| `dustpan/trash.py` | Trash listing, retention countdown and queued permanent deletions |
 | `dustpan/ordering.py` | Manual order: the positions a move writes |
 | `dustpan/dragdrop.py` | Drag and drop rules: where a drop lands and what it means, without GTK |
 | `dustpan/recurrence.py` | Repeat rules: parse, canonical form, next date |
@@ -82,7 +83,16 @@ or use the pencil on its page to rename it, recolour it, move it under another, 
 Archived projects are listed under Archived, at the foot of the sidebar. Each section heading has a ⋮ menu:
 rename, move up or down, delete. "Add section" is at the end of a project's page.
 
+**Completed subtasks.** Finished subtasks stay under their open parent, dimmed and struck through, in project
+and Inbox lists and in the task editor. The small broom beside a parent clears its completed subtasks from
+the list, with Undo. They remain in Completed. Clearing is remembered on this device; reopening a subtask
+shows it again.
+
 **Closing the window hides it.** Sync and reminders carry on. Ctrl+Q quits.
+
+**Trash.** Deleted tasks and projects appear in Trash, including a Restore action with Undo.
+Delete for good and Empty Trash ask first, then wait for sync when offline. The server's retention
+period is shown above the list. Hide Trash from its sidebar menu; bring it back from ⋯ above the sidebar.
 At login the autostart entry runs `dustpan --background`: no window until you open Dustpan.
 Hidden, it uses about 115 MB (most of it GTK) and about 10 ms of CPU a minute. It skips page rebuilds until shown.
 
