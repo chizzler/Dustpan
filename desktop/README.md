@@ -113,8 +113,8 @@ which keeps the code it started with.
 ## Versions
 
 The version is `__version__` in `dustpan/__init__.py` (`python -m dustpan --version`), and each release is a git tag `vX.Y.Z`.
-Before 1.0: the minor number goes up with each finished slice or set of slices, the patch number for fixes only.
+Before 1.0: the minor number follows the slices (0.12 is slice 12), the patch number is for fixes only.
 
 | Version | Date | What |
 | --- | --- | --- |
-| 0.1.0 | 2026-11-04 | First numbered version: slices 1 to 12b. Server OpenTodo v0.22.0. Time sectors, calendar window (Month, Week, Day). |
+| 0.12.0 | 2026-11-04 | First numbered version: slices 1 to 12b. Server OpenTodo v0.22.0. Time sectors, calendar window (Month, Week, Day). |
