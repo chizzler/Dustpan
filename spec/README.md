@@ -32,6 +32,7 @@ When the pin moves, re-read the sync doc's schema table and diff the vectors.
 | 10 | Built-in Anytime and Completed pages, and the Filter page (the query helper) | [views.md](views.md) | done 2026-11-02; the Filter page tried and approved |
 | 11 | Trash: restore, permanent deletion, offline queue and retention | [trash.md](trash.md) | done 2026-11-03; automated GTK smoke test passed, owner trial pending |
 | 11 | Catch up with v0.22.0: time sectors (show, filter, quick add, write rules), the `notes` filter terms | [sectors.md](sectors.md) | done 2026-11-04, owner trial pending |
+| 12 | Calendar, in a companion window: Month, then Week and Day, placing, repeating and multi-day tasks | [calendar.md](calendar.md) | 12a built 2026-11-04, owner trial pending |
 
 ## Behind the server
 

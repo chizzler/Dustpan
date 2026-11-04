@@ -14,6 +14,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from . import config, sectors, trash  # noqa: E402
 from .api import Api, ApiError, Offline  # noqa: E402
+from .calendarwindow import CSS as CALENDAR_CSS, CalendarWindow  # noqa: E402
 from .clock import wall_ms  # noqa: E402
 from .dates import day_heading, day_start_minutes, format_due, format_minutes, format_time, uses_12h  # noqa: E402
 from .dialogs import LabelDialog, ProjectDialog, TaskDialog, ViewDialog, ask_name  # noqa: E402
@@ -93,6 +94,7 @@ class Window(Adw.ApplicationWindow):
         self.filter_timer = 0
         self.last_toast = None
         self.toast_undo = None
+        self.calendar = None  # the calendar's window, once opened
 
         self.sidebar = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         self.sidebar.add_css_class("navigation-sidebar")
@@ -122,6 +124,9 @@ class Window(Adw.ApplicationWindow):
         header.pack_start(self.add_button)
         header.pack_start(self.edit_button)
         header.pack_end(refresh)
+        self.calendar_button = Gtk.ToggleButton(icon_name="x-office-calendar-symbolic", tooltip_text="Calendar")
+        self.calendar_button.connect("toggled", lambda b: self.show_calendar(b.get_active()))
+        header.pack_end(self.calendar_button)
         # Never sideways: a long row would let focus scroll the page off to one side.
         self.content = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
         self.autoscrolls = [Autoscroll(sidebar_scroll),
@@ -171,6 +176,9 @@ class Window(Adw.ApplicationWindow):
         self.events.start()
         self.connect("destroy", lambda _w: self.events.stop())
         self.connect("map", lambda _w: self.page_stale and self.refresh_view())
+        # The calendar comes and goes with this window, and reopens if it was open.
+        self.connect("map", lambda _w: self.store.get_meta("calendar_open", False) and self.show_calendar(True))
+        self.connect("unmap", lambda _w: self.calendar and self.calendar.set_visible(False))
 
     def toast(self, text, undo=None):
         """A new toast replaces the shown one, so Undo always means the latest action."""
@@ -182,7 +190,9 @@ class Window(Adw.ApplicationWindow):
             toast.set_button_label("Undo")
             toast.connect("button-clicked", lambda _t: undo())
         toast.connect("dismissed", self.on_toast_dismissed)
-        self.toasts.add_toast(toast)
+        # In the window the user is working in.
+        overlay = self.calendar.toasts if self.calendar and self.calendar.is_active() else self.toasts
+        overlay.add_toast(toast)
 
     def on_toast_dismissed(self, toast):
         if toast is self.last_toast:
@@ -303,6 +313,8 @@ class Window(Adw.ApplicationWindow):
                                       day_start_minutes(prefs.get("day_start")))
         self.rebuild_sidebar()
         self.show_page(self.selected)
+        if self.calendar is not None and self.calendar.get_visible():
+            self.calendar.refresh()
 
     def rebuild_sidebar(self):
         self.sidebar.unselect_all()
@@ -1528,10 +1540,30 @@ class Window(Adw.ApplicationWindow):
     def dismiss_reminder(self, reminder_id):
         self.run(self.writer.dismiss, reminder_id)
 
-    def edit(self, task_id):
+    def edit(self, task_id, parent=None):
         task = self.store.rows("task").get(task_id)
         if task is not None:
-            TaskDialog(self, task).present(self)
+            TaskDialog(self, task).present(parent or self)
+
+    # ---- the calendar window (calendarwindow.py) ----
+
+    def show_calendar(self, show):
+        """Open or close the calendar beside this window. Remembered on this device."""
+        self.store.set_meta("calendar_open", show)
+        if show:
+            if self.calendar is None:
+                self.calendar = CalendarWindow(self, on_closed=lambda: self.calendar_closed())
+            self.calendar.refresh()
+            self.calendar.present()
+        elif self.calendar is not None:
+            self.calendar.set_visible(False)
+        if self.calendar_button.get_active() != show:
+            self.calendar_button.set_active(show)
+
+    def calendar_closed(self):
+        """Its own close button: the same as the toggle."""
+        self.store.set_meta("calendar_open", False)
+        self.calendar_button.set_active(False)
 
 
 def confirm(window, heading, body, action, then, destructive=False):
@@ -1580,14 +1612,15 @@ class App(Adw.Application):
         self.add_action(quit_action)
         self.set_accels_for_action("app.quit", ["<Control>q"])
         provider = Gtk.CssProvider()
-        provider.load_from_string(CSS)
+        provider.load_from_string(CSS + CALENDAR_CSS)
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider,
                                                   Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self.theme = ThemeFollower(Gdk.Display.get_default())
 
     def main_window(self):
-        """The app's window, focused or not."""
-        return next(iter(self.get_windows()), None)
+        """The app's main window, focused or not. get_windows() puts the last focused first, maybe the calendar."""
+        windows = self.get_windows()
+        return next((w for w in windows if isinstance(w, Window)), next(iter(windows), None))
 
     def on_notification_action(self, _action, target, method):
         if self.main_window() is None:

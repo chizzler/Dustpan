@@ -41,6 +41,8 @@ The client keeps its dev data in `dev/data/client`.
 | `dustpan/events.py` | The live update stream |
 | `dustpan/filters.py` | The filter query language: parse, then test tasks |
 | `dustpan/views.py` | What the Inbox, Today, Upcoming and saved views list, and in what order |
+| `dustpan/sectors.py` | Time sectors: periods, "this week", carried over |
+| `dustpan/calendar.py` | The calendar's rules: the month grid, which tasks show on a day, day load |
 | `dustpan/quickadd/` | Quick add: read a line into task fields, in six languages |
 | `dustpan/model.py` | Display rules: trees, sections, what's hidden |
 | `dustpan/querytools.py` | The query helper without GTK: suggestions, and the conditions the builder adds |
@@ -52,6 +54,7 @@ The client keeps its dev data in `dev/data/client`.
 | `dustpan/app.py` | The GTK window and its pages |
 | `dustpan/dialogs.py` | The task and view editors |
 | `dustpan/dragging.py` | Drag and drop in GTK: sources, page and sidebar targets, the drop line, autoscroll |
+| `dustpan/calendarwindow.py` | The calendar window beside the main one (Month) |
 | `dustpan/querybar.py` | The query box: suggestions as you type, Not, and + Condition |
 | `dustpan/labelpicker.py` | The label picker: type to find, Enter to add, remove or create |
 | `dustpan/noteview.py` | Notes in GTK: the formatted view, and the Write and Preview editor |
