@@ -12,6 +12,7 @@ from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gsk, Gtk, Pango  # noqa
 from . import theme  # noqa: E402
 
 INDENT_PX = 24  # one level of subtasks
+FOLD_PX = 16  # the leading slot on every task row, where a parent shows its fold chevron
 FLASH_MS = 700  # how long a moved row is highlighted
 THEME_SETTLE_MS = 200  # Omarchy swaps the theme in several steps; reload once they stop
 
@@ -37,6 +38,9 @@ button.subtask-broom { min-width: 24px; min-height: 24px; padding: 0;
   border: 1px solid alpha(currentColor, 0.12); background: alpha(currentColor, 0.02);
   margin: -4px 0; }  /* as tall as a line of text, so a row doesn't grow when its broom appears */
 button.subtask-broom:hover { border-color: alpha(currentColor, 0.22); background: alpha(currentColor, 0.06); }
+button.fold-chevron { min-width: 16px; min-height: 18px; padding: 0; border-radius: 4px; opacity: 0.55; }
+button.fold-chevron:hover { opacity: 1; }
+button.fold-chevron image { -gtk-icon-size: 12px; }
 .task-text { min-height: 20px; }
 .add-task { margin-top: 4px; }
 .task-row { padding: 8px 4px; border-bottom: 1px solid alpha(currentColor, 0.08); }

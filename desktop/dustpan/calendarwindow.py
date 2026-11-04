@@ -622,6 +622,9 @@ class CalendarWindow(Adw.ApplicationWindow):
     def delete_task(self, task_id):
         self.main.delete_task(task_id)
 
+    def fold_state(self, _task_id):
+        return None  # the calendar shows no subtask trees
+
     def days(self):
         return self.main.days()
 

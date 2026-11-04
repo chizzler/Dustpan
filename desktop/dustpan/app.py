@@ -27,7 +27,8 @@ from .labelpicker import LabelPicker  # noqa: E402
 from .labels import ROW_CHIPS, carrying, duplicates, in_order, picker_order, remember, shown  # noqa: E402
 from .markdown import first_line  # noqa: E402
 from .querybar import QueryBar  # noqa: E402
-from .model import CLEARED_SUBTASKS, count_open, order_key, project_path, project_sections, snapshot  # noqa: E402
+from .model import (CLEARED_SUBTASKS, FOLDED_TASKS, count_open, folded_after, order_key, project_path,  # noqa: E402
+                    project_sections, snapshot, unfolded_down_to)
 from .reminders import describe, is_due, snooze_until  # noqa: E402
 from .rowactions import RowActions, TaskRow  # noqa: E402
 from .store import Store  # noqa: E402
@@ -35,8 +36,8 @@ from .sync import ClockSkew, Syncer, UnsupportedAccount  # noqa: E402
 from .views import (LOGBOOK_PAGE, WEEK_START, compare_tasks, group_tasks, in_anytime, in_today,  # noqa: E402
                     logbook, manual_order, open_count, run_query, run_view, sorted_tasks, today_groups,
                     upcoming_groups, view_options)
-from .widgets import (CSS, INDENT_PX, Dot, ThemeFollower, broom_button, escape, flash, label_chip, on_right_click, popup_menu,  # noqa: E402
-                      save_screenshot, scroll_into_view)
+from .widgets import (CSS, FOLD_PX, INDENT_PX, Dot, ThemeFollower, broom_button, escape, flash, label_chip,  # noqa: E402
+                      on_right_click, popup_menu, save_screenshot, scroll_into_view)
 from .writes import CannotEdit, Writer, descendants, live, project_descendants  # noqa: E402
 
 SYNC_INTERVAL_S = 30
@@ -84,6 +85,7 @@ class Window(Adw.ApplicationWindow):
         self.page_stale = False  # changes came in while hidden; rebuild when shown
         self.page_drop = None
         self.task_widgets = {}  # task id -> row on the shown page
+        self.folds = {}  # task id -> whether its subtasks are folded, for each row with subtasks on the page
         self.flash_task = None  # the task to highlight once the page is rebuilt
         self.focus_task = None  # the task row to focus once the page is rebuilt
         self.row_actions = RowActions(self)
@@ -473,6 +475,7 @@ class Window(Adw.ApplicationWindow):
                          margin_start=16, margin_end=16)
         self.page_drop = PageDrop(column, self.drag, self.drop_task)
         self.task_widgets = {}
+        self.folds = {}
         if key == TODAY:
             self.fill_groups(column, today_groups(self.snap.tasks, self.today),
                              lambda group: ToDay(self.today) if group.key == "today" else None)
@@ -813,10 +816,21 @@ class Window(Adw.ApplicationWindow):
     def day_heading(self, day):
         return day_heading(day, self.today)
 
-    def add_tasks(self, column, nodes, depth, parent_id, rows):
-        """A project's task trees. Each row is added to rows as (Slot, widget), in display order."""
+    def add_tasks(self, column, nodes, depth, parent_id, rows, folded=None):
+        """A project's task trees. Each row is added to rows as (Slot, widget), in display order.
+
+        The subtasks of a folded task are left out, of rows too: drops and keyboard moves treat it as a leaf.
+        """
+        if folded is None:
+            folded = set(self.store.get_meta(FOLDED_TASKS) or [])
         for node in nodes:
-            row = self.task_row(node.row, depth)
+            fold = None
+            if node.children:
+                fold = self.folds[node.id] = node.id in folded
+            hidden = 0
+            if fold:
+                hidden = sum(d.get("completed_at") is None for d in descendants(node.id, self.snap.all_tasks))
+            row =self.task_row(node.row, depth, fold=fold, hidden=hidden)
             completed = [child.row for child in node.children if child.row.get("completed_at") is not None]
             if completed and node.row.get("completed_at") is None:
                 broom = broom_button()
@@ -825,7 +839,31 @@ class Window(Adw.ApplicationWindow):
             if node.row.get("completed_at") is None:
                 rows.append((Slot(node.id, depth, parent_id), row))
             column.append(row)
-            self.add_tasks(column, node.children, depth + 1, node.id, rows)
+            if not fold:
+                self.add_tasks(column, node.children, depth + 1, node.id, rows, folded)
+
+    # ---- folding subtasks (spec/folding.md) ----
+
+    def fold_state(self, task_id):
+        """True when the task's subtasks are folded, False when shown, None when it has none on this page."""
+        return self.folds.get(task_id)
+
+    def fold(self, task_id, fold):
+        """← and →: fold or unfold the task's subtasks. ← on a task with nothing to fold goes to its parent."""
+        state = self.folds.get(task_id)
+        if state is not None and state != fold:
+            self.set_folded(task_id, fold)
+        elif fold and (parent := self.task_widgets.get(self.snap.all_tasks[task_id].get("parent_id"))):
+            parent.grab_focus()
+
+    def set_folded(self, task_id, fold):
+        """Remembered on this device. A focused subtask that folds away hands the focus to the folded task."""
+        focused = self.focused_task()
+        if fold and focused in {d.id for d in descendants(task_id, self.snap.all_tasks)}:
+            self.focus_task = task_id
+        folded = self.store.get_meta(FOLDED_TASKS) or []
+        self.store.set_meta(FOLDED_TASKS, folded_after(folded, task_id, fold, self.snap.all_tasks))
+        self.refresh_view()
 
     def clear_completed_subtasks(self, tasks, notify=True):
         """Hide finished subtrees in this device's project lists; keep the tasks in Completed."""
@@ -943,6 +981,11 @@ class Window(Adw.ApplicationWindow):
 
     def apply_drop(self, task_id, target):
         task = self.store.rows("task").get(task_id)
+        if isinstance(target, Place) and target.parent_id:
+            # Put under a folded task, it would vanish: unfold the way down to it.
+            folded = self.store.get_meta(FOLDED_TASKS) or []
+            if (shown := unfolded_down_to(folded, target.parent_id, self.snap.all_tasks)) != folded:
+                self.store.set_meta(FOLDED_TASKS, shown)
         self.flash_task = self.focus_task = task_id
         done = self.run(self.writer.drop, task_id, target)
         if done and done.undo:
@@ -1023,8 +1066,11 @@ class Window(Adw.ApplicationWindow):
 
     # ---- rows ----
 
-    def task_row(self, task, depth, placed=False):
-        """placed: also show the task's project, and its parent for a subtask. An open task's row can be dragged."""
+    def task_row(self, task, depth, placed=False, fold=None, hidden=0):
+        """placed: also show the task's project, and its parent for a subtask. An open task's row can be dragged.
+
+        fold: None for a row without subtasks, else whether they are folded; hidden: the open ones folded away.
+        """
         row = TaskRow(spacing=12, margin_start=depth * INDENT_PX)
         row.add_css_class("task-row")
         self.task_widgets[task.id] = row
@@ -1043,7 +1089,19 @@ class Window(Adw.ApplicationWindow):
         elif priority in (1, 2, 3):
             check.add_css_class(f"p{priority}")
         check.connect("clicked", lambda _b: self.reopen(task.id) if done else self.complete(task.id))
-        row.append(check)
+        # Every row has the leading slot, so checks line up across tree and flat lists. Only a parent fills it.
+        lead = Gtk.Box(spacing=4, valign=Gtk.Align.START)
+        slot = Adw.Bin(width_request=FOLD_PX)
+        if fold is not None:
+            chevron = Gtk.Button(icon_name="pan-end-symbolic" if fold else "pan-down-symbolic", focusable=False,
+                                 tooltip_text="Unfold subtasks (→)" if fold else "Fold subtasks (←)",
+                                 css_classes=["flat", "fold-chevron"])
+            chevron.update_state([Gtk.AccessibleState.EXPANDED], [not fold])
+            chevron.connect("clicked", lambda _b: self.set_folded(task.id, not fold))
+            slot.set_child(chevron)
+        lead.append(slot)
+        lead.append(check)
+        row.append(lead)
 
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, hexpand=True)
         text.add_css_class("task-text")
@@ -1081,6 +1139,9 @@ class Window(Adw.ApplicationWindow):
                                   tooltip_text="\n".join(describe(r) for r in reminders)))
         if minutes := task.get("estimate_minutes"):
             meta.append(Gtk.Label(label=format_minutes(minutes), css_classes=["dim-label"]))
+        if hidden:
+            meta.append(Gtk.Label(label=f"{hidden} subtask{'s' if hidden > 1 else ''}", css_classes=["dim-label"],
+                                  tooltip_text="Folded away. → or the arrow shows them."))
         if labels := shown(task.get("labels"), self.snap.labels, skip=self.page_label()):
             for label in labels[:ROW_CHIPS]:
                 meta.append(label_chip(label.get("name", ""), label.get("color")))

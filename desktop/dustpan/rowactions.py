@@ -43,6 +43,8 @@ KEYS = {
     (Gdk.KEY_Down, NONE): ("step", 1),
     (Gdk.KEY_l, NONE): ("labels", None),
     (Gdk.KEY_L, SHIFT): ("labels", None),
+    (Gdk.KEY_Left, NONE): ("fold", True),
+    (Gdk.KEY_Right, NONE): ("fold", False),
 }
 
 # On the calendar the arrows move the task in time (calendar_rules.grid_moves), as in the web app.
@@ -86,6 +88,7 @@ class RowActions:
     step(task_id, n): focus the row n rows away
     leaving(task_id): focus the next row once this one is gone
     edit(task_id), complete(task_id), reopen(task_id), delete_task(task_id), pick_labels(task_id) if labels
+    fold_state(task_id): True or False for a task whose subtasks are folded or shown, else None; fold(task_id, fold)
     places(): [(label, target, [(label, target)])] for Move to; days(): [(label, target)] for the date items
 
     keys and menu_moves: the list's (KEYS, MENU_MOVES) or the calendar's (CALENDAR_KEYS, CALENDAR_MOVES).
@@ -125,6 +128,8 @@ class RowActions:
             self.window.step(task_id, arg)
         elif action == "unselect":
             row.get_root().set_focus(None)
+        elif action == "fold":
+            self.later(self.window.fold, task_id, arg)
         elif action == "menu":
             self.menu(row, task_id, done, 12, row.get_height() / 2)
         elif action == "move":
@@ -177,6 +182,10 @@ class RowActions:
             item(first, "Complete", "complete", lambda: self.run("complete", task_id), accel="c")
         if self.labels:
             item(first, "Labels…", "labels", lambda: self.run("labels", task_id), accel="l")
+        folded = self.window.fold_state(task_id)
+        if folded is not None:
+            item(first, "Unfold subtasks" if folded else "Fold subtasks", "fold",
+                 lambda: self.later(self.window.fold, task_id, not folded), accel="Right" if folded else "Left")
         model.append_section(None, first)
 
         moves = None if done else self.window.moves(task_id)

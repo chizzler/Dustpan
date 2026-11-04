@@ -93,6 +93,10 @@ and Inbox lists and in the task editor. The small broom beside a parent clears i
 the list, with Undo. They remain in Completed. Clearing is remembered on this device; reopening a subtask
 shows it again.
 
+**Folding subtasks.** In a project or the Inbox, the arrow before a parent's check folds its subtasks away, or
+shows them again. ← and → do the same on the selected task, and so does its menu. A folded task says how many open
+subtasks it hides. Folds are remembered on this device. Moving a task under a folded one unfolds it. See `spec/folding.md`.
+
 **Calendar.** The calendar icon in the header opens the calendar in a window of its own, which Hyprland tiles
 beside the main one. The icon closes it again; if it was open, it reopens with the app. Day, Week and Month
 (`d`, `w`, `m`; Month at first) are remembered on this device. `[` and `]` step back and forward, `t` comes to today.
@@ -126,10 +130,11 @@ which keeps the code it started with.
 ## Versions
 
 The version is `__version__` in `dustpan/__init__.py` (`python -m dustpan --version`), and each release is a git tag `vX.Y.Z`.
-Before 1.0: the minor number follows the slices (0.12 is slice 12), the patch number is for fixes and for later parts of a slice (12c).
+Before 1.0: the minor number follows the slices (0.12 is slice 12), the patch number is for fixes, later parts of a slice (12c) and small features between slices.
 
 | Version | Date | What |
 | --- | --- | --- |
+| 0.12.3 | 2026-11-04 | Fold a task's subtasks away in project and Inbox lists: a chevron before the check, ← and →, and the row menu. Per device. Every row has a leading slot, so checks line up on every page. |
 | 0.12.2 | 2026-11-04 | Slice 12c: stretch a block's bottom edge to change its estimate; keys and a menu move tasks on the calendar; grid hours and day length in settings. A click on a calendar task selects it, a double-click opens it. |
 | 0.12.1 | 2026-11-04 | Fixes: the highlight and the list no longer jump when a task is ticked; the calendar grid keeps its place on every edit; the broom no longer grows its row; `calendar.py` renamed `calendar_rules.py`. |
 | 0.12.0 | 2026-11-04 | First numbered version: slices 1 to 12b. Server OpenTodo v0.22.0. Time sectors, calendar window (Month, Week, Day). |

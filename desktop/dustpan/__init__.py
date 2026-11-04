@@ -1,1 +1,1 @@
-__version__ = "0.12.2"  # see desktop/README.md, "Versions"
+__version__ = "0.12.3"  # see desktop/README.md, "Versions"

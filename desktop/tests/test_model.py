@@ -1,6 +1,6 @@
 import unittest
 
-from dustpan.model import build_tree, project_sections, snapshot
+from dustpan.model import build_tree, folded_after, project_sections, snapshot, unfolded_down_to
 from dustpan.store import Clock, Row, Store
 
 
@@ -127,3 +127,21 @@ class SnapshotTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FoldTest(unittest.TestCase):
+    TASKS = {"a": {"parent_id": None}, "b": {"parent_id": "a"}, "c": {"parent_id": "b"}, "x": {"parent_id": None},
+             "loop1": {"parent_id": "loop2"}, "loop2": {"parent_id": "loop1"}}
+
+    def test_folding_keeps_the_order_and_forgets_gone_tasks(self):
+        self.assertEqual(folded_after([], "a", True, self.TASKS), ["a"])
+        self.assertEqual(folded_after(["x", "gone", "a"], "b", True, self.TASKS), ["x", "a", "b"])
+        self.assertEqual(folded_after(["x", "a"], "a", True, self.TASKS), ["x", "a"])
+        self.assertEqual(folded_after(["x", "a"], "a", False, self.TASKS), ["x"])
+        self.assertEqual(folded_after(["x"], "gone", True, self.TASKS), ["x"])
+
+    def test_unfolds_the_way_down_to_a_new_parent_only(self):
+        self.assertEqual(unfolded_down_to(["a", "b", "c", "x"], "b", self.TASKS), ["c", "x"])
+        self.assertEqual(unfolded_down_to(["a", "x"], None, self.TASKS), ["a", "x"])
+        self.assertEqual(unfolded_down_to(["loop1", "x"], "loop2", self.TASKS), ["x"])
+

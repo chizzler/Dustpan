@@ -10,6 +10,25 @@ from .store import Clock, wins
 from .views import is_inbox_task, is_list_view, open_count, view_order
 
 CLEARED_SUBTASKS = "cleared_completed_subtasks"  # per-device display choice
+FOLDED_TASKS = "folded_tasks"  # per-device display choice: ids of tasks whose subtasks are folded away
+
+
+def folded_after(folded, task_id, fold, tasks):
+    """The folded ids once task_id is folded (fold) or unfolded, without ids of tasks that are gone.
+
+    tasks: every task by id. Kept in the order they were folded, so the stored list changes little.
+    """
+    kept = [i for i in folded if i in tasks and i != task_id]
+    return kept + [task_id] if fold and task_id in tasks else kept
+
+
+def unfolded_down_to(folded, parent_id, tasks):
+    """The folded ids with parent_id and every task above it unfolded: a task put under parent_id stays in sight."""
+    above = set()
+    while parent_id and parent_id not in above:  # a cycle in the data ends the walk
+        above.add(parent_id)
+        parent_id = (tasks.get(parent_id) or {}).get("parent_id")
+    return [i for i in folded if i not in above]
 
 
 def completed_subtask_visible(task, cleared):
