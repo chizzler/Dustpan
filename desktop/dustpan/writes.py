@@ -12,7 +12,7 @@ from datetime import date, datetime, time
 from . import labels as label_rules, quickadd, sectors
 from .clock import HybridClock, wall_ms
 from .dates import day_start_minutes, due_instant, logical_today
-from .dragdrop import Place, ToDay, ToLabel, ToProject
+from .dragdrop import Place, ToDay, ToLabel, ToProject, ToSlot
 from .filters import FilterError, parse as parse_query
 from .model import build_tree, order_key
 from .ordering import GAP, plan_move
@@ -664,7 +664,7 @@ class Writer:
         return changes + out
 
     def drop(self, task_id, target):
-        """Apply a drag-and-drop target (dragdrop.Place, ToProject, ToDay or ToLabel) to an open task, as one batch.
+        """Apply a drag-and-drop target (dragdrop.Place, ToProject, ToDay, ToSlot or ToLabel) to an open task, as one batch.
 
         Returns Done whose undo restores every field written. Nothing changed: an empty undo.
         """
@@ -683,6 +683,10 @@ class Writer:
                 if due and due.get("date") == target.day:
                     return []
                 return self._plan_edit(task_id, {"due": {**(due or {}), "date": target.day}})
+            if isinstance(target, ToSlot):
+                # A floating time: where it was dropped on this device's grid. The lane drops the time.
+                due = {"date": target.day, **({"time": target.time} if target.time else {})}
+                return [] if task.get("due") == due else self._plan_edit(task_id, {"due": due})
             if isinstance(target, ToLabel):
                 self._label(target.label_id)
                 labels = list(task.get("labels") or [])

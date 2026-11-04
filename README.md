@@ -7,7 +7,7 @@ A self-hosted Todoist replacement. One OpenTodo server, with my own clients for 
 | [project.md](project.md) | Goals, decisions, what we learned |
 | [dev-diary.md](dev-diary.md) | Progress, day by day |
 | [spec/](spec/README.md) | The protocol rules the clients follow |
-| [desktop/](desktop/README.md) | The Omarchy client: how to run and test it |
+| [desktop/](desktop/README.md) | The Omarchy client: how to run and test it, and its versions |
 | [deploy/](deploy/README.md) | The server: install, update, backups, restore |
 
 ## Real use
@@ -20,6 +20,8 @@ deploy/pull-backups.sh --install  # daily copies of the server's archives and th
 ```
 
 The client reads its URL and token from `~/.config/dustpan/config`.
+
+The desktop client is at 0.1.0 (`desktop/README.md`, "Versions"). The server is pinned to OpenTodo v0.22.0.
 
 ## Development
 

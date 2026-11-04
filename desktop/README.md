@@ -20,7 +20,9 @@ python3 -m unittest discover -s desktop/tests -t desktop
 `dev/credentials` holds the dev account and token. It's created once and ignored by git.
 The client keeps its dev data in `dev/data/client`.
 
-`DUSTPAN_SCREENSHOT=<folder> dev/client.sh` saves one PNG per sidebar page, then quits.
+`DUSTPAN_SCREENSHOT=<folder> dev/client.sh` is meant to save one PNG per sidebar page, then quit.
+It saves nothing at the moment (the window's paint node is None). Instead, crop `grim` to the window's
+`at` and `size` from `hyprctl clients -j`.
 `DUSTPAN_THEME=/usr/share/omarchy/themes/<name>/colors.toml` shows the app in another Omarchy theme.
 
 ## Layout
@@ -54,7 +56,7 @@ The client keeps its dev data in `dev/data/client`.
 | `dustpan/app.py` | The GTK window and its pages |
 | `dustpan/dialogs.py` | The task and view editors |
 | `dustpan/dragging.py` | Drag and drop in GTK: sources, page and sidebar targets, the drop line, autoscroll |
-| `dustpan/calendarwindow.py` | The calendar window beside the main one (Month) |
+| `dustpan/calendarwindow.py` | The calendar window beside the main one: Month, Week and Day |
 | `dustpan/querybar.py` | The query box: suggestions as you type, Not, and + Condition |
 | `dustpan/labelpicker.py` | The label picker: type to find, Enter to add, remove or create |
 | `dustpan/noteview.py` | Notes in GTK: the formatted view, and the Write and Preview editor |
@@ -91,6 +93,12 @@ and Inbox lists and in the task editor. The small broom beside a parent clears i
 the list, with Undo. They remain in Completed. Clearing is remembered on this device; reopening a subtask
 shows it again.
 
+**Calendar.** The calendar icon in the header opens the calendar in a window of its own, which Hyprland tiles
+beside the main one. The icon closes it again; if it was open, it reopens with the app. Day, Week and Month
+(`d`, `w`, `m`; Month at first) are remembered on this device. `[` and `]` step back and forward, `t` comes to today.
+Drag tasks between the windows: onto a Month day (keeps its time), a time slot in Day or Week (sets the time),
+or a day's Unscheduled lane (no time). Click a task to edit it. See `spec/calendar.md`.
+
 **Closing the window hides it.** Sync and reminders carry on. Ctrl+Q quits.
 
 **Trash.** Deleted tasks and projects appear in Trash, including a Restore action with Undo.
@@ -101,3 +109,12 @@ Hidden, it uses about 115 MB (most of it GTK) and about 10 ms of CPU a minute. I
 
 **After pulling or changing code, quit with Ctrl+Q and reopen.** The launcher only shows the copy already running,
 which keeps the code it started with.
+
+## Versions
+
+The version is `__version__` in `dustpan/__init__.py` (`python -m dustpan --version`), and each release is a git tag `vX.Y.Z`.
+Before 1.0: the minor number goes up with each finished slice or set of slices, the patch number for fixes only.
+
+| Version | Date | What |
+| --- | --- | --- |
+| 0.1.0 | 2026-11-04 | First numbered version: slices 1 to 12b. Server OpenTodo v0.22.0. Time sectors, calendar window (Month, Week, Day). |

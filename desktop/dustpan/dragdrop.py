@@ -43,6 +43,14 @@ class ToDay:
 
 
 @dataclass(frozen=True)
+class ToSlot:
+    """The calendar's grid: due on day at time ("HH:MM", this device's wall time). None is the day's Unscheduled lane."""
+
+    day: str
+    time: str | None = None
+
+
+@dataclass(frozen=True)
 class ToLabel:
     """The label added to the task's own. Its place, project and dates stay."""
 
@@ -232,6 +240,8 @@ def describe(target, task, names, day_text):
     """The toast after a drop. names maps task, section and project ids to titles and names."""
     if isinstance(target, ToDay):
         return "Due " + day_text(target.day)
+    if isinstance(target, ToSlot):
+        return "Due " + day_text(target.day) + (f" at {target.time}" if target.time else ", no time")
     if isinstance(target, ToProject):
         return "Moved to " + names.get(target.project_id, "Inbox")
     if isinstance(target, ToLabel):

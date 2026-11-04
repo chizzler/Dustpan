@@ -3,7 +3,7 @@ from datetime import datetime
 
 from dustpan.clock import HybridClock
 from dustpan.dates import due_instant
-from dustpan.dragdrop import Place, ToDay, ToProject
+from dustpan.dragdrop import Place, ToDay, ToProject, ToSlot
 from dustpan.ids import default_reminder_id, detached_id, occurrence_id
 from dustpan.store import Store
 from dustpan.writes import CannotEdit, Writer
@@ -462,3 +462,15 @@ class SectorWriteTest(WriterCase):
                 self.writer.edit("t1", {"sector": sector})
         with self.assertRaises(CannotEdit):
             self.writer.edit("t1", {"sector": "2026-W46"})
+
+
+class SlotDropTest(WriterCase):
+    def test_a_slot_sets_date_and_floating_time_and_the_lane_drops_the_time(self):
+        self.seed("task", "t1", title="Dentist", due={"date": "2026-11-05", "time": "09:00", "tz": "Europe/Berlin"})
+        done = self.writer.drop("t1", ToSlot("2026-11-06", "14:30"))
+        self.assertEqual(self.task("t1").get("due"), {"date": "2026-11-06", "time": "14:30"})
+        self.writer.drop("t1", ToSlot("2026-11-06"))
+        self.assertEqual(self.task("t1").get("due"), {"date": "2026-11-06"})
+        self.assertEqual(self.writer.drop("t1", ToSlot("2026-11-06")).undo, [])
+        self.writer.revert(done.undo)
+        self.assertEqual(self.task("t1").get("due"), {"date": "2026-11-05", "time": "09:00", "tz": "Europe/Berlin"})

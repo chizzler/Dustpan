@@ -107,3 +107,88 @@ def visible_rows(cell, most):
         return list(cell), 0
     keep = max(0, most - 1)
     return list(cell[:keep]), len(cell) - keep
+
+
+# ---- Day and Week: blocks on a time grid (calendar.ts, layout.ts) ----
+
+DAY_MINUTES = 24 * 60
+SLOT_MINUTES = 15
+DEFAULT_BLOCK_MINUTES = 30  # how long an unestimated block is drawn; it counts for nothing
+MIN_BLOCK_MINUTES = 25  # the shortest a block is drawn: room for its title
+MAX_LANES = 4
+GRID = {"startHour": 6, "endHour": 22, "dayLength": DAY_LENGTH}  # the web app's per-device defaults
+
+
+def parse_time(text):
+    """"HH:MM" as minutes from midnight, or None."""
+    if not isinstance(text, str) or len(text) != 5 or text[2] != ":" or not (text[:2] + text[3:]).isdigit():
+        return None
+    hours, minutes = int(text[:2]), int(text[3:])
+    return hours * 60 + minutes if hours < 24 and minutes < 60 else None
+
+
+def block_for(task):
+    """(start, end, estimated) of a task's block on its day, in minutes; None without a time.
+
+    An unestimated block is drawn 30 minutes long. A block past midnight stops at the day's end.
+    """
+    due = viewed_due(task)
+    start = parse_time(due[1]) if due else None
+    if start is None:
+        return None
+    minutes = task.get("estimate_minutes")
+    estimated = isinstance(minutes, int) and minutes > 0
+    return start, min(DAY_MINUTES, start + (minutes if estimated else DEFAULT_BLOCK_MINUTES)), estimated
+
+
+def layout_day(blocks, max_lanes=MAX_LANES, min_length=0):
+    """Side by side layout of overlapping blocks. A port of layout.ts's layoutDay.
+
+    blocks: (id, start, end). Returns (placed, overflow): placed are dicts with id, start, end, lane, lanes,
+    overlap and hidden, in time order; overflow are dicts with lane, lanes, start, end and the hidden ids.
+    Blocks that overlap, as drawn at least min_length tall, form a cluster split into equal lanes.
+    A cluster needing more than max_lanes shows max_lanes − 1 lanes and a "+N" marker in the last.
+    """
+    cap = max(2, int(max_lanes))
+    ordered = sorted(((i, s, e if e > s else s + 1) for i, s, e in blocks), key=lambda b: (b[1], -b[2], b[0]))
+    placed, overflow = [], []
+    cluster, lane_ends, cluster_end = [], [], float("-inf")
+
+    def flush():
+        if not cluster:
+            return
+        needed = len(lane_ends)
+
+        def overlaps(x):
+            return any(b is not x and b[1] < x[2] and x[1] < b[2] for b, _ in cluster)
+
+        if needed <= cap:
+            placed.extend(dict(id=b[0], start=b[1], end=b[2], lane=lane, lanes=needed, overlap=overlaps(b), hidden=False)
+                          for b, lane in cluster)
+            return
+        marker = cap - 1
+        hidden = []
+        for b, lane in cluster:
+            hide = lane >= marker
+            placed.append(dict(id=b[0], start=b[1], end=b[2], lane=marker if hide else lane, lanes=cap,
+                               overlap=overlaps(b), hidden=hide))
+            if hide:
+                hidden.append(b)
+        overflow.append(dict(lane=marker, lanes=cap, start=min(b[1] for b in hidden), end=max(b[2] for b in hidden),
+                             ids=[b[0] for b in hidden]))
+
+    for b in ordered:
+        if b[1] >= cluster_end:
+            flush()
+            cluster, lane_ends, cluster_end = [], [], float("-inf")
+        end = max(b[2], b[1] + min_length)
+        lane = next((i for i, e in enumerate(lane_ends) if e <= b[1]), None)
+        if lane is None:
+            lane = len(lane_ends)
+            lane_ends.append(end)
+        else:
+            lane_ends[lane] = end
+        cluster.append((b, lane))
+        cluster_end = max(cluster_end, end)
+    flush()
+    return placed, overflow

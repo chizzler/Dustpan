@@ -5,6 +5,7 @@
                              the app with its window hidden, for login: reminders and sync run
   python -m dustpan sync     sync once and print what came in
   python -m dustpan tree     print projects, sections and tasks from the local copy
+  python -m dustpan --version
 """
 
 import sys
@@ -59,6 +60,10 @@ def main():
     if not args or args == ["--background"]:
         from .app import main as app_main
         return app_main(background=bool(args))
+    if args == ["--version"]:
+        from . import __version__
+        print(f"Dustpan {__version__}")
+        return 0
     commands = {"sync": cmd_sync, "tree": cmd_tree}
     if args[0] not in commands:
         print(__doc__.strip(), file=sys.stderr)
