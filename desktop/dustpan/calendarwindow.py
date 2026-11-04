@@ -1,7 +1,7 @@
-"""The calendar, in a window of its own beside the main one. See spec/calendar.md.
+"""The calendar, in a window of its own beside the main one. See spec/rules.md.
 
 It reads the main window's store and writes through it, so both refresh together.
-The rules are in calendar.py; this file only draws them.
+The rules are in rules.py; this file only draws them.
 """
 
 import math
@@ -13,8 +13,8 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402
 
-from . import calendar  # noqa: E402
-from .calendar import DAY_MINUTES, MIN_BLOCK_MINUTES, SLOT_MINUTES  # noqa: E402
+from . import calendar_rules as rules  # noqa: E402
+from .calendar_rules import DAY_MINUTES, MIN_BLOCK_MINUTES, SLOT_MINUTES  # noqa: E402
 from .dates import format_minutes, format_time, uses_12h  # noqa: E402
 from .dragdrop import ToDay, ToSlot  # noqa: E402
 from .widgets import Dot  # noqa: E402
@@ -173,7 +173,15 @@ class CalendarWindow(Adw.ApplicationWindow):
         self.scroll = None  # the time grid's position, kept across rebuilds
         self.columns = {}  # day -> TimeColumn on the shown grid
         self.grid_parts = []  # every TimeColumn shown, the gutter too
-        self.scroller = None  # the time grid's scrolled window
+        # Week and Day share one heads area and one scrolled grid. Only their contents are replaced,
+        # so the scroll position holds through every refresh, with no frame at midnight.
+        self.time_heads = Adw.Bin()
+        self.time_viewport = Gtk.Viewport(scroll_to_focus=False)
+        self.time_scroller = Gtk.ScrolledWindow(child=self.time_viewport, vexpand=True,
+                                                hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.time_view = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.time_view.append(self.time_heads)
+        self.time_view.append(self.time_scroller)
 
         self.title = Adw.WindowTitle(title="Calendar")
         self.back = Gtk.Button(icon_name="go-previous-symbolic")
@@ -229,7 +237,7 @@ class CalendarWindow(Adw.ApplicationWindow):
         if not step:
             self.anchor = self.main.today
         elif self.view == "month":
-            self.anchor = calendar.add_months(self.anchor, step)
+            self.anchor = rules.add_months(self.anchor, step)
         else:
             days = step * (7 if self.view == "week" else 1)
             self.anchor = (date.fromisoformat(self.anchor) + timedelta(days=days)).isoformat()
@@ -249,9 +257,8 @@ class CalendarWindow(Adw.ApplicationWindow):
     # ---- drawing ----
 
     def refresh(self):
-        if self.scroller is not None:  # read before the old grid goes: going, it scrolls to the top
-            self.scroll = self.scroller.get_vadjustment().get_value()
-            self.scroller = None
+        if self.body.get_child() is self.time_view:  # read before the grid may go: going, it scrolls to the top
+            self.scroll = self.time_scroller.get_vadjustment().get_value()
         for column in self.grid_parts:
             column.clear()
         self.grid_parts = []
@@ -261,22 +268,21 @@ class CalendarWindow(Adw.ApplicationWindow):
         main = self.main
         self.projects = main.store.rows("project")
         self.archived = {p.id for p in self.projects.values() if p.get("archived")}
-        self.day_length = (main.store.get_meta("calendar_grid", {}) or {}).get("dayLength", calendar.DAY_LENGTH)
+        self.day_length = (main.store.get_meta("calendar_grid", {}) or {}).get("dayLength", rules.DAY_LENGTH)
         if self.view == "month":
             self.columns = {}
-            self.scroll = None
             self.body.set_child(self.month())
         else:
-            days = [self.anchor] if self.view == "day" else calendar.week_dates(self.anchor, main.week_start)
-            self.body.set_child(self.time_grid(days))
+            days = [self.anchor] if self.view == "day" else rules.week_dates(self.anchor, main.week_start)
+            self.time_grid(days)
 
     def tasks_in(self, first, last):
         tasks = list(self.main.snap.all_tasks.values())
-        days = calendar.by_day(calendar.calendar_tasks(tasks, self.archived, first, last))
-        return days, calendar.deadline_markers(tasks, self.archived, first, last)
+        days = rules.by_day(rules.calendar_tasks(tasks, self.archived, first, last))
+        return days, rules.deadline_markers(tasks, self.archived, first, last)
 
     def load_label(self, tasks):
-        planned, _, over = calendar.day_load(tasks, self.day_length)
+        planned, _, over = rules.day_load(tasks, self.day_length)
         if not planned:
             return None
         return Gtk.Label(label=f"{format_minutes(planned)} / {format_minutes(self.day_length)}", hexpand=True, xalign=1,
@@ -299,7 +305,7 @@ class CalendarWindow(Adw.ApplicationWindow):
     # Month
 
     def month(self):
-        weeks = calendar.month_grid(self.anchor, self.main.week_start)
+        weeks = rules.month_grid(self.anchor, self.main.week_start)
         days, deadlines = self.tasks_in(weeks[0][0], weeks[-1][-1])
         self.title.set_title(date.fromisoformat(self.anchor).strftime("%B %Y"))
         self.title.set_subtitle("")
@@ -326,7 +332,7 @@ class CalendarWindow(Adw.ApplicationWindow):
         box.append(top)
         for task in deadlines:
             box.append(self.deadline_label(task))
-        rows, hidden = calendar.visible_rows(tasks, max(1, MOST_ROWS - len(deadlines)))
+        rows, hidden = rules.visible_rows(tasks, max(1, MOST_ROWS - len(deadlines)))
         for task in rows:
             box.append(self.task_line(task))
         if hidden:
@@ -350,7 +356,7 @@ class CalendarWindow(Adw.ApplicationWindow):
             self.title.set_title(span)
             self.title.set_subtitle(f"Week {start.isocalendar()[1]}, {end.year}")
         grid = (main.store.get_meta("calendar_grid", {}) or {})
-        shade = (grid.get("startHour", calendar.GRID["startHour"]) * 60, grid.get("endHour", calendar.GRID["endHour"]) * 60)
+        shade = (grid.get("startHour", rules.GRID["startHour"]) * 60, grid.get("endHour", rules.GRID["endHour"]) * 60)
 
         heads = Gtk.Box(css_classes=["cal-heads"])
         heads.append(Gtk.Box(width_request=GUTTER_PX))
@@ -369,25 +375,26 @@ class CalendarWindow(Adw.ApplicationWindow):
         self.columns = {}
         for day in days:
             day_tasks = tasks.get(day, [])
-            timed = [t for t in day_tasks if calendar.block_for(t)]
-            untimed = [t for t in day_tasks if not calendar.block_for(t)]
+            timed = [t for t in day_tasks if rules.block_for(t)]
+            untimed = [t for t in day_tasks if not rules.block_for(t)]
             head_row.append(self.day_head(day, day_tasks, untimed, deadlines.get(day, []), len(days) == 1))
             column = self.time_column(day, timed, shade)
             columns.append(column)
             self.columns[day] = column
             self.grid_parts.append(column)
 
-        # Our own viewport: the automatic one scrolls to whatever takes the focus.
-        scroller = Gtk.ScrolledWindow(child=Gtk.Viewport(child=body, scroll_to_focus=False), vexpand=True,
-                                      hscrollbar_policy=Gtk.PolicyType.NEVER)
+        self.time_heads.set_child(heads)
+        self.time_viewport.set_child(body)
+        if self.body.get_child() is self.time_view:
+            return  # already showing: the scroll position holds
+        self.body.set_child(self.time_view)
         wanted = self.scroll if self.scroll is not None else shade[0] * PX_PER_MINUTE
-        self.scroller = scroller
-
+        scroller = self.time_scroller
         tries = iter(range(100))  # about three seconds, then give up (a hidden window never lays out)
 
         def restore():
             # Only once the grid is laid out: before that the value doesn't stick.
-            if self.scroller is not scroller or next(tries, None) is None:
+            if self.body.get_child() is not self.time_view or next(tries, None) is None:
                 return GLib.SOURCE_REMOVE
             adjustment = scroller.get_vadjustment()
             if scroller.get_height() <= 0 or adjustment.get_upper() < DAY_MINUTES * PX_PER_MINUTE:
@@ -396,10 +403,6 @@ class CalendarWindow(Adw.ApplicationWindow):
             return GLib.SOURCE_REMOVE
 
         GLib.timeout_add(30, restore)
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        outer.append(heads)
-        outer.append(scroller)
-        return outer
 
     def day_head(self, day, tasks, untimed, deadlines, single):
         today = self.main.today
@@ -418,7 +421,7 @@ class CalendarWindow(Adw.ApplicationWindow):
             head.append(self.deadline_label(task))
         lane = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1, css_classes=["cal-lane"],
                        tooltip_text="Unscheduled: due this day, no time")
-        rows, hidden = calendar.visible_rows(untimed, MOST_LANE * (3 if single else 1))
+        rows, hidden = rules.visible_rows(untimed, MOST_LANE * (3 if single else 1))
         for task in rows:
             lane.append(self.task_line(task))
         if hidden:
@@ -436,14 +439,14 @@ class CalendarWindow(Adw.ApplicationWindow):
         elif day == today:
             column.now = column.past_until = self.now_minutes()
         blocks = {t.id: t for t in timed}
-        placed, overflow = calendar.layout_day(
-            [(t.id, *calendar.block_for(t)[:2]) for t in timed], min_length=MIN_BLOCK_MINUTES)
+        placed, overflow = rules.layout_day(
+            [(t.id, *rules.block_for(t)[:2]) for t in timed], min_length=MIN_BLOCK_MINUTES)
         twelve = uses_12h(self.main.time_format)
         for b in placed:
             if b["hidden"]:
                 continue
             task = blocks[b["id"]]
-            estimated = calendar.block_for(task)[2]
+            estimated = rules.block_for(task)[2]
             project = self.projects.get(task.get("project_id"))
             column.add(self.block(task, b["start"], b["end"], estimated, twelve),
                        b["start"], max(MIN_BLOCK_MINUTES, b["end"] - b["start"]), b["lane"], b["lanes"],
@@ -482,7 +485,7 @@ class CalendarWindow(Adw.ApplicationWindow):
         line = Gtk.Box(spacing=5, css_classes=["cal-task"])
         project = self.projects.get(task.get("project_id"))
         line.append(Dot(project.get("color") if project else None, 7))
-        if (start := calendar.parse_time(calendar.viewed_due(task)[1])) is not None:
+        if (start := rules.parse_time(rules.viewed_due(task)[1])) is not None:
             at = format_time(time(start // 60, start % 60), uses_12h(self.main.time_format))
             line.append(Gtk.Label(label=at, css_classes=["cal-time"]))
         title = task.get("title") or ""
@@ -527,7 +530,7 @@ class CalendarWindow(Adw.ApplicationWindow):
         def length():
             task = self.main.snap.all_tasks.get(self.main.drag.task_id or "")
             minutes = task.get("estimate_minutes") if task else None
-            return minutes if isinstance(minutes, int) and minutes > 0 else calendar.DEFAULT_BLOCK_MINUTES
+            return minutes if isinstance(minutes, int) and minutes > 0 else rules.DEFAULT_BLOCK_MINUTES
 
         def motion(_target, _x, y):
             column.ghost = (slot(y), length())

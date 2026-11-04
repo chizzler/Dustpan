@@ -34,7 +34,8 @@ button.task-check.p3 { border-color: var(--dustpan-p3); background: alpha(var(--
 button.task-check.done { border-color: alpha(currentColor, 0.3); background: alpha(currentColor, 0.15); }
 button.task-check.done image { opacity: 0.7; }
 button.subtask-broom { min-width: 24px; min-height: 24px; padding: 0;
-  border: 1px solid alpha(currentColor, 0.12); background: alpha(currentColor, 0.02); }
+  border: 1px solid alpha(currentColor, 0.12); background: alpha(currentColor, 0.02);
+  margin: -4px 0; }  /* as tall as a line of text, so a row doesn't grow when its broom appears */
 button.subtask-broom:hover { border-color: alpha(currentColor, 0.22); background: alpha(currentColor, 0.06); }
 .task-text { min-height: 20px; }
 .add-task { margin-top: 4px; }

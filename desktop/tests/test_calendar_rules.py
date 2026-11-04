@@ -1,6 +1,6 @@
 import unittest
 
-from dustpan import calendar
+from dustpan import calendar_rules as calendar
 
 
 def task(task_id, day=None, at=None, **fields):

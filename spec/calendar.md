@@ -26,7 +26,7 @@ What the desktop client implements from `docs/calendar-views.md`, `docs/place-ta
 
 ## Month (12a)
 
-Ported to `calendar.py`, from `month.ts` and `calendar.ts`.
+Ported to `calendar_rules.py`, from `month.ts` and `calendar.ts`.
 
 - **Grid.** Six weeks from the first day of the week (`user_prefs.week_start`) holding the 1st.
   Today is marked. Days of other months and past days are dimmed.
@@ -46,7 +46,7 @@ Ported to `calendar.py`, from `month.ts` and `calendar.ts`.
 
 ## Week and Day (12b)
 
-Ported to `calendar.py`, from `calendar.ts` (`blockFor`) and `layout.ts` (`layoutDay`, with its tests).
+Ported to `calendar_rules.py`, from `calendar.ts` (`blockFor`) and `layout.ts` (`layoutDay`, with its tests).
 
 - **Switching.** Day, Week and Month in the header, or `d`, `w`, `m`. The view is remembered on this device
   (`meta.calendar_view`). `[` and `]` step by a day, a week or a month.

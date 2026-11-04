@@ -105,7 +105,7 @@ class Window(Adw.ApplicationWindow):
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.on_sidebar_key)
         self.sidebar.add_controller(keys)
-        sidebar_scroll = Gtk.ScrolledWindow(child=self.sidebar, vexpand=True)
+        sidebar_scroll = self.sidebar_scroll = Gtk.ScrolledWindow(child=self.sidebar, vexpand=True)
         sidebar_view = Adw.ToolbarView(content=sidebar_scroll)
         sidebar_header = Adw.HeaderBar(title_widget=Adw.WindowTitle(title="Dustpan"))
         pages = Gtk.Button(icon_name="view-more-symbolic", tooltip_text="Show or hide pages", css_classes=["flat"])
@@ -129,6 +129,9 @@ class Window(Adw.ApplicationWindow):
         header.pack_end(self.calendar_button)
         # Never sideways: a long row would let focus scroll the page off to one side.
         self.content = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        # One viewport for every page: swapping its child keeps the scroll position, with no frame at the top.
+        self.viewport = Gtk.Viewport()
+        self.content.set_child(self.viewport)
         self.autoscrolls = [Autoscroll(sidebar_scroll),
                             Autoscroll(self.content, lambda dy: self.page_drop and self.page_drop.scrolled(dy))]
         content_view = Adw.ToolbarView(content=self.content)
@@ -317,6 +320,10 @@ class Window(Adw.ApplicationWindow):
             self.calendar.refresh()
 
     def rebuild_sidebar(self):
+        # Rebuilt on every change: keep its scroll position and, if a row had the focus, that row's focus.
+        sidebar_scroll = self.sidebar_scroll.get_vadjustment().get_value()
+        focus = self.get_focus()
+        focused_key = getattr(focus, "key", None) if focus is not None and focus.get_parent() is self.sidebar else None
         self.sidebar.unselect_all()
         self.sidebar.remove_all()
         self.rows_by_key = {}
@@ -387,6 +394,9 @@ class Window(Adw.ApplicationWindow):
         self.rebuilding = True
         self.sidebar.select_row(target)
         self.rebuilding = False
+        self.sidebar_scroll.get_vadjustment().set_value(sidebar_scroll)
+        if focused_key in self.rows_by_key:
+            self.rows_by_key[focused_key].grab_focus()
 
     def add_sidebar_heading(self, text, button=None):
         box = Gtk.Box(margin_top=12, margin_start=6)
@@ -445,6 +455,7 @@ class Window(Adw.ApplicationWindow):
         self.add_button.set_visible(not is_view and not is_archived and key not in NO_ADDING)
         self.edit_button.set_visible(is_view or is_label or self.page_project() is not None)
         self.edit_button.set_tooltip_text("Edit view" if is_view else "Edit label" if is_label else "Edit project")
+        was_adding = self.add_entry is not None and self.add_entry.has_focus()
         if self.add_entry is not None:
             self.add_text = self.add_entry.get_text()
             self.add_entry = None
@@ -452,6 +463,7 @@ class Window(Adw.ApplicationWindow):
         self.filter_bar = self.filter_results = None
         # Redrawing the same list keeps its scroll position, and the focused task.
         scroll = self.content.get_vadjustment().get_value() if key == self.shown else 0
+        old_order = list(self.task_widgets)
         if key == self.shown and self.focus_task is None:
             self.focus_task = self.focused_task()
         opened = key != self.shown
@@ -474,7 +486,7 @@ class Window(Adw.ApplicationWindow):
         elif key == COMPLETED:
             self.fill_completed(column)
         elif key == FILTER:
-            self.fill_filter(column, focus=filter_focused or opened)
+            self.fill_filter(column, focus=opened and not filter_focused)
         elif key == TRASH:
             self.fill_trash(column)
         elif is_view:
@@ -485,22 +497,49 @@ class Window(Adw.ApplicationWindow):
             self.fill_label(column, self.snap.labels[key[len(LABEL):]])
         else:
             self.fill_project(column, None if key == INBOX else key)
-        self.content.set_child(Adw.Clamp(child=self.page_drop.widget, maximum_size=760))
-        GLib.idle_add(self.after_page, scroll, self.task_widgets.get(self.flash_task),
-                      self.task_widgets.get(self.focus_task))
+        self.viewport.set_child(Adw.Clamp(child=self.page_drop.widget, maximum_size=760))
+        self.content.get_vadjustment().set_value(scroll)
+        # Focus now, before anything is drawn: the old focused row is gone, and GTK would hand the focus
+        # to the first row on the page for a frame (the highlight jumping to the top, the list scrolling there).
+        self.restore_focus(self.focus_task, old_order)
+        # Typing in the add-task entry or the filter: keep typing there, also without a frame elsewhere.
+        if was_adding and self.add_entry is not None:
+            self.without_scrolling(self.focus_add_entry)
+        elif self.add_entry is not None:
+            GLib.idle_add(self.focus_add_entry)  # just opened: focusing it scrolls it into view
+        if filter_focused and self.filter_bar is not None:
+            self.without_scrolling(self.filter_bar.focus)
+        GLib.idle_add(self.after_page, scroll, self.task_widgets.get(self.flash_task))
         self.flash_task = self.focus_task = None
-        if self.add_entry is not None:
-            GLib.idle_add(self.focus_add_entry)
 
-    def after_page(self, scroll, moved, focus):
-        """Once the new page is laid out: its old scroll position, the moved row in view and flashing, the focus."""
-        if scroll:
+    def restore_focus(self, task_id, old_order):
+        """Focus task_id's new row, or, when it left the page, the next row that is still here.
+
+        The viewport mustn't scroll to it: the new rows have no place yet, and the scroll position already holds.
+        """
+        if task_id is None:
+            return
+        row = self.task_widgets.get(task_id)
+        if row is None and task_id in old_order:
+            i = old_order.index(task_id)
+            row = next((self.task_widgets[t] for t in old_order[i + 1:] + old_order[:i][::-1] if t in self.task_widgets),
+                       None)
+        if row is not None:
+            self.without_scrolling(row.grab_focus)
+
+    def without_scrolling(self, focus):
+        """Run focus() without the page scrolling to what takes the focus."""
+        self.viewport.set_scroll_to_focus(False)
+        focus()
+        self.viewport.set_scroll_to_focus(True)
+
+    def after_page(self, scroll, moved):
+        """Once the new page is laid out: its old scroll position, and the moved row in view and flashing."""
+        if scroll and self.content.get_vadjustment().get_value() != scroll:
             self.content.get_vadjustment().set_value(scroll)
         if moved is not None:
             scroll_into_view(self.content, moved)
             flash(moved)
-        if focus is not None:
-            focus.grab_focus()
         return GLib.SOURCE_REMOVE
 
     def focused_task(self):
@@ -1317,7 +1356,7 @@ class Window(Adw.ApplicationWindow):
             remove = [i for i in before if i not in wanted]
             if not add and not remove:
                 # Back to the row, once the popover has given up the focus.
-                GLib.idle_add(self.after_page, 0, None, self.task_widgets.get(task_id))
+                GLib.idle_add(lambda: (row := self.task_widgets.get(task_id)) is not None and row.grab_focus() and False)
                 return
             self.focus_task = task_id  # kept through the rebuild
             done = self.run(self.writer.change_task_labels, task_id, add, remove)

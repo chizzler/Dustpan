@@ -1,6 +1,7 @@
 """The calendar's rules: which tasks show on which day, in what order, and how full a day is.
 
 Ports of web/src/lib/month.ts and parts of calendar.ts (v0.22.0). Pure; calendarwindow.py draws them.
+Not named calendar.py: run from this folder, that would hide the standard library's calendar module.
 See spec/calendar.md.
 """
 

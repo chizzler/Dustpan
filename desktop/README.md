@@ -44,7 +44,7 @@ It saves nothing at the moment (the window's paint node is None). Instead, crop 
 | `dustpan/filters.py` | The filter query language: parse, then test tasks |
 | `dustpan/views.py` | What the Inbox, Today, Upcoming and saved views list, and in what order |
 | `dustpan/sectors.py` | Time sectors: periods, "this week", carried over |
-| `dustpan/calendar.py` | The calendar's rules: the month grid, which tasks show on a day, day load |
+| `dustpan/calendar_rules.py` | The calendar's rules: the month grid, which tasks show on a day, day load |
 | `dustpan/quickadd/` | Quick add: read a line into task fields, in six languages |
 | `dustpan/model.py` | Display rules: trees, sections, what's hidden |
 | `dustpan/querytools.py` | The query helper without GTK: suggestions, and the conditions the builder adds |
@@ -107,6 +107,17 @@ period is shown above the list. Hide Trash from its sidebar menu; bring it back 
 At login the autostart entry runs `dustpan --background`: no window until you open Dustpan.
 Hidden, it uses about 115 MB (most of it GTK) and about 10 ms of CPU a minute. It skips page rebuilds until shown.
 
+**Keeping the window still.** Every change rebuilds the shown page and the sidebar. Code that rebuilds must not
+let a frame show the wrong state:
+- Swap the child of the one persistent `Window.viewport` (or the calendar's `time_viewport`), never the scrolled
+  window's child: a new viewport starts at the top.
+- Put the focus back in the same call that swaps the page, through `without_scrolling()`, not on an idle callback:
+  when the focused row goes, GTK focuses the first row on the page until then.
+- When the focused task leaves the page, focus its neighbour (`restore_focus`).
+- Controls that come and go on a row (the broom) must not change the row's height.
+To check, record the focused widget, the scroll value and a row's bounds on the frame clock's `after-paint`,
+in a test copy with its window focused.
+
 **After pulling or changing code, quit with Ctrl+Q and reopen.** The launcher only shows the copy already running,
 which keeps the code it started with.
 
@@ -117,4 +128,5 @@ Before 1.0: the minor number follows the slices (0.12 is slice 12), the patch nu
 
 | Version | Date | What |
 | --- | --- | --- |
+| 0.12.1 | 2026-11-04 | Fixes: the highlight and the list no longer jump when a task is ticked; the calendar grid keeps its place on every edit; the broom no longer grows its row; `calendar.py` renamed `calendar_rules.py`. |
 | 0.12.0 | 2026-11-04 | First numbered version: slices 1 to 12b. Server OpenTodo v0.22.0. Time sectors, calendar window (Month, Week, Day). |
