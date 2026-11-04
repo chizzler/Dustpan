@@ -8,6 +8,7 @@ import re
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+from .. import sectors
 from ..recurrence import format_date, nth_weekday_of
 from .words import lookup_at, phrase_at, tok
 
@@ -490,3 +491,15 @@ def clock_at(tokens, j, v, after_at, hour_suffix):
             return None
         return clock(h, 0), 1 + hw
     return None
+
+
+def sector_phrase_at(tokens, i, ctx):
+    """(tokens covered, sector word) for the longest time sector phrase at i in any active language, or (0, None)."""
+    best, word = 0, None
+    if tok(tokens, i) is None:
+        return best, word
+    for v in ctx.vocabs:
+        for w in sectors.WORDS:
+            if (n := phrase_at(tokens, i, v.get("sectorPhrases", {}).get(w, []))) > best:
+                best, word = n, w
+    return best, word

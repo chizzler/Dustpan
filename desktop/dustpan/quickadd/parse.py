@@ -5,9 +5,11 @@ Spans are (start, end) character ranges of the line. A recognised span leaves th
 
 from dataclasses import dataclass, field
 
+from .. import sectors
 from ..recurrence import first_occurrence
 from .attributes import match_duration, match_energy, match_label, match_priority, match_project, match_spent
-from .dates import DateCtx, match_date_at, match_deadline_at, match_time_at, ordinal_out_of_range_at
+from .dates import (DateCtx, match_date_at, match_deadline_at, match_time_at, ordinal_out_of_range_at,
+                    sector_phrase_at)
 from .reminders import match_reminder_at
 from .repeats import RepeatMatch, match_repeat_at
 from .words import VOCABS, active_languages, strip_spans, tokenize, words_at
@@ -23,6 +25,7 @@ class Context:
     week_start: int = 1  # 0 = Sunday
     day_parts: bool = False  # read "this morning", "tomorrow afternoon"
     energy: bool = False  # read ~deep, ~low
+    sectors: bool = False  # read "this week", "sometime next month"
 
 
 @dataclass
@@ -31,6 +34,7 @@ class Result:
     due: dict | None = None  # {"date"} or {"date", "time"}
     deadline: str | None = None
     someday: bool = False
+    sector: str | None = None  # "2026-W45": from a sector phrase on a line without a date
     evening: bool = False
     day_part: str | None = None  # "morning" or "afternoon"
     project_id: str | None = None
@@ -58,7 +62,7 @@ class Parser:
         self.bare_hour_is_time = any(v["hourSuffixH"] for v in vocabs)
         self.tokens, self.quotes = tokenize(line)
         # What was recognised: (value, span), or None.
-        self.date = self.time = self.deadline = self.project = self.repeat = self.day_part = None
+        self.date = self.time = self.deadline = self.project = self.repeat = self.day_part = self.sector = None
         self.priority = self.estimate = None
         self.date_bare = False  # a month name alone, which a later complete date replaces
         self.repeat_first = ""  # the first date of "every other friday"
@@ -194,6 +198,12 @@ class Parser:
         if tm:
             self.time, self.time_date = (tm.time, self.span(tm.start, tm.to)), tm.date
             return tm.to
+        # A sector phrase, like the someday words, counts only on a line without a date.
+        if self.ctx.sectors and self.sector is None:
+            n, word = sector_phrase_at(tokens, i, dctx)
+            if n:
+                self.sector = sectors.resolve(word, self.ctx.today, dctx.week_start), self.span(i, i + n)
+                return i + n
         if self.someday is None and (n := self.words(i, "somedayWords")):
             self.someday = self.span(i, i + n)
             return i + n
@@ -214,15 +224,18 @@ class Parser:
         return {"date": day, "time": self.time[0]} if self.time else {"date": day}
 
     def result(self):
-        parked = self.someday is not None and not (self.date or self.time or self.deadline or self.repeat)
+        sectored = self.sector is not None and not (self.date or self.time or self.repeat)
+        parked = self.someday is not None and not (sectored or self.date or self.time or self.deadline or self.repeat)
         found = [self.date, self.time, self.day_part, self.deadline, self.project, self.repeat, self.priority,
                  self.estimate, *self.energies, *self.labels, *self.reminders]
-        remove = [f[1] for f in found if f] + [s for s in (self.evening, self.someday if parked else None) if s]
+        remove = [f[1] for f in found if f] + [s for s in (self.evening, self.someday if parked else None,
+                                              self.sector[1] if sectored else None) if s]
         return Result(
             title=strip_spans(self.line, remove, self.quotes),
             due=self.due(),
             deadline=self.deadline and self.deadline[0],
             someday=parked,
+            sector=self.sector[0] if sectored else None,
             evening=self.evening is not None,
             day_part=self.day_part and self.day_part[0],
             project_id=self.project and self.project[0],

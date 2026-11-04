@@ -39,7 +39,7 @@ class SuggestTest(unittest.TestCase):
 
     def test_every_keyword_completes_to_something_that_parses_or_reads_on(self):
         for word, _ in KEYWORDS:
-            if word in ("due", "deadline", "created", "search:"):
+            if word.endswith(":") or word in ("due", "deadline", "created"):
                 continue  # these need what follows them
             parse(word)
 

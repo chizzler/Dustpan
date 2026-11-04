@@ -1,12 +1,12 @@
 """The filter query language: parse a query, then test tasks against it.
 
-A port of web/src/lib/filter/parse.ts and evaluate.ts (v0.18.0). The grammar and
+A port of web/src/lib/filter/parse.ts and evaluate.ts (v0.22.0). The grammar and
 messages are in OpenTodo's docs/filters.md. See spec/views.md.
 
 The tree is plain tuples, tagged by their first item:
 ("or", [nodes]), ("and", [nodes]), ("not", node), ("label", name), ("project", name, descendants),
-("priority", n), ("date", field, op, date), ("keyword", word), ("search", text), ("origin", value),
-("energy", value), ("workspace", name), ("field", name, op, value), ("nofield", name), ("tracked", op, minutes).
+("priority", n), ("date", field, op, date), ("keyword", word), ("search", text), ("notes", text),
+("origin", value), ("energy", value), ("sector", value), ("workspace", name), ("field", name, op, value), ("nofield", name), ("tracked", op, minutes).
 Dates are ("relative", days), ("weekday", 0 = Sunday), ("iso", "YYYY-MM-DD") or ("period", "week" | "month", offset).
 """
 
@@ -15,6 +15,7 @@ import re
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
+from . import sectors
 from .dates import local_due
 
 MAX_QUERY_LENGTH = 4096
@@ -22,8 +23,9 @@ MAX_NESTING = 64
 
 WEEKDAYS = ("sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday")
 SIMPLE_KEYWORDS = {"overdue", "today", "tomorrow", "completed", "open", "subtask", "someday", "deferred", "evening",
-                   "morning", "afternoon", "blocked", "unblocked", "available", "habit", "origin", "energy"}
-NO_KEYWORDS = ("date", "project", "labels", "time", "deadline", "start", "origin", "energy")
+                   "morning", "afternoon", "blocked", "unblocked", "available", "habit", "origin", "energy",
+                   "notes", "sector", "carried"}
+NO_KEYWORDS = ("date", "project", "labels", "time", "deadline", "start", "origin", "energy", "notes", "sector")
 DATE_FIELDS = {"due", "created", "deadline", "start"}
 DATE_STARTS = {"today", "tomorrow", "yesterday", "this", "last", "next"}
 DATE_UNITS = {"days", "week", "weeks", "month", "months"}
@@ -153,7 +155,18 @@ def tokenize(src):
         else:
             word = read_bare()
             prefix = word[:word.find(":") + 1].lower() if ":" in word else ""
-            if prefix in ("search:", "workspace:", "origin:", "energy:"):
+            if prefix == "sector:":
+                typed = read_prefixed(word, prefix)
+                if typed.lower() in ("this", "next"):  # "sector: this week", written with a space
+                    while i < n and src[i].isspace():
+                        i += 1
+                    typed = f"{typed} {read_bare()}"
+                if not (value := sector_term_value(typed)):
+                    raise FilterError(f'Unknown time sector "{typed}" at position {pos + 1}; use this week, next week, '
+                                      "this month, next month, this quarter, next quarter or a period such as 2026-W44",
+                                      pos)
+                out.append(Token("sector", pos, src[pos:i], value))
+            elif prefix in ("search:", "notes:", "workspace:", "origin:", "energy:"):
                 value = read_prefixed(word, prefix)
                 if prefix == "energy:":
                     value = value.lower()
@@ -162,6 +175,7 @@ def tokenize(src):
                 elif not value:
                     raise FilterError({
                         "search:": f'Expected text after "search:" at position {pos + 1}',
+                        "notes:": f'Expected text after "notes:" at position {pos + 1}',
                         "workspace:": f'Expected a workspace name after "workspace:" at position {pos + 1}',
                         "origin:": f'Expected a provider or kind after "origin:" at position {pos + 1}',
                     }[prefix], pos)
@@ -171,6 +185,15 @@ def tokenize(src):
             else:
                 out.append(Token("word", pos, word, word))
     return out
+
+
+def sector_term_value(text):
+    """A sector: term's value: a relative word ("this-week") or a period in upper case ("2026-W44"), or None."""
+    word = "-".join(w for w in re.split(r"[\s_-]+", text.strip().lower()) if w)
+    if word in sectors.WORDS:
+        return word
+    period = text.strip().upper()
+    return period if sectors.parse(period) else None
 
 
 # ---- parser ----
@@ -273,7 +296,7 @@ class Parser:
 
     def parse_term(self, prev):
         tok = self.peek()
-        if tok.type in ("label", "search", "origin", "energy", "workspace", "priority"):
+        if tok.type in ("label", "search", "notes", "origin", "energy", "sector", "workspace", "priority"):
             self.take()
             return (tok.type, tok.value)
         if tok.type == "project":
@@ -643,6 +666,12 @@ def compile_query(ast, ctx):
             "no origin": lambda t: origin_of(t) is None,
             "energy": lambda t: energy_of(t) is not None,
             "no energy": lambda t: energy_of(t) is None,
+            "sector": lambda t: sectors.parse(t.get("sector")) is not None,
+            "no sector": lambda t: sectors.parse(t.get("sector")) is None,
+            "carried": lambda t: sectors.is_carried(t.get("sector"), today, ctx.week_start),
+            # A note of only blank space is no note.
+            "notes": lambda t: text(t.get("description")).strip() != "",
+            "no notes": lambda t: text(t.get("description")).strip() == "",
         }[word]
 
     def build(node):
@@ -679,6 +708,12 @@ def compile_query(ast, ctx):
         if kind == "search":
             needle = node[1].lower()
             return lambda t: needle in text(t.get("title")).lower() or needle in text(t.get("description")).lower()
+        if kind == "notes":  # the note only, never the title
+            needle = node[1].lower()
+            return lambda t: needle in text(t.get("description")).lower()
+        if kind == "sector":  # a relative word is the viewer's period on this evaluation's day
+            want = sectors.resolve(node[1], today, ctx.week_start) or node[1]
+            return lambda t: t.get("sector") == want
         if kind == "origin":
             want = node[1].lower()
 

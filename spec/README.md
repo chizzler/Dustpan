@@ -3,9 +3,9 @@
 The parts of OpenTodo's protocol that Dustpan clients implement.
 OpenTodo's own docs are the reference. This file records what we use, what we skip, and where we differ.
 
-The client is ported from **OpenTodo v0.18.0**. Local clone: `../opentodo`, beside this repo, at tag `v0.18.0`.
-The tests read that clone's vectors. The server runs v0.22.0 (`deploy/deploy.sh`).
-The v1 API only grows from v0.22.0, so the client keeps working. What it doesn't do yet is listed under "Behind the server".
+Pinned to **OpenTodo v0.22.0**. Local clone: `../opentodo`, beside this repo, at tag `v0.22.0`. The tests read its vectors.
+Most of the client was ported from v0.18.0 and still matches. The v1 API only grows from v0.22.0.
+What the client doesn't do yet is listed under "Behind the server".
 
 - Sync protocol: `docs/sync.md`
 - REST API and auth: `docs/api.md`
@@ -31,15 +31,15 @@ When the pin moves, re-read the sync doc's schema table and diff the vectors.
 | 9 | Labels: chips, a picker, labels in the sidebar, rename, recolour, reorder, merge, delete | [labels.md](labels.md) | done 2026-11-02, tried and approved; drop on a label 2026-11-02 |
 | 10 | Built-in Anytime and Completed pages, and the Filter page (the query helper) | [views.md](views.md) | done 2026-11-02; the Filter page tried and approved |
 | 11 | Trash: restore, permanent deletion, offline queue and retention | [trash.md](trash.md) | done 2026-11-03; automated GTK smoke test passed, owner trial pending |
+| 11 | Catch up with v0.22.0: time sectors (show, filter, quick add, write rules), the `notes` filter terms | [sectors.md](sectors.md) | done 2026-11-04, owner trial pending |
 
 ## Behind the server
 
-Features added between v0.18.0 and v0.22.0 that the shared vectors cover and the client doesn't yet:
+Server features since v0.18.0 that the client doesn't show or set yet. Their data syncs and is kept.
 
-- **Time sectors** (`task.sector`, v0.21.0). A task planned for a week, month or quarter with no date.
-  The web app leaves it out of the Inbox and Anytime; ours shows it there. Quick add doesn't read "this week" and the like.
-  The filter keywords `sector`, `no sector` and `carried` are unknown.
-- **The `notes` filter keyword** (v0.19.0).
+- **Time sectors**: shown, filtered and read by quick add (see [sectors.md](sectors.md)), but not set from the editor.
+- **Multi-day tasks** (`span`, v0.19.0): Upcoming lists them by their due date, not once under their first day.
+- **Sorting a view by a custom field** (v0.22.0): falls back to due date.
+- Objectives, routines, themes, reusable lists, rotation, location reminders: ignored.
 
-Everything else new (objectives, routines, themes, reusable lists, rotation) syncs and is stored, and the client ignores it.
-To catch up: check out the new tag in `../opentodo`, run the tests, and port until they pass.
+To catch up with a later release: check out its tag in `../opentodo`, run the tests, and port until they pass.

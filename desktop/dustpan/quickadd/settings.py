@@ -39,4 +39,5 @@ def context_for(prefs, projects, today, now, system=None):
         week_start=WEEK_START.get(prefs.get("week_start"), 1),
         day_parts=prefs.get("day_parts") == "on",
         energy=prefs.get("energy") == "on",
+        sectors=prefs.get("time_sectors") == "on",
     )

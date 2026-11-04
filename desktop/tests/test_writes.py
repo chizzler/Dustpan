@@ -262,6 +262,14 @@ class WriterTest(WriterCase):
         self.assertEqual((reminder.get("kind"), reminder.get("offset_minutes")), ("relative", -60))
         self.assertEqual(len({o["ts"] for o in self.outbox()}), 1)
 
+    def test_quick_add_reads_a_sector_only_when_turned_on(self):
+        today = {"date": self.today}
+        off = self.task(self.writer.quick_add("Plan it this week", due=today))
+        self.assertEqual((off.get("title"), off.get("sector"), off.get("due")), ("Plan it this week", None, today))
+        self.seed("user_prefs", "me", time_sectors="on")
+        on = self.task(self.writer.quick_add("Plan it this week", due=today))
+        self.assertEqual((on.get("title"), on.get("sector"), on.get("due")), ("Plan it", "2026-W45", None))
+
     def test_quick_add_keeps_the_page_place_and_date_unless_the_line_sets_them(self):
         self.seed("project", "p1", name="Home")
         self.seed("section", "s1", name="Garden", project_id="p1")
@@ -422,3 +430,35 @@ class WriterTest(WriterCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SectorWriteTest(WriterCase):
+    def test_choosing_a_sector_clears_the_other_whens_and_keeps_the_deadline(self):
+        self.seed("task", "t1", title="Budget", due={"date": "2026-11-05"}, start="2026-11-04", evening=True,
+                  deadline="2026-11-20")
+        self.writer.edit("t1", {"sector": "2026-W46"})
+        task = self.task("t1")
+        self.assertEqual({k: task.get(k) for k in ("sector", "due", "start", "evening", "deadline")},
+                         {"sector": "2026-W46", "due": None, "start": None, "evening": False, "deadline": "2026-11-20"})
+
+    def test_a_date_clears_the_sector_in_the_same_batch(self):
+        self.seed("task", "t1", title="Budget", sector="2026-W45")
+        self.seed("task", "t2", title="Other")
+        self.writer.edit("t1", {"due": {"date": "2026-11-06"}})
+        self.writer.edit("t2", {"due": {"date": "2026-11-06"}})
+        self.assertEqual(self.task("t1").get("sector"), "")
+        self.assertNotIn("sector", {o["field"] for o in self.outbox() if o["entityId"] == "t2"})
+        self.assertEqual(len({o["ts"] for o in self.outbox() if o["entityId"] == "t1"}), 1)
+
+    def test_a_drop_on_a_day_clears_the_sector(self):
+        self.seed("task", "t1", title="Budget", sector="2026-W45")
+        self.writer.drop("t1", ToDay("2026-11-06"))
+        self.assertEqual((self.task("t1").get("due"), self.task("t1").get("sector")), ({"date": "2026-11-06"}, ""))
+
+    def test_refuses_bad_sectors_and_repeating_tasks(self):
+        self.seed("task", "t1", title="Weekly", due={"date": "2026-11-05"}, recurrence="every week")
+        for sector in ("2026-W60", "this week"):
+            with self.assertRaises(CannotEdit):
+                self.writer.edit("t1", {"sector": sector})
+        with self.assertRaises(CannotEdit):
+            self.writer.edit("t1", {"sector": "2026-W46"})

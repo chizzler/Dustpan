@@ -12,7 +12,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
-from . import config, trash  # noqa: E402
+from . import config, sectors, trash  # noqa: E402
 from .api import Api, ApiError, Offline  # noqa: E402
 from .clock import wall_ms  # noqa: E402
 from .dates import day_heading, day_start_minutes, format_due, format_minutes, format_time, uses_12h  # noqa: E402
@@ -296,9 +296,10 @@ class Window(Adw.ApplicationWindow):
         prefs = self.store.rows("user_prefs").get("me")
         prefs = prefs.values if prefs else {}
         self.time_format = prefs.get("time_format", "system")
+        self.week_start = WEEK_START.get(prefs.get("week_start"), 1)
         self.today = self.writer.today()
         self.filter_context = Context(self.today, list(self.snap.all_tasks.values()), list(self.snap.labels.values()),
-                                      self.snap.live_projects, WEEK_START.get(prefs.get("week_start"), 1),
+                                      self.snap.live_projects, self.week_start,
                                       day_start_minutes(prefs.get("day_start")))
         self.rebuild_sidebar()
         self.show_page(self.selected)
@@ -1014,6 +1015,10 @@ class Window(Adw.ApplicationWindow):
             label = Gtk.Label(label=due.text)
             label.add_css_class(f"due-{due.state}" if due.state != "later" and not done else "dim-label")
             meta.append(label)
+        elif sector := sectors.label(task.get("sector"), self.today, self.week_start):
+            # Where the date would be. Carried over is quiet, never overdue.
+            meta.append(Gtk.Label(label=sector[0], css_classes=["dim-label"],
+                                  tooltip_text="Time sector, carried over" if sector[1] else "Time sector"))
         if deadline := task.get("deadline"):
             late = deadline < self.today and not done
             meta.append(Gtk.Label(label="Deadline " + self.day_text(deadline),
@@ -1080,7 +1085,8 @@ class Window(Adw.ApplicationWindow):
         due = format_due(parsed.due, time_format=self.time_format)
         names = dict(self.project_paths)
         parts = [
-            due and due.text, parsed.someday and "Someday", parsed.evening and "This evening", parsed.day_part,
+            due and due.text, parsed.someday and "Someday",
+            parsed.sector and sectors.label(parsed.sector, self.today, self.week_start)[0], parsed.evening and "This evening", parsed.day_part,
             parsed.deadline and "Deadline " + self.day_text(parsed.deadline),
             parsed.project_id and names.get(parsed.project_id, "Project"), *("@" + name for name in parsed.labels),
             parsed.priority and f"p{parsed.priority}", parsed.estimate_minutes and format_minutes(parsed.estimate_minutes),

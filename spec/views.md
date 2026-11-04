@@ -1,14 +1,14 @@
 # Filters and views
 
 What the desktop client implements from `docs/filters.md`, `docs/saved-views.md`, `docs/today-and-upcoming.md`
-and the `view` entity in `docs/sync.md` (v0.18.0).
+and the `view` entity in `docs/sync.md` (v0.18.0; the `notes` and `sector` terms from v0.22.0).
 
 ## Ported, and checked
 
 | Our module | OpenTodo source | Checked against |
 | --- | --- | --- |
 | `filters.py` (parser) | `web/src/lib/filter/parse.ts`, `internal/filter` | every worked example and the error table in `docs/filters.md`, `internal/filter/testdata/limits.json` and `formatted.txt` |
-| `filters.py` (evaluation) | `web/src/lib/filter/evaluate.ts`, `dependencies.ts` | our own tests |
+| `filters.py` (evaluation) | `web/src/lib/filter/evaluate.ts`, `dependencies.ts` | `filter/evaluate.vectors.json` (v0.22.0; tracked time and custom fields skipped), and our own tests |
 | `views.py` (Inbox) | `web/src/lib/inbox.ts` | `inbox.vectors.json` |
 | `views.py` (Today, Upcoming, sort, group) | `web/src/lib/views.ts` | our own tests |
 

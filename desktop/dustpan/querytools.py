@@ -22,7 +22,10 @@ KEYWORDS = (
     ("no project", "in the Inbox"), ("no time", "due on a day, at no set time"),
     ("due", "compare the due date: due <= 7 days"), ("deadline", "compare the deadline: deadline < friday"),
     ("created", "compare when it was added: created >= 7 days ago"),
-    ("search:", "words in the title or notes"),
+    ("search:", "words in the title or notes"), ("notes:", "words in the notes"),
+    ("notes", "has notes"), ("no notes", "no notes"),
+    ("sector", "planned for a week, month or quarter"), ("no sector", "no time sector"),
+    ("carried", "its sector's period has ended"), ("sector:", "this week, next month, 2026-W45"),
     ("p1", "priority 1"), ("p2", "priority 2"), ("p3", "priority 3"), ("p4", "no priority"),
 )
 
@@ -103,6 +106,12 @@ def conditions(label_names, project_names):
             ("Open", "open"), ("Completed", "completed"), ("A subtask", "subtask"), ("Blocked", "blocked"),
             ("Someday", "someday"), ("Starts later", "deferred"), ("A habit", "habit"),
         ]),
+        ("Time sector", [
+            ("This week", "sector: this week"), ("Next week", "sector: next week"),
+            ("This month", "sector: this month"), ("Next month", "sector: next month"),
+            ("Carried over", "carried"), ("Any sector", "sector"), ("No sector", "no sector"),
+        ]),
+        ("Notes", [("Has notes", "notes"), ("No notes", "no notes")]),
         ("Label", [(name, label_term(name)) for name in label_names] + [("No labels", "no labels")]),
         ("Project", [(name, project_term(name)) for name in project_names] +
          [(name + " and its sub-projects", project_term(name, True)) for name in project_names] +

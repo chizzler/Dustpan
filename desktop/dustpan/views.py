@@ -37,8 +37,9 @@ class Result:
 
 
 def is_placed(task):
-    """A project, a do-on date, a start date or Someday. A deadline alone doesn't place a task."""
-    return task.get("project_id") is not None or bool(task.get("due")) or bool(task.get("start"))
+    """A project, a do-on date, a start date, Someday or a time sector. A deadline alone doesn't place a task."""
+    return (task.get("project_id") is not None or bool(task.get("due")) or bool(task.get("start"))
+            or bool(task.get("sector")))
 
 
 def is_inbox_task(task, parent_of=lambda _id: None):
@@ -249,9 +250,9 @@ LOGBOOK_PAGE = 100  # completions shown at first, and added by each "Show more"
 
 
 def in_anytime(task, today):
-    """Open and active, with no date of any kind and no start: for whenever there's time."""
+    """Open and active, with no date of any kind, no start and no sector: for whenever there's time."""
     return (task.get("completed_at") is None and is_active(task, today) and not task.get("due")
-            and not task.get("deadline") and task.get("start") is None)
+            and not task.get("deadline") and task.get("start") is None and not task.get("sector"))
 
 
 def logbook_heading(iso, today):

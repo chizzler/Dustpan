@@ -10,13 +10,14 @@ FIELDS = {"title": "title", "due": "due", "projectId": "project_id", "labels": "
           "estimateMinutes": "estimate_minutes", "spentMinutes": "spent_minutes", "recurrence": "recurrence",
           "reminders": "reminders"}
 # Compared only when a case states them.
-OPTIONAL = {"dayPart": "day_part", "evening": "evening", "energy": "energy"}
+OPTIONAL = {"dayPart": "day_part", "evening": "evening", "energy": "energy", "sector": "sector"}
 
 
 def context(ctx):
     return Context(ctx["today"], ctx["now"], ctx["languages"], ctx["projects"],
                    day_month_order=ctx.get("dayMonthOrder", ""), week_start=ctx.get("weekStart", 1),
-                   day_parts=ctx.get("dayParts", False), energy=ctx.get("energy", False))
+                   day_parts=ctx.get("dayParts", False), energy=ctx.get("energy", False),
+                   sectors=ctx.get("sectors", False))
 
 
 class QuickAddVectorsTest(unittest.TestCase):

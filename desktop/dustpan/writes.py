@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
 
-from . import labels as label_rules, quickadd
+from . import labels as label_rules, quickadd, sectors
 from .clock import HybridClock, wall_ms
 from .dates import day_start_minutes, due_instant, logical_today
 from .dragdrop import Place, ToDay, ToLabel, ToProject
@@ -25,7 +25,7 @@ from .trash import deleted_with
 from .views import DEFAULTS as VIEW_DEFAULTS, GROUP_BY, SORT_BY, SORT_DIR, is_list_view, view_order
 
 EDITABLE = ("title", "description", "priority", "due", "recurrence", "project_id", "section_id", "labels",
-            "estimate_minutes", "deadline")
+            "estimate_minutes", "deadline", "sector")
 MAX_ESTIMATE = 10080  # minutes: the server's bound
 MAX_VALUE_BYTES = 64 * 1024  # the server's bound on one value, as the JSON we send
 VIEW_EDITABLE = ("name", "query", "group_by", "sort_by", "sort_dir", "show_completed")
@@ -131,6 +131,7 @@ class Writer:
             planned = plan()
             changes, result = planned if isinstance(planned, tuple) else (planned, None)
             changes = self._completed_by(changes)
+            changes = self._sector_clears(changes)
             changes = changes + self._default_reminders(changes)
             changes = changes + self._reminder_follow_ups(changes)
             if not changes:
@@ -191,6 +192,23 @@ class Writer:
         return [
             (entity, eid, {**patch, "completed_by": me if patch["completed_at"] is not None else None})
             if entity == "task" and "completed_at" in patch and "completed_by" not in patch else (entity, eid, patch)
+            for entity, eid, patch in changes
+        ]
+
+    def _sector_clears(self, changes):
+        """One "when" at a time: a do-on date, a start or Someday clears a task's sector in the same batch.
+
+        As in the web app's sectorWrites.ts. The deadline stays.
+        """
+        tasks = self.store.rows("task")
+
+        def dates(patch):
+            return patch.get("due") is not None or bool(patch.get("start"))
+
+        return [
+            (entity, eid, {**patch, "sector": ""})
+            if entity == "task" and "sector" not in patch and dates(patch) and (tasks.get(eid) or {}).get("sector")
+            else (entity, eid, patch)
             for entity, eid, patch in changes
         ]
 
@@ -289,10 +307,10 @@ class Writer:
                 {"project_id": project_id, "section_id": section_id}
             task = self._new_task(
                 self.store.rows("task"), parsed.title, **where, parent_id=parent_id,
-                due=parsed.due or (None if parsed.someday else due),
+                due=parsed.due or (None if parsed.someday or parsed.sector else due),
                 priority=parsed.priority, labels=ids, estimate_minutes=parsed.estimate_minutes,
                 deadline=parsed.deadline, start="someday" if parsed.someday else None, evening=parsed.evening,
-                day_part=None if parsed.evening else parsed.day_part, energy=parsed.energy,
+                day_part=None if parsed.evening else parsed.day_part, energy=parsed.energy, sector=parsed.sector,
                 recurrence=parsed.recurrence)
             changes = created + [("task", task_id, task)]
             changes += [("reminder", str(uuid.uuid4()), self._typed_reminder(task_id, task["due"], r, now))
@@ -535,6 +553,18 @@ class Writer:
             if minutes is not None and not (isinstance(minutes, int) and 1 <= minutes <= MAX_ESTIMATE):
                 raise CannotEdit("An estimate is 1 minute to 1 week")
             patch["estimate_minutes"] = minutes
+        if "sector" in changes:
+            # Choosing a sector clears the do-on date, the start and the part of the day. "" clears it.
+            sector = changes["sector"] or ""
+            if sector and not sectors.parse(sector):
+                raise CannotEdit("A time sector is a week, month or quarter, like 2026-W45")
+            if task.get("recurrence") and sector:
+                raise CannotEdit("A repeating task keeps its date")
+            if (task.get("sector") or "") != sector:
+                patch["sector"] = sector
+            if sector:
+                patch.update({k: v for k, v in (("due", None), ("start", None), ("evening", False), ("day_part", None))
+                              if task.get(k)})
         if "deadline" in changes:
             patch["deadline"] = check_due({"date": changes["deadline"]})["date"] if changes["deadline"] else None
         if "recurrence" in changes:

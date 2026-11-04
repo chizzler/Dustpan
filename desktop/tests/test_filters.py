@@ -6,7 +6,7 @@ from datetime import datetime
 from dustpan.filters import Context, FilterError, blocked_ids, compile_query, parse, resolve_range, with_completed
 from dustpan.store import Clock, Row
 
-from .vectors import read
+from .vectors import load, read
 
 
 def show(query):
@@ -219,6 +219,32 @@ def blocked(task_id, *blockers, ts=0, device="d"):
     row = task(task_id, blocked_by=list(blockers))
     row.clocks["blocked_by"] = Clock(ts, device)
     return row
+
+
+class EvaluateVectorsTest(unittest.TestCase):
+    # Tracked time and custom fields aren't implemented: they warn and match nothing (spec/views.md).
+    UNSUPPORTED = ("tracked", "cost")
+    # The defaults the upstream test gives every task (evaluate.vectors.test.ts).
+    DEFAULTS = {"title": "", "description": "", "labels": [], "priority": 4, "due": None, "project_id": None,
+                "parent_id": None, "start": None, "deadline": None, "completed_at": None, "deleted_at": None,
+                "created_at": 1792454400000, "blocked_by": []}
+
+    def test_cases(self):
+        data = load("filter/evaluate")
+        rows = lambda items: [Row(item["id"], item) for item in items]
+        tasks = [Row(item["id"], {**self.DEFAULTS, **item}) for item in data["tasks"]]
+        context = Context(data["today"], tasks, rows(data["labels"]), rows(data["projects"]), week_start=data["week_start"])
+        for case in data["cases"]:
+            if any(word in case["query"] for word in self.UNSUPPORTED):
+                continue
+            with self.subTest(case["query"]):
+                ast = parse(case["query"])
+                if ast is None:
+                    self.assertEqual(case["ids"], [])
+                    continue
+                test, warnings = compile_query(ast, context)
+                self.assertEqual(sorted(t.id for t in tasks if test(t)), sorted(case["ids"]))
+                self.assertEqual(len(warnings), case.get("warnings", 0))
 
 
 class BlockedTest(unittest.TestCase):
