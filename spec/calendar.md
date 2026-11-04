@@ -20,7 +20,7 @@ What the desktop client implements from `docs/calendar-views.md`, `docs/place-ta
 | --- | --- | --- |
 | 12a | The window and its toggle. Month: six weeks, open tasks per day, deadlines, day load. Drop a task on a day. | done, tried and approved |
 | 12b | Week and Day: a time grid, blocks as tall as their estimate, the Unscheduled lane, the line for now. Drops on a 15-minute slot or the lane (brought forward from 12c). | built |
-| 12c | Stretch a block to change its estimate, keyboard and menu moves on the grid, grid hours and day length in settings. | |
+| 12c | Stretch a block to change its estimate, keyboard and menu moves on the grid, grid hours and day length in settings. | built |
 | 12d | Repeating tasks' coming dates (`occurrences.vectors.json`) and multi-day bars (`span`). | |
 | Later | Plan (two weeks), Year, stacked months, other calendars' events. | |
 
@@ -42,7 +42,7 @@ Ported to `calendar_rules.py`, from `month.ts` and `calendar.ts`.
 - **Moves.** Drop a task on a day: it gets that date and keeps its time (`ToDay`, as in slice 6), with Undo.
   Tasks drag from the calendar as well as from the main window's lists.
 - **Keys.** `[` and `]` go back and forward a month, `t` comes back to today.
-- Clicking a task opens its editor.
+- A click selects a task, a double-click opens its editor (as in the main window's lists, from 12c).
 
 ## Week and Day (12b)
 
@@ -63,3 +63,26 @@ Ported to `calendar_rules.py`, from `calendar.ts` (`blockFor`) and `layout.ts` (
 - **Drops** (`ToSlot`). On the grid: a ghost shows where the task will land, at the 15-minute slot under the pointer,
   as long as its estimate. The task gets that date and time, as a floating time (a zoned due loses its zone).
   On a day's header: that date with no time. On a Month day: that date, keeping the time (`ToDay`). Undo for each.
+
+## Stretching, keys and settings (12c)
+
+Ported to `calendar_rules.py` from `calendar.ts` (`resizeEstimate`, `stepEstimate`, `stepStart`, `nudgeDue`,
+`normalizeGridPrefs`), with their tests. The keys follow `docs/place-tasks-on-the-calendar.md`.
+
+- **Stretch.** Drag a block's bottom edge (the lowest 6 px; the pointer shows a resize cursor). The start stays,
+  the block follows in whole 15-minute slots, from 15 minutes to a week. An unestimated block stretches from its
+  drawn 30 minutes. Only the estimate is written (`Stretch`): a zoned due keeps its zone. Undo.
+  The top edge is not draggable yet; Alt+Shift+↑/↓ does that from the keyboard.
+- **Select.** Calendar tasks are selected like list rows: a click, or `j` / `k` through the shown tasks
+  (each day's lane, then its blocks by time). Enter or a double-click opens, `c` completes, Delete deletes, Esc unselects.
+  The selection holds through every rebuild; a task that leaves the view hands it to its neighbour.
+- **Keys on the grid** (`grid_moves`). ↑ / ↓ 15 minutes earlier or later (an untimed task goes to the grid's first hour),
+  ← / → a day either way, Shift+↑ / ↓ shorter or longer by 15 minutes, Alt+Shift+↑ / ↓ the start 15 minutes either way
+  keeping the end, `u` back to the lane keeping the date. Times set this way are floating, as a drop on the grid.
+  In Month only ← / → work, and keep the time (`ToDay`). A task moved off the shown range takes the view with it.
+  Each move is one write with Undo.
+- **Menu.** Right-click, Menu, Shift+F10 or `.`: the main window's row menu, with the grid moves (greyed when they
+  would change nothing) instead of the list moves. No Labels item yet.
+- **Settings.** The gear in the header: when the grid starts and ends (6:00 to 22:00) and the day length
+  (8 hours; 4 to 12 hours). Per device, in `meta.calendar_grid`, read through `grid_prefs`, which repairs bad values.
+  The grid opens at its start hour and shades the hours outside; the day length is what the load is measured against.

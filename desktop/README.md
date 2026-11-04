@@ -44,7 +44,7 @@ It saves nothing at the moment (the window's paint node is None). Instead, crop 
 | `dustpan/filters.py` | The filter query language: parse, then test tasks |
 | `dustpan/views.py` | What the Inbox, Today, Upcoming and saved views list, and in what order |
 | `dustpan/sectors.py` | Time sectors: periods, "this week", carried over |
-| `dustpan/calendar_rules.py` | The calendar's rules: the month grid, which tasks show on a day, day load |
+| `dustpan/calendar_rules.py` | The calendar's rules: the month grid, which tasks show on a day, day load, stretching, keyboard moves, grid settings |
 | `dustpan/quickadd/` | Quick add: read a line into task fields, in six languages |
 | `dustpan/model.py` | Display rules: trees, sections, what's hidden |
 | `dustpan/querytools.py` | The query helper without GTK: suggestions, and the conditions the builder adds |
@@ -97,7 +97,9 @@ shows it again.
 beside the main one. The icon closes it again; if it was open, it reopens with the app. Day, Week and Month
 (`d`, `w`, `m`; Month at first) are remembered on this device. `[` and `]` step back and forward, `t` comes to today.
 Drag tasks between the windows: onto a Month day (keeps its time), a time slot in Day or Week (sets the time),
-or a day's Unscheduled lane (no time). Click a task to edit it. See `spec/calendar.md`.
+or a day's Unscheduled lane (no time). Drag a block's bottom edge to change its estimate. Click a task to select it,
+double-click to edit it. On a selected task the arrows move it (Shift changes its length), `u` unschedules it, and
+right-click or `.` opens its menu. The gear sets the grid's hours and the day length for this device. See `spec/calendar.md`.
 
 **Closing the window hides it.** Sync and reminders carry on. Ctrl+Q quits.
 
@@ -124,9 +126,10 @@ which keeps the code it started with.
 ## Versions
 
 The version is `__version__` in `dustpan/__init__.py` (`python -m dustpan --version`), and each release is a git tag `vX.Y.Z`.
-Before 1.0: the minor number follows the slices (0.12 is slice 12), the patch number is for fixes only.
+Before 1.0: the minor number follows the slices (0.12 is slice 12), the patch number is for fixes and for later parts of a slice (12c).
 
 | Version | Date | What |
 | --- | --- | --- |
+| 0.12.2 | 2026-11-04 | Slice 12c: stretch a block's bottom edge to change its estimate; keys and a menu move tasks on the calendar; grid hours and day length in settings. A click on a calendar task selects it, a double-click opens it. |
 | 0.12.1 | 2026-11-04 | Fixes: the highlight and the list no longer jump when a task is ticked; the calendar grid keeps its place on every edit; the broom no longer grows its row; `calendar.py` renamed `calendar_rules.py`. |
 | 0.12.0 | 2026-11-04 | First numbered version: slices 1 to 12b. Server OpenTodo v0.22.0. Time sectors, calendar window (Month, Week, Day). |

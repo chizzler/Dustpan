@@ -1,7 +1,7 @@
-"""The calendar, in a window of its own beside the main one. See spec/rules.md.
+"""The calendar, in a window of its own beside the main one. See spec/calendar.md.
 
 It reads the main window's store and writes through it, so both refresh together.
-The rules are in rules.py; this file only draws them.
+The rules are in calendar_rules.py; this file only draws them.
 """
 
 import math
@@ -14,15 +14,17 @@ gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, GObject, Graphene, Gsk, Gtk, Pango  # noqa: E402
 
 from . import calendar_rules as rules  # noqa: E402
-from .calendar_rules import DAY_MINUTES, MIN_BLOCK_MINUTES, SLOT_MINUTES  # noqa: E402
+from .calendar_rules import DAY_MINUTES, MIN_BLOCK_MINUTES, SLOT_MINUTES, hhmm  # noqa: E402
 from .dates import format_minutes, format_time, uses_12h  # noqa: E402
-from .dragdrop import ToDay, ToSlot  # noqa: E402
+from .dragdrop import Stretch, ToDay, ToSlot  # noqa: E402
+from .rowactions import CALENDAR_KEYS, CALENDAR_MOVES, RowActions, TaskRow  # noqa: E402
 from .widgets import Dot  # noqa: E402
 
 MOST_ROWS = 4  # task lines a Month day shows before "+N more"
 MOST_LANE = 3  # untimed tasks a Week or Day header shows before "+N more"
 PX_PER_MINUTE = 0.8  # 48 px an hour, as the web app
 GUTTER_PX = 52
+EDGE_PX = 6  # the bottom of a block that stretches it
 VIEWS = ("day", "week", "month")
 
 CSS = """
@@ -37,6 +39,8 @@ CSS = """
 .cal-load.over { color: var(--dustpan-overdue); opacity: 1; }
 .cal-task { font-size: 0.9em; padding: 1px 3px; border-radius: 4px; }
 .cal-task:hover { background: alpha(currentColor, 0.07); }
+.cal-task:focus { background: alpha(var(--accent-bg-color), 0.15); }
+.cal-block:focus { outline: 2px solid alpha(var(--accent-color), 0.8); outline-offset: -1px; border-radius: 5px; }
 .cal-task.dragging, .cal-block.dragging { opacity: 0.4; }
 .cal-time { font-size: 0.85em; opacity: 0.65; font-feature-settings: "tnum"; }
 .cal-deadline { font-size: 0.85em; color: var(--dustpan-overdue); }
@@ -49,10 +53,6 @@ CSS = """
 .cal-block { padding: 2px 4px 2px 7px; font-size: 0.85em; }
 .cal-block .cal-time { font-size: 0.9em; }
 """
-
-
-def hhmm(minutes):
-    return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
 class TimeColumn(Gtk.Widget):
@@ -79,6 +79,12 @@ class TimeColumn(Gtk.Widget):
             if not (isinstance(color, str) and rgba.parse(color)):
                 rgba.parse("#94a3b8")
         self.items.append((child, top, length, lane, lanes, rgba, dashed))
+
+    def stretch(self, child, length):
+        """Draw child length minutes long, while its bottom edge is dragged."""
+        self.items = [(c, top, length if c is child else n, *rest) for c, top, n, *rest in self.items]
+        self.queue_allocate()
+        self.queue_draw()
 
     def clear(self):
         """Let go of the children before the column is thrown away."""
@@ -172,6 +178,9 @@ class CalendarWindow(Adw.ApplicationWindow):
         self.view = view if view in VIEWS else "month"
         self.scroll = None  # the time grid's position, kept across rebuilds
         self.columns = {}  # day -> TimeColumn on the shown grid
+        self.task_widgets = {}  # task id -> its block or line, in the order j and k step through
+        self.shown = []  # the days on screen
+        self.actions = RowActions(self, CALENDAR_KEYS, CALENDAR_MOVES, labels=False)
         self.grid_parts = []  # every TimeColumn shown, the gutter too
         # Week and Day share one heads area and one scrolled grid. Only their contents are replaced,
         # so the scroll position holds through every refresh, with no frame at midnight.
@@ -198,6 +207,9 @@ class CalendarWindow(Adw.ApplicationWindow):
         header = Adw.HeaderBar(title_widget=self.title)
         for button in (self.back, today, self.forward):
             header.pack_start(button)
+        settings = Gtk.Button(icon_name="preferences-system-symbolic", tooltip_text="Grid hours and day length")
+        settings.connect("clicked", lambda _b: self.grid_settings())
+        header.pack_end(settings)
         header.pack_end(self.switcher)
         self.body = Adw.Bin(hexpand=True, vexpand=True)
         view = Adw.ToolbarView(content=self.body)
@@ -259,22 +271,45 @@ class CalendarWindow(Adw.ApplicationWindow):
     def refresh(self):
         if self.body.get_child() is self.time_view:  # read before the grid may go: going, it scrolls to the top
             self.scroll = self.time_scroller.get_vadjustment().get_value()
+        focused, old_order = self.focused_task(), list(self.task_widgets)
         for column in self.grid_parts:
             column.clear()
         self.grid_parts = []
+        self.task_widgets = {}
         unit = {"day": "day", "week": "week", "month": "month"}[self.view]
         self.back.set_tooltip_text(f"Previous {unit} ([)")
         self.forward.set_tooltip_text(f"Next {unit} (])")
         main = self.main
         self.projects = main.store.rows("project")
         self.archived = {p.id for p in self.projects.values() if p.get("archived")}
-        self.day_length = (main.store.get_meta("calendar_grid", {}) or {}).get("dayLength", rules.DAY_LENGTH)
+        self.grid = rules.grid_prefs(main.store.get_meta("calendar_grid"))
+        self.day_length = self.grid["dayLength"]
         if self.view == "month":
             self.columns = {}
             self.body.set_child(self.month())
         else:
             days = [self.anchor] if self.view == "day" else rules.week_dates(self.anchor, main.week_start)
+            self.shown = days
             self.time_grid(days)
+        self.restore_focus(focused, old_order)
+
+    def focused_task(self):
+        widgets = {widget: task_id for task_id, widget in self.task_widgets.items()}
+        widget = self.get_focus()
+        while widget is not None and widget not in widgets:
+            widget = widget.get_parent()
+        return widgets.get(widget)
+
+    def restore_focus(self, task_id, old_order):
+        """Focus task_id's new block or line, or, when it has gone, the next one still here. In the same call
+        as the rebuild, so no frame shows the focus elsewhere; the grid doesn't scroll to it."""
+        if task_id is None:
+            return
+        if task_id not in self.task_widgets and task_id in old_order:
+            i = old_order.index(task_id)
+            task_id = next((t for t in old_order[i + 1:] + old_order[:i][::-1] if t in self.task_widgets), None)
+        if task_id is not None:
+            self.task_widgets[task_id].grab_focus()
 
     def tasks_in(self, first, last):
         tasks = list(self.main.snap.all_tasks.values())
@@ -298,7 +333,7 @@ class CalendarWindow(Adw.ApplicationWindow):
         listing = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1, margin_top=6, margin_bottom=6,
                           margin_start=6, margin_end=6)
         for task in tasks:
-            listing.append(self.task_line(task))
+            listing.append(self.task_line(task, listed=False))
         more.set_popover(Gtk.Popover(child=listing))
         return more
 
@@ -306,6 +341,7 @@ class CalendarWindow(Adw.ApplicationWindow):
 
     def month(self):
         weeks = rules.month_grid(self.anchor, self.main.week_start)
+        self.shown = [day for week in weeks for day in week]
         days, deadlines = self.tasks_in(weeks[0][0], weeks[-1][-1])
         self.title.set_title(date.fromisoformat(self.anchor).strftime("%B %Y"))
         self.title.set_subtitle("")
@@ -355,8 +391,7 @@ class CalendarWindow(Adw.ApplicationWindow):
             span = f"{start.day}–{end.day} {end:%b}" if start.month == end.month else f"{start:%-d %b} – {end:%-d %b}"
             self.title.set_title(span)
             self.title.set_subtitle(f"Week {start.isocalendar()[1]}, {end.year}")
-        grid = (main.store.get_meta("calendar_grid", {}) or {})
-        shade = (grid.get("startHour", rules.GRID["startHour"]) * 60, grid.get("endHour", rules.GRID["endHour"]) * 60)
+        shade = (self.grid["startHour"] * 60, self.grid["endHour"] * 60)
 
         heads = Gtk.Box(css_classes=["cal-heads"])
         heads.append(Gtk.Box(width_request=GUTTER_PX))
@@ -448,9 +483,10 @@ class CalendarWindow(Adw.ApplicationWindow):
             task = blocks[b["id"]]
             estimated = rules.block_for(task)[2]
             project = self.projects.get(task.get("project_id"))
-            column.add(self.block(task, b["start"], b["end"], estimated, twelve),
-                       b["start"], max(MIN_BLOCK_MINUTES, b["end"] - b["start"]), b["lane"], b["lanes"],
+            block = self.block(task, b["start"], b["end"], estimated, twelve)
+            column.add(block, b["start"], max(MIN_BLOCK_MINUTES, b["end"] - b["start"]), b["lane"], b["lanes"],
                        color=(project.get("color") if project else None) or "", dashed=not estimated)
+            self.stretchable(block, column, task)
         for o in overflow:
             column.add(self.more_button([blocks[i] for i in o["ids"]]), o["start"], MIN_BLOCK_MINUTES,
                        o["lane"], o["lanes"])
@@ -459,7 +495,7 @@ class CalendarWindow(Adw.ApplicationWindow):
 
     def block(self, task, start, end, estimated, twelve):
         title = task.get("title") or ""
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, css_classes=["cal-block"], overflow=Gtk.Overflow.HIDDEN)
+        box = TaskRow(orientation=Gtk.Orientation.VERTICAL, css_classes=["cal-block"], overflow=Gtk.Overflow.HIDDEN)
         when = format_time(time(start // 60, start % 60), twelve)
         if estimated:
             when += "–" + format_time(time(end // 60 % 24, end % 60), twelve)
@@ -475,14 +511,58 @@ class CalendarWindow(Adw.ApplicationWindow):
             line.append(label)
             box.append(line)
         box.set_tooltip_text(f"{title}\n{when}")
-        self.open_on_click(box, task)
+        self.selectable(box, task)
         self.main.drag.source(box, task.id, title)
         return box
 
+    def stretchable(self, block, column, task):
+        """Drag the block's bottom edge to change its estimate: the start stays, whole 15-minute slots.
+        Unestimated, it stretches from its drawn 30 minutes."""
+        start, end, _ = rules.block_for(task)
+        estimate = task.get("estimate_minutes") or None
+        length = estimate or rules.DEFAULT_BLOCK_MINUTES
+        drawn = max(MIN_BLOCK_MINUTES, end - start)
+        held = {}
+        hover = Gtk.EventControllerMotion()
+        hover.connect("motion", lambda _c, _x, y: block.set_cursor_from_name(
+            "ns-resize" if y >= block.get_height() - EDGE_PX else None))
+        hover.connect("leave", lambda _c: block.set_cursor(None))
+        block.add_controller(hover)
+        # Before the drag source and the click, which then never see the press.
+        drag = Gtk.GestureDrag(propagation_phase=Gtk.PropagationPhase.CAPTURE)
+
+        def begin(gesture, _x, y):
+            if y < block.get_height() - EDGE_PX:
+                gesture.set_state(Gtk.EventSequenceState.DENIED)
+                return
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+            block.grab_focus()
+            held["estimate"] = estimate
+
+        def update(_gesture, _dx, dy):
+            if "estimate" in held:
+                held["estimate"] = rules.resize_estimate(start, (start + length) * PX_PER_MINUTE + dy, PX_PER_MINUTE)
+                column.stretch(block, max(MIN_BLOCK_MINUTES, min(held["estimate"], DAY_MINUTES - start)))
+
+        def finish(_gesture, *_args):
+            if "estimate" not in held:
+                return
+            wanted = held.pop("estimate")
+            column.stretch(block, drawn)
+            if wanted != estimate:
+                self.main.drop_task(task.id, Stretch(wanted))
+
+        drag.connect("drag-begin", begin)
+        drag.connect("drag-update", update)
+        drag.connect("drag-end", finish)
+        drag.connect("cancel", lambda g, _s: finish(g))
+        block.add_controller(drag)
+
     # ---- tasks, clicks and drops ----
 
-    def task_line(self, task):
-        line = Gtk.Box(spacing=5, css_classes=["cal-task"])
+    def task_line(self, task, listed=True):
+        """listed: a line on the calendar itself, which j and k step through; not one in a "+N more" popover."""
+        line = TaskRow(spacing=5, css_classes=["cal-task"])
         project = self.projects.get(task.get("project_id"))
         line.append(Dot(project.get("color") if project else None, 7))
         if (start := rules.parse_time(rules.viewed_due(task)[1])) is not None:
@@ -491,14 +571,123 @@ class CalendarWindow(Adw.ApplicationWindow):
         title = task.get("title") or ""
         line.append(Gtk.Label(label=title, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END,
                               tooltip_text=title))
-        self.open_on_click(line, task)
+        self.selectable(line, task, listed)
         self.main.drag.source(line, task.id, title)
         return line
 
-    def open_on_click(self, widget, task):
-        click = Gtk.GestureClick()
-        click.connect("released", lambda *_a: self.main.edit(task.id, parent=self))
-        widget.add_controller(click)
+    def selectable(self, widget, task, listed=True):
+        """As a row in the main window: a click selects, a double-click opens, a right-click or . opens its menu."""
+        if listed:
+            self.task_widgets[task.id] = widget
+        self.actions.attach(widget, task.id, task.get("completed_at") is not None)
+
+    # ---- what RowActions asks of the window ----
+
+    def moves(self, task_id):
+        task = self.main.snap.all_tasks.get(task_id)
+        if task is None:
+            return {}
+        return rules.grid_moves(task, self.grid["startHour"] * 60, on_grid=self.view != "month")
+
+    def move(self, task_id, move):
+        target = self.moves(task_id).get(move)
+        if target is None:
+            return
+        slot = target.slot if isinstance(target, Stretch) else target
+        if slot is not None and slot.day not in self.shown:
+            self.anchor = slot.day  # follow the task to its new day
+        self.apply_drop(task_id, target)
+
+    def apply_drop(self, task_id, target):
+        self.main.apply_drop(task_id, target)
+
+    def step(self, task_id, n):
+        order = list(self.task_widgets)
+        i = order.index(task_id) + n if task_id in order else -1
+        if 0 <= i < len(order):
+            self.task_widgets[order[i]].grab_focus()
+
+    def leaving(self, _task_id):
+        pass  # refresh() focuses the next task when this one has gone
+
+    def edit(self, task_id):
+        self.main.edit(task_id, parent=self)
+
+    def complete(self, task_id):
+        self.main.complete(task_id)
+
+    def reopen(self, task_id):
+        self.main.reopen(task_id)
+
+    def delete_task(self, task_id):
+        self.main.delete_task(task_id)
+
+    def days(self):
+        return self.main.days()
+
+    def places(self):
+        return self.main.places()
+
+    # ---- settings ----
+
+    def grid_settings(self):
+        """Grid hours and day length, for this device only (meta calendar_grid), as the web app's."""
+        grid = dict(self.grid)
+        lengths = sorted({*rules.DAY_LENGTHS, grid["dayLength"]})
+        page = Adw.PreferencesPage()
+        group = Adw.PreferencesGroup(description="These settings are for this device only.")
+        page.add(group)
+        twelve = uses_12h(self.main.time_format)
+
+        def hour(h):
+            return "Midnight" if h == 24 else format_time(time(h), twelve)
+
+        start = Adw.ComboRow(title="Grid starts", subtitle="Day and Week open at this hour",
+                             model=Gtk.StringList.new([hour(h) for h in range(24)]), selected=grid["startHour"])
+        end = Adw.ComboRow(title="Grid ends", subtitle="Later hours are shaded")
+        length = Adw.ComboRow(title="Day length", subtitle="Planned time is measured against this",
+                              model=Gtk.StringList.new([format_minutes(m) for m in lengths]),
+                              selected=lengths.index(grid["dayLength"]))
+        for row in (start, end, length):
+            group.add(row)
+
+        def end_hours():
+            return list(range(grid["startHour"] + 1, 25))
+
+        def fill_end():
+            hours = end_hours()
+            end.set_model(Gtk.StringList.new([hour(h) for h in hours]))
+            end.set_selected(hours.index(grid["endHour"]))
+
+        def save():
+            self.main.store.set_meta("calendar_grid", rules.grid_prefs(grid))
+            self.refresh()
+
+        def on_start(row, _p):
+            grid["startHour"] = row.get_selected()
+            grid["endHour"] = max(grid["endHour"], grid["startHour"] + 1)
+            fill_end()
+            save()
+            if self.body.get_child() is self.time_view:
+                self.time_scroller.get_vadjustment().set_value(grid["startHour"] * 60 * PX_PER_MINUTE)
+
+        def on_end(row, _p):
+            hours = end_hours()
+            if row.get_selected() < len(hours) and hours[row.get_selected()] != grid["endHour"]:
+                grid["endHour"] = hours[row.get_selected()]
+                save()
+
+        def on_length(row, _p):
+            grid["dayLength"] = lengths[row.get_selected()]
+            save()
+
+        fill_end()
+        start.connect("notify::selected", on_start)
+        end.connect("notify::selected", on_end)
+        length.connect("notify::selected", on_length)
+        dialog = Adw.PreferencesDialog(title="Calendar grid", content_width=420, content_height=320)
+        dialog.add(page)
+        dialog.present(self)
 
     def accepts(self, task_id):
         return bool(task_id) and task_id in self.main.snap.all_tasks

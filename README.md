@@ -21,7 +21,7 @@ deploy/pull-backups.sh --install  # daily copies of the server's archives and th
 
 The client reads its URL and token from `~/.config/dustpan/config`.
 
-The desktop client is at 0.12.1 (`desktop/README.md`, "Versions"). The server is pinned to OpenTodo v0.22.0.
+The desktop client is at 0.12.2 (`desktop/README.md`, "Versions"). The server is pinned to OpenTodo v0.22.0.
 
 ## Development
 

@@ -7,6 +7,8 @@ target into one batch.
 
 from dataclasses import dataclass
 
+from .dates import format_minutes
+
 BEFORE, INSIDE, AFTER = "before", "inside", "after"
 HEAD, END = "head", "end"  # a hit on a list's heading, or past its last row
 
@@ -48,6 +50,14 @@ class ToSlot:
 
     day: str
     time: str | None = None
+
+
+@dataclass(frozen=True)
+class Stretch:
+    """A block made estimate minutes long. With a slot (a ToSlot), it also starts there: its end stays put."""
+
+    estimate: int
+    slot: ToSlot | None = None
 
 
 @dataclass(frozen=True)
@@ -242,6 +252,9 @@ def describe(target, task, names, day_text):
         return "Due " + day_text(target.day)
     if isinstance(target, ToSlot):
         return "Due " + day_text(target.day) + (f" at {target.time}" if target.time else ", no time")
+    if isinstance(target, Stretch):
+        takes = "takes " + format_minutes(target.estimate)
+        return f"Starts at {target.slot.time}, {takes}" if target.slot else takes.capitalize()
     if isinstance(target, ToProject):
         return "Moved to " + names.get(target.project_id, "Inbox")
     if isinstance(target, ToLabel):

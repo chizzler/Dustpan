@@ -16,23 +16,12 @@ SHIFT, ALT = Gdk.ModifierType.SHIFT_MASK, Gdk.ModifierType.ALT_MASK
 NONE = Gdk.ModifierType(0)
 
 # (key, modifiers) -> (action, argument)
-KEYS = {
-    (Gdk.KEY_Up, ALT): ("move", UP),
-    (Gdk.KEY_Down, ALT): ("move", DOWN),
-    (Gdk.KEY_Up, ALT | SHIFT): ("move", TOP),
-    (Gdk.KEY_Down, ALT | SHIFT): ("move", BOTTOM),
-    (Gdk.KEY_Tab, NONE): ("move", INDENT),
-    (Gdk.KEY_ISO_Left_Tab, SHIFT): ("move", OUTDENT),
-    (Gdk.KEY_Tab, SHIFT): ("move", OUTDENT),
-    (Gdk.KEY_Up, NONE): ("step", -1),
+COMMON_KEYS = {
     (Gdk.KEY_k, NONE): ("step", -1),
-    (Gdk.KEY_Down, NONE): ("step", 1),
     (Gdk.KEY_j, NONE): ("step", 1),
     (Gdk.KEY_Return, NONE): ("open", None),
     (Gdk.KEY_KP_Enter, NONE): ("open", None),
     (Gdk.KEY_c, NONE): ("complete", None),
-    (Gdk.KEY_l, NONE): ("labels", None),
-    (Gdk.KEY_L, SHIFT): ("labels", None),
     (Gdk.KEY_Delete, NONE): ("delete", None),
     (Gdk.KEY_BackSpace, NONE): ("delete", None),
     (Gdk.KEY_Menu, NONE): ("menu", None),
@@ -41,9 +30,43 @@ KEYS = {
     (Gdk.KEY_Escape, NONE): ("unselect", None),
 }
 
+KEYS = {
+    **COMMON_KEYS,
+    (Gdk.KEY_Up, ALT): ("move", UP),
+    (Gdk.KEY_Down, ALT): ("move", DOWN),
+    (Gdk.KEY_Up, ALT | SHIFT): ("move", TOP),
+    (Gdk.KEY_Down, ALT | SHIFT): ("move", BOTTOM),
+    (Gdk.KEY_Tab, NONE): ("move", INDENT),
+    (Gdk.KEY_ISO_Left_Tab, SHIFT): ("move", OUTDENT),
+    (Gdk.KEY_Tab, SHIFT): ("move", OUTDENT),
+    (Gdk.KEY_Up, NONE): ("step", -1),
+    (Gdk.KEY_Down, NONE): ("step", 1),
+    (Gdk.KEY_l, NONE): ("labels", None),
+    (Gdk.KEY_L, SHIFT): ("labels", None),
+}
+
+# On the calendar the arrows move the task in time (calendar_rules.grid_moves), as in the web app.
+CALENDAR_KEYS = {
+    **COMMON_KEYS,
+    (Gdk.KEY_Up, NONE): ("move", "earlier"),
+    (Gdk.KEY_Down, NONE): ("move", "later"),
+    (Gdk.KEY_Left, NONE): ("move", "day-before"),
+    (Gdk.KEY_Right, NONE): ("move", "day-after"),
+    (Gdk.KEY_Up, SHIFT): ("move", "shorter"),
+    (Gdk.KEY_Down, SHIFT): ("move", "longer"),
+    (Gdk.KEY_Up, ALT | SHIFT): ("move", "start-earlier"),
+    (Gdk.KEY_Down, ALT | SHIFT): ("move", "start-later"),
+    (Gdk.KEY_u, NONE): ("move", "unschedule"),
+}
+
 # The moves in the menu, with the keys it shows for them.
 MENU_MOVES = ((UP, "Move up", "<Alt>Up"), (DOWN, "Move down", "<Alt>Down"), (TOP, "Move to top", "<Alt><Shift>Up"),
          (BOTTOM, "Move to bottom", "<Alt><Shift>Down"), (INDENT, "Indent", "Tab"), (OUTDENT, "Outdent", "<Shift>Tab"))
+CALENDAR_MOVES = (("earlier", "15 minutes earlier", "Up"), ("later", "15 minutes later", "Down"),
+                  ("day-before", "Day before", "Left"), ("day-after", "Day after", "Right"),
+                  ("shorter", "Shorter", "<Shift>Up"), ("longer", "Longer", "<Shift>Down"),
+                  ("start-earlier", "Start earlier", "<Alt><Shift>Up"), ("start-later", "Start later", "<Alt><Shift>Down"),
+                  ("unschedule", "Unschedule", "u"))
 
 
 class TaskRow(Gtk.Box):
@@ -58,16 +81,19 @@ class TaskRow(Gtk.Box):
 class RowActions:
     """Gives task rows focus, keys and a menu. The window does the work, through these methods:
 
-    moves(task_id): {move: target or None} for a task in a list, or None on flat pages
+    moves(task_id): {move: target or None} for the task, or None on flat pages; the menu offers the moves listed
     move(task_id, move), apply_drop(task_id, target): apply a move or a target; the task keeps the focus
     step(task_id, n): focus the row n rows away
     leaving(task_id): focus the next row once this one is gone
-    edit(task_id), complete(task_id), reopen(task_id), delete_task(task_id), pick_labels(task_id)
+    edit(task_id), complete(task_id), reopen(task_id), delete_task(task_id), pick_labels(task_id) if labels
     places(): [(label, target, [(label, target)])] for Move to; days(): [(label, target)] for the date items
+
+    keys and menu_moves: the list's (KEYS, MENU_MOVES) or the calendar's (CALENDAR_KEYS, CALENDAR_MOVES).
     """
 
-    def __init__(self, window):
+    def __init__(self, window, keys=KEYS, menu_moves=MENU_MOVES, labels=True):
         self.window = window
+        self.keys, self.menu_moves, self.labels = keys, menu_moves, labels
         self.popover = None  # the open menu
 
     def attach(self, row, task_id, done):
@@ -90,8 +116,8 @@ class RowActions:
             self.run("open", task_id)
 
     def key(self, row, task_id, done, keyval, state):
-        action, arg = KEYS.get((keyval, state & MODS), (None, None))
-        if action is None or (done and action == "move"):
+        action, arg = self.keys.get((keyval, state & MODS), (None, None))
+        if action is None or (done and action == "move") or (action == "labels" and not self.labels):
             return False
         if done and action == "complete":
             action = "reopen"  # c completes or reopens, as in the web app
@@ -149,15 +175,17 @@ class RowActions:
             item(first, "Reopen", "reopen", lambda: self.run("reopen", task_id))
         else:
             item(first, "Complete", "complete", lambda: self.run("complete", task_id), accel="c")
-        item(first, "Labels…", "labels", lambda: self.run("labels", task_id), accel="l")
+        if self.labels:
+            item(first, "Labels…", "labels", lambda: self.run("labels", task_id), accel="l")
         model.append_section(None, first)
 
         moves = None if done else self.window.moves(task_id)
         if moves is not None:
             section = Gio.Menu()
-            for move, label, accel in MENU_MOVES:
-                item(section, label, move, lambda m=move: self.later(self.window.move, task_id, m),
-                     enabled=moves.get(move) is not None, accel=accel)
+            for move, label, accel in self.menu_moves:
+                if move in moves:
+                    item(section, label, move, lambda m=move: self.later(self.window.move, task_id, m),
+                         enabled=moves[move] is not None, accel=accel)
             model.append_section(None, section)
 
         if not done:

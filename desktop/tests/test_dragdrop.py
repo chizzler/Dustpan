@@ -1,7 +1,7 @@
 import unittest
 
 from dustpan.dragdrop import (AFTER, BEFORE, BOTTOM, DOWN, END, HEAD, INDENT, INSIDE, OUTDENT, TOP, UP, Place, Slot, ToDay,
-                              ToProject, describe, level, nudge, resolve, zone)
+                              Stretch, ToProject, ToSlot, describe, level, nudge, resolve, zone)
 from dustpan.store import Row
 
 # A section as a project list shows it:
@@ -135,6 +135,8 @@ class DescribeTest(unittest.TestCase):
 
     def test_each_kind_of_change(self):
         self.assertEqual(self.text(ToDay("2026-11-05")), "Due Thu 5 Nov")
+        self.assertEqual(self.text(Stretch(90)), "Takes 1h 30m")
+        self.assertEqual(self.text(Stretch(45, ToSlot("2026-11-05", "08:45"))), "Starts at 08:45, takes 45 min")
         self.assertEqual(self.text(ToProject(None), project_id="p1"), "Moved to Inbox")
         self.assertEqual(self.text(ToProject("p2"), project_id="p1"), "Moved to Work")
         self.assertEqual(self.text(Place("p1", None, "a"), project_id="p1"), "Moved under “Plan trip”")

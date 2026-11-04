@@ -1,6 +1,7 @@
 import unittest
 
 from dustpan import calendar_rules as calendar
+from dustpan.dragdrop import Stretch, ToDay, ToSlot
 
 
 def task(task_id, day=None, at=None, **fields):
@@ -143,3 +144,84 @@ class BlockTest(unittest.TestCase):
         self.assertEqual(calendar.block_for(task("b", "2026-11-04", "23:45")), (1425, 1440, False))
         self.assertIsNone(calendar.block_for(task("c", "2026-11-04")))
         self.assertIsNone(calendar.parse_time("24:00"))
+
+
+PX = 48 / 60  # 48 px an hour, 12 px a slot
+
+
+class StretchTest(unittest.TestCase):
+    """calendar.test.ts's cases for the bottom edge and the keyboard steps."""
+
+    def test_resizes_in_whole_slots(self):
+        start = 10 * 60
+        bottom = (start + 30) * PX
+        self.assertEqual(calendar.resize_estimate(start, bottom + 2 * 12, PX), 60)
+        self.assertEqual(calendar.resize_estimate(start, bottom + 2 * 12 + 5, PX), 60)
+        self.assertEqual(calendar.resize_estimate(start, bottom - 12, PX), 15)
+        self.assertEqual(calendar.resize_estimate(start, 0, PX), 15)
+        self.assertEqual(calendar.resize_estimate(start, 0, 0), 15)
+
+    def test_steps_the_estimate(self):
+        for current, delta, want in ((30, 15, 45), (30, -15, 15), (15, -15, 15), (None, 15, 45), (None, -15, 15),
+                                     (20, 15, 30), (20, -15, 15), (10080, 15, 10080)):
+            self.assertEqual(calendar.step_estimate(current, delta), want, (current, delta))
+
+    def test_steps_the_start_keeping_the_end(self):
+        for start, estimate, delta, want in ((600, 60, -15, (585, 75)), (600, 60, 15, (615, 45)),
+                                             (600, 15, 15, (600, 15)), (600, None, -15, (585, 45)),
+                                             (605, 30, 15, (615, 20)), (0, 30, -15, (0, 30))):
+            self.assertEqual(calendar.step_start(start, estimate, delta), want, (start, estimate, delta))
+
+
+class GridPrefsTest(unittest.TestCase):
+    def test_defaults_and_repairs(self):
+        default = {"startHour": 6, "endHour": 22, "dayLength": 480}
+        self.assertEqual(calendar.grid_prefs(None), default)
+        self.assertEqual(calendar.grid_prefs("junk"), default)
+        self.assertEqual(calendar.grid_prefs({"startHour": 8, "endHour": 18, "dayLength": 360}),
+                         {"startHour": 8, "endHour": 18, "dayLength": 360})
+        self.assertEqual(calendar.grid_prefs({"startHour": 7.5, "endHour": 30, "dayLength": 0}), default)
+        self.assertEqual(calendar.grid_prefs({"startHour": 23}), {**default, "startHour": 23, "endHour": 24})
+        self.assertEqual(calendar.grid_prefs({"endHour": 4}), {**default, "startHour": 3, "endHour": 4})
+        self.assertEqual(calendar.grid_prefs({"startHour": 18, "endHour": 9}), default)
+        self.assertEqual(calendar.grid_prefs({"startHour": True}), default)
+
+
+class GridMovesTest(unittest.TestCase):
+    def moves(self, *args, on_grid=True, **fields):
+        return calendar.grid_moves(task("t", *args, **fields), 6 * 60, on_grid)
+
+    def test_a_timed_block(self):
+        m = self.moves("2026-11-05", "09:00", estimate_minutes=60)
+        self.assertEqual(list(m), list(calendar.GRID_MOVES))
+        self.assertEqual(m["earlier"], ToSlot("2026-11-05", "08:45"))
+        self.assertEqual(m["later"], ToSlot("2026-11-05", "09:15"))
+        self.assertEqual(m["day-before"], ToSlot("2026-11-04", "09:00"))
+        self.assertEqual(m["day-after"], ToSlot("2026-11-06", "09:00"))
+        self.assertEqual(m["shorter"], Stretch(45))
+        self.assertEqual(m["longer"], Stretch(75))
+        self.assertEqual(m["start-earlier"], Stretch(75, ToSlot("2026-11-05", "08:45")))
+        self.assertEqual(m["start-later"], Stretch(45, ToSlot("2026-11-05", "09:15")))
+        self.assertEqual(m["unschedule"], ToSlot("2026-11-05"))
+
+    def test_the_ends_of_the_day_and_the_shortest_block(self):
+        m = self.moves("2026-11-05", "00:00", estimate_minutes=15)
+        self.assertIsNone(m["earlier"])
+        self.assertIsNone(m["shorter"])
+        self.assertIsNone(m["start-later"])
+        self.assertIsNone(self.moves("2026-11-05", "23:45")["later"])
+
+    def test_without_an_estimate_it_stretches_from_thirty_minutes(self):
+        m = self.moves("2026-11-05", "09:00")
+        self.assertEqual((m["shorter"], m["longer"]), (Stretch(15), Stretch(45)))
+
+    def test_without_a_time_the_arrows_put_it_on_the_grid(self):
+        m = self.moves("2026-11-05")
+        self.assertEqual(m["earlier"], ToSlot("2026-11-05", "06:00"))
+        self.assertEqual(m["day-after"], ToSlot("2026-11-06"))
+        self.assertTrue(all(m[k] is None for k in ("shorter", "longer", "start-earlier", "start-later", "unschedule")))
+
+    def test_month_moves_days_only_and_keeps_the_time(self):
+        self.assertEqual(self.moves("2026-11-30", "09:00", on_grid=False),
+                         {"day-before": ToDay("2026-11-29"), "day-after": ToDay("2026-12-01")})
+        self.assertEqual(self.moves(), {})

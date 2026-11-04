@@ -3,7 +3,7 @@ from datetime import datetime
 
 from dustpan.clock import HybridClock
 from dustpan.dates import due_instant
-from dustpan.dragdrop import Place, ToDay, ToProject, ToSlot
+from dustpan.dragdrop import Place, Stretch, ToDay, ToProject, ToSlot
 from dustpan.ids import default_reminder_id, detached_id, occurrence_id
 from dustpan.store import Store
 from dustpan.writes import CannotEdit, Writer
@@ -474,3 +474,21 @@ class SlotDropTest(WriterCase):
         self.assertEqual(self.writer.drop("t1", ToSlot("2026-11-06")).undo, [])
         self.writer.revert(done.undo)
         self.assertEqual(self.task("t1").get("due"), {"date": "2026-11-05", "time": "09:00", "tz": "Europe/Berlin"})
+
+    def test_a_stretch_sets_the_estimate_and_keeps_a_zoned_due(self):
+        due = {"date": "2026-11-05", "time": "09:00", "tz": "Europe/Berlin"}
+        self.seed("task", "t1", title="Dentist", due=due, estimate_minutes=30)
+        done = self.writer.drop("t1", Stretch(60))
+        self.assertEqual((self.task("t1").get("due"), self.task("t1").get("estimate_minutes")), (due, 60))
+        self.assertEqual(self.writer.drop("t1", Stretch(60)).undo, [])
+        self.writer.revert(done.undo)
+        self.assertEqual(self.task("t1").get("estimate_minutes"), 30)
+
+    def test_a_stretch_from_the_top_moves_the_start_too_and_undoes_both(self):
+        self.seed("task", "t1", title="Write", due={"date": "2026-11-05", "time": "09:00"})
+        done = self.writer.drop("t1", Stretch(45, ToSlot("2026-11-05", "08:45")))
+        self.assertEqual((self.task("t1").get("due"), self.task("t1").get("estimate_minutes")),
+                         ({"date": "2026-11-05", "time": "08:45"}, 45))
+        self.writer.revert(done.undo)
+        self.assertEqual((self.task("t1").get("due"), self.task("t1").get("estimate_minutes")),
+                         ({"date": "2026-11-05", "time": "09:00"}, None))
