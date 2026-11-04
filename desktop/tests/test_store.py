@@ -85,6 +85,19 @@ class ClockTest(unittest.TestCase):
         self.clock.follow_server(self.now)
         self.assertEqual(self.clock.last, self.now)
 
+    def test_refusals_in_one_exchange_keep_edits_in_order(self):
+        # OpenTodo #651: two batches refused in turn must not stamp the later edit first.
+        server = self.now
+        self.now += 2 * 3_600_000
+        self.clock.stamp()
+        self.clock.stamp()
+        self.clock.refused(server)
+        first = self.clock.stamp()
+        self.clock.refused(server)
+        second = self.clock.stamp()
+        self.assertLessEqual(first, server + 5 * 60_000)
+        self.assertGreater(second, first)
+
 
 if __name__ == "__main__":
     unittest.main()

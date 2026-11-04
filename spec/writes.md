@@ -91,7 +91,7 @@ Editing the date or time keeps the zone. Clearing the time drops it.
 
 The server lists refused ops in `rejected`, with a reason.
 
-- **`clock_skew`.** Our clock ran more than 5 minutes fast. Follow the server's clock, set `last` to `serverTime` if it's ahead,
+- **`clock_skew`.** Our clock ran more than 5 minutes fast. Follow the server's clock, set `last` to `serverTime` if it's more than 2.5 minutes ahead (OpenTodo #651),
   stamp the refused ops again (ops that shared a timestamp share the new one) and queue them with the same ids.
   The stored field's clock follows when it still holds that op. More than 3 such rounds in one exchange is an error.
   The client sends the `clock_skew` feature.

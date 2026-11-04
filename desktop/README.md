@@ -9,7 +9,7 @@ Needs `python`, `python-gobject`, `gtk4` and `libadwaita` from the official Arch
 Run everything from the repo root.
 
 ```sh
-dev/server.sh          # local OpenTodo v0.18.0 on 127.0.0.1:8080 (downloads and checks it once)
+dev/server.sh          # local OpenTodo v0.22.0 on 127.0.0.1:8080 (downloads and checks it once)
 dev/seed.py            # sample data, once per fresh server
 dev/client.sh          # the app, against the dev server
 dev/client.sh sync     # sync once, no window

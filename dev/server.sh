@@ -4,7 +4,7 @@
 # Data lives in dev/data. Delete that folder to start fresh.
 set -euo pipefail
 
-VERSION=v0.18.0
+VERSION=v0.22.0
 ASSET=opentodo-linux-amd64
 BASE=https://github.com/OpenTodoApp/OpenTodo/releases/download/$VERSION
 

@@ -9,9 +9,9 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 # HOST (an ssh destination) and DOMAIN come from deploy/deploy.env, which git ignores. See deploy.env.example.
 # shellcheck source=/dev/null
 [[ -f $HERE/deploy.env ]] && source "$HERE/deploy.env"
-VERSION=v0.18.0
+VERSION=v0.22.0
 ASSET=opentodo-linux-amd64
-SHA256=fee9eeb6601b9cda14596d379b4f2161db7e21a8f359d74acfbb67f8da38a6da
+SHA256=74c8b2276e315c2428dee06433efe361599cb3482e384ca6f3e02a6871119c9b
 URL=https://github.com/OpenTodoApp/OpenTodo/releases/download/$VERSION/$ASSET
 
 [[ -n ${HOST:-} && -n ${DOMAIN:-} ]] || { echo "Set HOST and DOMAIN in $HERE/deploy.env first." >&2; exit 1; }

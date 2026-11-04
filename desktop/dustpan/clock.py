@@ -4,6 +4,8 @@ import time
 
 SKEW_TOLERANCE_MS = 2_000
 MAX_AHEAD_MS = 5 * 60_000
+# A refused clock this close to the server keeps going (OpenTodo issue #651).
+RESTART_AFTER_REFUSAL_MS = MAX_AHEAD_MS // 2
 
 
 def wall_ms():
@@ -44,7 +46,11 @@ class HybridClock:
             self.store.set_meta("clock_last", server_time)
 
     def refused(self, server_time):
-        """The server refused ops for clock skew: restart from its time."""
+        """The server refused ops for clock skew: restart from its time if well ahead of it.
+
+        A clock closer than that holds stamps an earlier refusal in this exchange just gave out.
+        Going back below them would stamp a later edit before an earlier one.
+        """
         self.follow_server(server_time)
-        if self.last > server_time:
+        if self.last > server_time + RESTART_AFTER_REFUSAL_MS:
             self.store.set_meta("clock_last", server_time)
