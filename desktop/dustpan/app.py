@@ -410,8 +410,12 @@ class Window(Adw.ApplicationWindow):
             self.rows_by_key[focused_key].grab_focus()
 
     def add_sidebar_heading(self, text, button=None):
-        box = Gtk.Box(margin_top=12, margin_start=6)
-        heading = Gtk.Label(label=text, xalign=0, hexpand=True, css_classes=["heading", "dim-label"])
+        box = Gtk.Box(spacing=8, margin_top=14, margin_start=6, margin_end=6,
+                      css_classes=["sidebar-heading"])
+        box.append(Gtk.Box(width_request=6, height_request=6, valign=Gtk.Align.CENTER,
+                           css_classes=["sidebar-heading-mark"]))
+        heading = Gtk.Label(label=text.upper(), xalign=0, hexpand=True,
+                            css_classes=["sidebar-heading-label"])
         box.append(heading)
         if button:
             box.append(button)

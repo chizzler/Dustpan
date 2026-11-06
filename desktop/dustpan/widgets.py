@@ -48,10 +48,14 @@ button.subtask-broom:hover { border-color: alpha(currentColor, 0.22); background
 button.fold-chevron { min-width: 16px; min-height: 18px; padding: 0; border-radius: 4px; opacity: 0.55; }
 button.fold-chevron:hover { opacity: 1; }
 button.fold-chevron image { -gtk-icon-size: 12px; }
+.sidebar-heading { padding-bottom: 5px; border-bottom: 2px solid alpha(currentColor, 0.22); }
+.sidebar-heading-mark { background: var(--accent-bg-color); border-radius: 1px; }
+.sidebar-heading-label { font-size: 0.78em; font-weight: 700; color: alpha(currentColor, 0.72); }
 .task-text { min-height: 20px; }
 .add-task { margin-top: 4px; }
 .task-row { padding: 8px 4px; border-bottom: 1px solid alpha(currentColor, 0.08); }
-.task-row:focus { background: alpha(var(--accent-bg-color), 0.15); border-radius: 6px; }
+.task-row:focus { background: alpha(var(--accent-bg-color), 0.08); border-radius: 3px;
+                   box-shadow: inset 3px 0 0 var(--accent-bg-color); }
 .task-row:focus-visible { outline: 2px solid alpha(var(--accent-color), 0.7); outline-offset: -2px; }
 .dragging { opacity: 0.4; }
 .drag-pill { padding: 6px 12px; border-radius: 8px; background: var(--popover-bg-color); color: var(--popover-fg-color);
@@ -73,7 +77,7 @@ button.task-place:hover label { text-decoration: underline; }
 .danger-button:active { background: color-mix(in srgb, var(--destructive-bg-color) 80%, black); }
 .due-overdue { color: var(--dustpan-overdue); }
 .due-today { color: var(--dustpan-today); }
-.section-heading { margin-top: 24px; padding-bottom: 6px; border-bottom: 1px solid alpha(currentColor, 0.15); }
+.section-heading { margin-top: 24px; padding-bottom: 6px; border-bottom: 2px solid alpha(currentColor, 0.24); }
 .section-heading button { min-height: 24px; min-width: 24px; padding: 0; }
 .colour-choice { min-width: 28px; min-height: 28px; padding: 0; border-radius: 999px; }
 .colour-choice:checked { box-shadow: inset 0 0 0 2px var(--accent-color); }
@@ -82,7 +86,8 @@ button.task-place:hover label { text-decoration: underline; }
 .note-quote { border-left: 3px solid alpha(currentColor, 0.25); padding-left: 10px; }
 .note-code { background: alpha(currentColor, 0.06); border-radius: 6px; padding: 8px 10px; }
 .task-note { font-size: 0.9em; }
-.label-chip { padding: 1px 8px 1px 6px; border-radius: 999px; background: alpha(currentColor, 0.08); }
+.label-chip { padding: 1px 8px 1px 6px; border-radius: 3px; background: alpha(currentColor, 0.05);
+              box-shadow: inset 0 0 0 1px alpha(currentColor, 0.24); }
 .label-chip button { min-width: 18px; min-height: 18px; padding: 0; margin: -2px -4px -2px 0; }
 .label-chip.more { padding: 1px 8px; }
 .label-picker list row { padding: 2px 6px; }
@@ -179,7 +184,7 @@ def broom_button():
 
 
 def label_chip(name, color, on_remove=None):
-    """A label as a small pill: its colour as a dot, then its name. on_remove adds an × that calls it."""
+    """A label as a small tag: its colour as a dot, then its name. on_remove adds an × that calls it."""
     chip = Gtk.Box(spacing=5, valign=Gtk.Align.CENTER, css_classes=["label-chip"])
     chip.append(Dot(color, 8))
     chip.append(Gtk.Label(label=name, ellipsize=Pango.EllipsizeMode.END, max_width_chars=24))
