@@ -34,6 +34,7 @@ struct ContentView: View {
             .overlay(alignment: .bottom) { ToastView() }
             .sheet(item: $model.editing, content: TaskEditor.init)
             .sheet(item: $model.editingView, content: ViewEditor.init)
+            .sheet(item: $model.editingLabel, content: LabelEditor.init)
             .onChange(of: undoManager, initial: true) { model.undoManager = undoManager }
             .frame(minWidth: 640, minHeight: 400)
         }

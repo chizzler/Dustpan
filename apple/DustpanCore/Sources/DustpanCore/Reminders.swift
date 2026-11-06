@@ -97,6 +97,8 @@ func planDefaultReminder(userId: String, taskId: String, before: [String: JSON]?
 
 /// Offsets from the due time offered in the editor, in minutes.
 public let relativePresets: [Int64] = [0, -10, -30, -60, -1440]
+/// Offsets from 09:00 on the deadline.
+public let deadlinePresets: [Int64] = [0, -1440]
 
 /// "At due time", "30 minutes before", "2 hours after", "1 day before".
 public func offsetLabel(_ minutes: Int64) -> String {
@@ -113,12 +115,17 @@ public func offsetLabel(_ minutes: Int64) -> String {
     return "\(n) \(unit)\(n == 1 ? "" : "s") \(minutes < 0 ? "before" : "after")"
 }
 
+/// "On the deadline", "1 day before the deadline".
+public func deadlineOffsetLabel(_ minutes: Int64) -> String {
+    minutes == 0 ? "On the deadline" : offsetLabel(minutes) + " the deadline"
+}
+
 /// One line for a reminder in the editor.
 public func describe(reminder r: Row) -> String {
     let offset = r["offset_minutes"].int ?? 0
     switch r["kind"].string {
     case "relative": return offsetLabel(offset)
-    case "deadline": return offset == 0 ? "On the deadline" : offsetLabel(offset) + " the deadline"
+    case "deadline": return deadlineOffsetLabel(offset)
     default:
         guard let fireAt = r["fire_at"].int else { return "No time" }
         return Date(ms: fireAt).formatted(.dateTime.weekday().day().month().year().hour().minute())

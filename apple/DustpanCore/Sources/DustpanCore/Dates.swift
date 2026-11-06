@@ -209,3 +209,29 @@ public func formatDay(_ day: Day, locale: Locale = .current) -> String {
     f.dateFormat = "EEE d MMM"
     return f.string(from: Date(timeIntervalSince1970: Double(day.number) * 86_400))
 }
+
+/// An estimate as typed: "30m", "1h30", "2h", "1.5h" or a number of minutes. Empty means none.
+public func parseEstimate(_ text: String) throws(CannotEdit) -> Int64? {
+    let text = text.lowercased().filter { !$0.isWhitespace }
+    guard !text.isEmpty else { return nil }
+    var minutes: Int64?
+    if let m = text.wholeMatch(of: /(\d+(?:[.,]\d+)?)h(?:(\d{1,2})(?:m|min)?)?/),
+       let hours = Double(m.1.replacingOccurrences(of: ",", with: ".")) {
+        let extra = m.2.flatMap { Int64($0) } ?? 0
+        // Half up, like Go and JS.
+        if extra <= 59 { minutes = Int64((hours * 60 + Double(extra) + 0.5).rounded(.down)) }
+    } else if let m = text.wholeMatch(of: /(\d+)(?:m|min|mins|minutes)?/) {
+        minutes = Int64(m.1)
+    }
+    guard let minutes, (1...maxEstimate).contains(minutes) else {
+        throw CannotEdit("Write the estimate like 30m or 1h30, up to a week")
+    }
+    return minutes
+}
+
+/// An estimate as the editor shows it: "30m", "1h30", "2h".
+public func estimateText(_ minutes: Int64?) -> String {
+    guard let minutes, minutes > 0 else { return "" }
+    let (hours, rest) = minutes.quotientAndRemainder(dividingBy: 60)
+    return hours == 0 ? "\(rest)m" : rest == 0 ? "\(hours)h" : "\(hours)h" + String(format: "%02d", rest)
+}

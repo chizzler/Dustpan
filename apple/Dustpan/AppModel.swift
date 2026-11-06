@@ -7,7 +7,14 @@ enum Page: Hashable {
     case upcoming
     case inbox
     case project(String)
+    case label(String)
     case view(String)
+}
+
+/// A label in the editor: an existing one, or a new one.
+struct LabelDraft: Identifiable {
+    let id = UUID()
+    var label: Row?
 }
 
 /// A saved view in the editor: an existing one, or a new one (with a query to start from).
@@ -52,6 +59,10 @@ final class AppModel {
     var editing: Row?
     /// The saved view open in its editor.
     var editingView: ViewDraft?
+    /// The label open in its editor.
+    var editingLabel: LabelDraft?
+    /// The task whose row shows the label picker.
+    var labelling: String?
     /// The window's, so Undo works from the toast, Edit ▸ Undo and the editor alike.
     @ObservationIgnored weak var undoManager: UndoManager?
     /// Why the app can't start: no config, or no database.
@@ -255,8 +266,31 @@ final class AppModel {
     }
 
     /// Add a task at the end of a list. False when it can't be added.
-    func add(_ title: String, to place: Place, due: JSON = nil) -> Bool {
-        perform { try $0.addTask(title, projectId: place.projectId, sectionId: place.sectionId, due: due) } != nil
+    func add(_ title: String, to place: Place, due: JSON = nil, labels: [String] = []) -> Bool {
+        perform {
+            try $0.addTask(title, projectId: place.projectId, sectionId: place.sectionId, due: due, labels: labels)
+        } != nil
+    }
+
+    func addSubtask(_ title: String, to parentId: String) throws {
+        try apply { try $0.addTask(title, parentId: parentId) }
+    }
+
+    /// Delete tasks and their subtasks. One Undo brings them all back.
+    func delete(_ tasks: [Row]) {
+        guard let first = tasks.first else { return }
+        let ids = tasks.map(\.id)
+        undoable("Delete", { writer in
+            var undo: [Change] = []
+            for (index, id) in ids.enumerated() {
+                do {
+                    undo += try writer.deleteTask(id).undo
+                } catch where index > 0 {
+                    // A subtask of another selected task went with it.
+                }
+            }
+            return Done(undo: undo)
+        }) { _ in tasks.count == 1 ? "Deleted “\(first["title"].string ?? "")”" : "Deleted \(tasks.count) tasks" }
     }
 
     /// Create a view and show it, or edit one.
@@ -278,7 +312,76 @@ final class AppModel {
     func edit(_ taskId: String, _ edit: TaskEdit) throws {
         guard !edit.isEmpty else { return }
         try apply { try $0.edit(taskId, edit) }
+        if let labels = edit.labels { rememberLabels(labels) }
     }
+
+    func addReminder(to taskId: String, deadlineOffset minutes: Int64) throws {
+        try apply { try $0.addReminder(taskId, deadlineOffset: minutes) }
+    }
+
+    // MARK: labels
+
+    /// Labels assigned lately on this device first, then sidebar order.
+    var labelsForPicker: [Row] {
+        let recent = (try? store?.meta(recentLabelsKey).array?.compactMap(\.string)) ?? []
+        return pickerOrder(Array(snapshot.labels.values), recent: recent)
+    }
+
+    /// Remember the labels just assigned, by id. Names of labels made in the same edit are found by name.
+    private func rememberLabels(_ refs: [String]) {
+        guard let store else { return }
+        let ids = refs.compactMap { ref in
+            snapshot.labels[ref] != nil ? ref : exactLabel(Array(snapshot.labels.values), ref)?.id
+        }
+        guard !ids.isEmpty else { return }
+        let recent = (try? store.meta(recentLabelsKey).array?.compactMap(\.string)) ?? []
+        try? store.setMeta(recentLabelsKey, .array(DustpanCore.rememberLabels(recent, ids).map(JSON.string)))
+    }
+
+    /// What the row's picker changed, as one batch with Undo.
+    func changeLabels(of task: Row, add: [String], remove: Set<String>) {
+        guard !add.isEmpty || !remove.isEmpty else { return }
+        let title = task["title"].string ?? ""
+        undoable("Change Labels", { try $0.changeTaskLabels(task.id, add: add, remove: remove) }) { _ in
+            "Changed labels on “\(title)”"
+        }
+        rememberLabels(add)
+    }
+
+    /// Create a label and show it, or rename and recolour one.
+    func saveLabel(_ label: Row?, name: String, color: String) throws {
+        if let label {
+            let done = try apply { try $0.editLabel(label.id, name: name, color: color) }
+            if !done.undo.isEmpty { registerUndo("Edit Label", done) }
+        } else {
+            page = .label(try apply { try $0.addLabel(name, color: color) })
+        }
+    }
+
+    func moveLabel(_ label: Row, step: Int) {
+        undoable(step < 0 ? "Move Up" : "Move Down", { try $0.moveLabel(label.id, step: step) }, message: nil)
+    }
+
+    func moveLabel(_ label: Row, to index: Int) {
+        undoable("Move Label", { try $0.moveLabel(label.id, to: index) }, message: nil)
+    }
+
+    func deleteLabel(_ label: Row) {
+        if page == .label(label.id) { page = .today }
+        undoable("Delete Label", { try $0.deleteLabel(label.id) }) { _ in
+            "Deleted label “\(label["name"].string ?? "")”"
+        }
+    }
+
+    func mergeLabel(_ source: Row, into target: Row) {
+        if page == .label(source.id) { page = .label(target.id) }
+        undoable("Merge Labels", { try $0.mergeLabels(source.id, into: target.id) }) { _ in
+            "Merged “\(source["name"].string ?? "")” into “\(target["name"].string ?? "")”"
+        }
+    }
+
+    /// Live tasks that carry a label: what deleting or merging it changes.
+    func uses(of label: Row) -> Int { carrying(snapshot.allTasks.values, label.id).count }
 
     /// Complete an open task, or reopen a completed one. A repeating task moves on. Undo puts it back.
     func toggle(_ task: Row) {
@@ -306,16 +409,23 @@ final class AppModel {
     }
 
     /// Run an action and offer its Undo in the toast and in Edit ▸ Undo. Redo runs the action again.
+    /// Without a message, there's no toast: Edit ▸ Undo alone.
     private func undoable(_ name: String, _ action: @escaping (Writer) throws -> Done,
-                          message: @escaping (Done) -> String) {
+                          message: ((Done) -> String)?) {
         guard let done = perform(action), !done.undo.isEmpty else { return }
-        show(Toast(message: message(done), undoable: undoManager != nil))
+        if let message { show(Toast(message: message(done), undoable: undoManager != nil)) }
         undoManager?.registerUndo(withTarget: self) { model in
             model.toast = nil
             guard model.perform({ try $0.revert(done.undo) }) != nil else { return }
             model.undoManager?.registerUndo(withTarget: model) { $0.undoable(name, action, message: message) }
             model.undoManager?.setActionName(name)
         }
+        undoManager?.setActionName(name)
+    }
+
+    /// Edit ▸ Undo for an edit made in a sheet. Redo isn't offered: the sheet's values are gone.
+    private func registerUndo(_ name: String, _ done: Done) {
+        undoManager?.registerUndo(withTarget: self) { model in model.perform { try $0.revert(done.undo) } }
         undoManager?.setActionName(name)
     }
 

@@ -28,6 +28,13 @@ struct ReminderRow: View {
                         }
                     }
                     .onChange(of: offset) { act { try model.setOffset(reminder.id, minutes: offset) } }
+                case "deadline":
+                    Picker("Remind", selection: $offset) {
+                        ForEach(Set(deadlinePresets + [offset]).sorted(by: >), id: \.self) {
+                            Text(deadlineOffsetLabel($0)).tag($0)
+                        }
+                    }
+                    .onChange(of: offset) { act { try model.setOffset(reminder.id, minutes: offset) } }
                 case "absolute":
                     LabeledContent("Remind at") {
                         HStack(spacing: 4) {

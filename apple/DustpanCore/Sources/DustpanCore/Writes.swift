@@ -24,21 +24,30 @@ public struct CannotEdit: Error, LocalizedError, Equatable {
 public struct Done: Sendable {
     public var undo: [Change] = []
     public var nextDue: Day?
+
+    public init(undo: [Change] = [], nextDue: Day? = nil) { (self.undo, self.nextDue) = (undo, nextDue) }
 }
 
-/// The task fields `Writer.edit` takes: title, priority, due, repeat rule, project and section.
+/// The task fields `Writer.edit` takes. Nil leaves a field alone.
 public struct TaskEdit: Equatable, Sendable {
     public var title: String?
     public var priority: Int64?
-    /// nil leaves the due alone; .null clears it.
+    /// .null clears it.
     public var due: JSON?
     /// A rule to parse; "" stops the repeat.
     public var recurrence: String?
     public var place: Place?
+    /// Ids of live labels, or names: a name with no label creates one in the same batch.
+    public var labels: [String]?
+    /// Minutes, or .null for none.
+    public var estimateMinutes: JSON?
+    /// "YYYY-MM-DD", or .null for none.
+    public var deadline: JSON?
 
     public init(title: String? = nil, priority: Int64? = nil, due: JSON? = nil, recurrence: String? = nil,
-                place: Place? = nil) {
+                place: Place? = nil, labels: [String]? = nil, estimateMinutes: JSON? = nil, deadline: JSON? = nil) {
         (self.title, self.priority, self.due, self.recurrence, self.place) = (title, priority, due, recurrence, place)
+        (self.labels, self.estimateMinutes, self.deadline) = (labels, estimateMinutes, deadline)
     }
 
     public var isEmpty: Bool { self == TaskEdit() }
@@ -55,6 +64,8 @@ public struct Place: Hashable, Sendable {
 }
 
 let positionGap: Double = 1000
+/// The server's bound on an estimate, in minutes: a week.
+public let maxEstimate: Int64 = 10080
 
 /// A due value the server accepts, or CannotEdit.
 func checkDue(_ due: JSON) throws(CannotEdit) -> JSON {
@@ -274,7 +285,7 @@ public final class Writer {
     /// Add a task at the end of its list. A subtask takes its parent's project and no section. Returns its id.
     @discardableResult
     public func addTask(_ title: String, projectId: String? = nil, sectionId: String? = nil,
-                        parentId: String? = nil, due: JSON = nil) throws -> String {
+                        parentId: String? = nil, due: JSON = nil, labels: [String] = []) throws -> String {
         let taskId = newId()
         try commit {
             let tasks = try store.rows("task")
@@ -294,7 +305,9 @@ public final class Writer {
                 "deleted_at": nil, "estimate_minutes": nil,
             ]
             if let sectionId { patch["section_id"] = .string(sectionId) }
-            return [Change("task", taskId, patch)]
+            let (ids, created) = try resolveLabels(labels)
+            patch["labels"] = .array(ids.map(JSON.string))
+            return created + [Change("task", taskId, patch)]
         }
         return taskId
     }
@@ -357,6 +370,17 @@ public final class Writer {
         }
     }
 
+    /// Delete a task and its subtasks. Undo brings them back.
+    public func deleteTask(_ taskId: String) throws -> Done {
+        try commit {
+            let tasks = try store.rows("task")
+            let gone = [try liveTask(tasks, taskId)] + descendants(of: taskId, in: tasks)
+            let now = now()
+            return (gone.map { Change("task", $0.id, ["deleted_at": .int(now)]) },
+                    Done(undo: gone.map { Change("task", $0.id, ["deleted_at": nil]) }))
+        }
+    }
+
     /// Apply the undo changes of an earlier action, as a new batch.
     public func revert(_ undo: [Change]) throws {
         try commit { undo }
@@ -396,9 +420,29 @@ public final class Writer {
                     }
                 }
             }
-            if let place = edit.place {
-                out = try planMove(tasks, task, to: place, into: &patch)
+            if let labels = edit.labels {
+                let (ids, created) = try resolveLabels(labels)
+                patch["labels"] = .array(ids.map(JSON.string))
+                out += created
             }
+            if let minutes = edit.estimateMinutes {
+                if !minutes.isNull {
+                    guard let n = minutes.int, (1...maxEstimate).contains(n) else {
+                        throw CannotEdit("An estimate is 1 minute to 1 week")
+                    }
+                }
+                patch["estimate_minutes"] = minutes
+            }
+            if let deadline = edit.deadline {
+                if !deadline.isNull {
+                    guard let text = deadline.string, isRealDate(text) else { throw CannotEdit("That isn't a valid date") }
+                }
+                patch["deadline"] = deadline
+            }
+            if let place = edit.place {
+                out += try planMove(tasks, task, to: place, into: &patch)
+            }
+            // New labels come first in the batch, so they exist before the task refers to them.
             return patch.isEmpty ? out : out + [Change("task", taskId, patch)]
         }
     }
@@ -435,6 +479,15 @@ public final class Writer {
         }
     }
 
+    /// A reminder offsetMinutes from 09:00 on the task's deadline. Returns its id.
+    @discardableResult
+    public func addReminder(_ taskId: String, deadlineOffset offsetMinutes: Int64) throws -> String {
+        try checkOffset(offsetMinutes)
+        return try addReminder(taskId, kind: "deadline", offset: .int(offsetMinutes)) {
+            deadlineFireAt($0["deadline"], .int(offsetMinutes))
+        }
+    }
+
     /// A reminder at a moment of its own (unix ms). Returns its id.
     @discardableResult
     public func addReminder(_ taskId: String, at fireAt: Int64) throws -> String {
@@ -459,15 +512,18 @@ public final class Writer {
         }
     }
 
-    /// A relative reminder at another offset from its task's due time.
+    /// A relative or deadline reminder at another offset from its task's due time or deadline.
     public func setOffset(_ reminderId: String, minutes: Int64) throws {
         try checkOffset(minutes)
         try commit {
             guard let reminder = try store.rows("reminder")[reminderId], isLive(reminder),
-                  reminder["kind"] == "relative" else { throw CannotEdit("That reminder no longer exists") }
+                  reminder["kind"] == "relative" || reminder["kind"] == "deadline" else {
+                throw CannotEdit("That reminder no longer exists")
+            }
             let task = try liveTask(try store.rows("task"), reminder["task_id"].string ?? "")
-            return [Change("reminder", reminderId, ["offset_minutes": .int(minutes),
-                                                     "fire_at": relativeFireAt(task["due"], .int(minutes)),
+            let fireAt = reminder["kind"] == "deadline" ? deadlineFireAt(task["deadline"], .int(minutes))
+                : relativeFireAt(task["due"], .int(minutes))
+            return [Change("reminder", reminderId, ["offset_minutes": .int(minutes), "fire_at": fireAt,
                                                      "delivered_at": nil, "dismissed_at": nil])]
         }
     }
@@ -584,4 +640,175 @@ public struct ViewEdit: Equatable, Sendable {
     }
 
     public var isEmpty: Bool { self == ViewEdit() }
+}
+
+// MARK: - Labels (spec/labels.md)
+
+extension Writer {
+    /// plan, also returning a Done whose undo puts back every field the changes write.
+    func undoable(_ plan: () throws -> [Change]) throws -> Done {
+        try commit {
+            let changes = try plan()
+            var rows: [String: [String: Row]] = [:]
+            var undo: [Change] = []
+            for change in changes {
+                if rows[change.entity] == nil { rows[change.entity] = try store.rows(change.entity) }
+                if let row = rows[change.entity]?[change.id] {
+                    undo.append(Change(change.entity, change.id,
+                                       Dictionary(uniqueKeysWithValues: change.patch.keys.map { ($0, row[$0]) })))
+                }
+            }
+            return (changes, Done(undo: undo))
+        }
+    }
+
+    func liveLabels() throws -> [Row] { try store.rows("label").values.filter(isLive) }
+
+    func liveLabel(_ labelId: String) throws -> Row {
+        guard let label = try store.rows("label")[labelId], isLive(label) else {
+            throw CannotEdit("That label no longer exists")
+        }
+        return label
+    }
+
+    /// A name a label may take: not empty, and no other label's, ignoring case.
+    func labelName(_ name: String, for labelId: String? = nil) throws -> String {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw CannotEdit("A label needs a name") }
+        if let other = exactLabel(try liveLabels().filter { $0.id != labelId }, name) {
+            throw CannotEdit("There's already a label called “\(other["name"].string ?? "")”")
+        }
+        return name
+    }
+
+    /// The first colour no label uses, else one by the clock.
+    func freeColour(_ used: Set<String>, now: Int64) -> String {
+        labelColours.first { !used.contains($0.hex) }?.hex ?? labelColours[Int(now % Int64(labelColours.count))].hex
+    }
+
+    /// Label ids in the order given, and the changes creating the missing ones.
+    ///
+    /// refs are ids of live labels, or names. Names ignore case, then spaces, dashes and underscores.
+    /// With two labels of one name, the first in sidebar order wins.
+    func resolveLabels(_ refs: [String]) throws -> ([String], [Change]) {
+        var labels = try liveLabels().sorted { a, b in
+            let pa = a["position"].number ?? 0, pb = b["position"].number ?? 0
+            if pa != pb { return pa < pb }
+            let ca = a["created_at"].number ?? 0, cb = b["created_at"].number ?? 0
+            return ca != cb ? ca < cb : bytesLess(a.id, b.id)
+        }
+        var known = Set(labels.map(\.id))
+        var used = Set(labels.compactMap { $0["color"].string })
+        var ids: [String] = [], created: [Change] = []
+        for ref in refs {
+            let name = ref.trimmingCharacters(in: .whitespacesAndNewlines)
+            var labelId = known.contains(ref) ? ref
+                : labels.first { labelKey($0["name"].string ?? "", fold: false) == labelKey(name, fold: false) }?.id
+                ?? labels.first { labelKey($0["name"].string ?? "", fold: true) == labelKey(name, fold: true) }?.id
+            if labelId == nil {
+                guard !name.isEmpty else { continue }
+                let id = newId(), now = now()
+                let colour = freeColour(used, now: now)
+                used.insert(colour)
+                let fields: [String: JSON] = ["name": .string(name), "color": .string(colour), "position": .int(now),
+                                              "created_at": .int(now), "deleted_at": nil]
+                labels.append(Row(id: id, values: fields))
+                known.insert(id)
+                created.append(Change("label", id, fields))
+                labelId = id
+            }
+            if let labelId, !ids.contains(labelId) { ids.append(labelId) }
+        }
+        return (ids, created)
+    }
+
+    /// A label, last in the sidebar. Returns its id.
+    @discardableResult
+    public func addLabel(_ name: String, color: String? = nil) throws -> String {
+        let labelId = newId()
+        try commit {
+            let used = Set(try liveLabels().compactMap { $0["color"].string })
+            let now = now()
+            return [Change("label", labelId, [
+                "name": .string(try labelName(name)), "color": .string(color ?? freeColour(used, now: now)),
+                "position": .int(now), "created_at": .int(now), "deleted_at": nil,
+            ])]
+        }
+        return labelId
+    }
+
+    /// Rename or recolour. One op per changed field; no task is written, since tasks hold ids.
+    public func editLabel(_ labelId: String, name: String? = nil, color: String? = nil) throws -> Done {
+        try undoable {
+            let label = try liveLabel(labelId)
+            var patch: [String: JSON] = [:]
+            if let name, name.trimmingCharacters(in: .whitespacesAndNewlines) != label["name"].string {
+                patch["name"] = .string(try labelName(name, for: labelId))
+            }
+            if let color, color != label["color"].string {
+                guard color.wholeMatch(of: /#[0-9a-fA-F]{6}/) != nil else { throw CannotEdit("That isn't a colour") }
+                patch["color"] = .string(color)
+            }
+            return patch.isEmpty ? [] : [Change("label", labelId, patch)]
+        }
+    }
+
+    /// Put a label at index of the sidebar's labels, counted without it.
+    public func moveLabel(_ labelId: String, to index: Int) throws -> Done {
+        try undoable {
+            _ = try liveLabel(labelId)
+            let siblings = try liveLabels().map { (id: $0.id, position: $0["position"].number ?? 0) }
+            return planOrder(siblings, moving: labelId, to: index, fallback: Double(now())).map {
+                Change("label", $0.id, ["position": position($0.position)])
+            }
+        }
+    }
+
+    /// One place up (-1) or down (+1) in the sidebar. Nothing at an edge.
+    public func moveLabel(_ labelId: String, step: Int) throws -> Done {
+        let order = try liveLabels().sorted(by: orderLess).map(\.id)
+        guard let index = order.firstIndex(of: labelId).map({ $0 + step }), order.indices.contains(index) else {
+            return Done()
+        }
+        return try moveLabel(labelId, to: index)
+    }
+
+    /// Tombstone a label and take its id off every live task, one op per task.
+    public func deleteLabel(_ labelId: String) throws -> Done {
+        try undoable {
+            _ = try liveLabel(labelId)
+            let changes = carrying(try store.rows("task").values, labelId).map { task in
+                Change("task", task.id, ["labels": .array(labelIds(task).filter { $0 != labelId }.map(JSON.string))])
+            }
+            return changes + [Change("label", labelId, ["deleted_at": .int(now())])]
+        }
+    }
+
+    /// Every live task with source carries target instead, once. Then source is deleted.
+    public func mergeLabels(_ sourceId: String, into targetId: String) throws -> Done {
+        try undoable {
+            guard sourceId != targetId else { throw CannotEdit("A label can't merge into itself") }
+            _ = try liveLabel(sourceId)
+            _ = try liveLabel(targetId)
+            let changes = carrying(try store.rows("task").values, sourceId).map { task in
+                var seen: Set<String> = []
+                let merged = labelIds(task).map { $0 == sourceId ? targetId : $0 }.filter { seen.insert($0).inserted }
+                return Change("task", task.id, ["labels": .array(merged.map(JSON.string))])
+            }
+            return changes + [Change("label", sourceId, ["deleted_at": .int(now())])]
+        }
+    }
+
+    /// Add labels (ids, or names that create one) and remove ids, from the task's current array.
+    /// Reads the array in the same transaction as the write, so edits on a row never lose a label.
+    public func changeTaskLabels(_ taskId: String, add: [String] = [], remove: Set<String> = []) throws -> Done {
+        try undoable {
+            let current = labelIds(try liveTask(try store.rows("task"), taskId))
+            let (added, created) = try resolveLabels(add)
+            var seen: Set<String> = []
+            let wanted = (current + added).filter { seen.insert($0).inserted && !remove.contains($0) }
+            if wanted == current { return [] }
+            return created + [Change("task", taskId, ["labels": .array(wanted.map(JSON.string))])]
+        }
+    }
 }

@@ -25,7 +25,7 @@ struct TaskList: View {
                 }
             }
         }
-        .taskMenus()
+        .taskMenus(selection: selection)
         .navigationTitle(title)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -50,6 +50,7 @@ struct TaskList: View {
                 withAnimation { model.toggle(item.node.row) }
             }
             .padding(.leading, CGFloat(item.depth) * 24)
+            .labelPicker(for: item.node.row)
         }
     }
 
@@ -67,24 +68,44 @@ struct TaskList: View {
 }
 
 extension View {
-    /// The row menu and double-click of a list of tasks, keyed by task id.
-    func taskMenus() -> some View { modifier(TaskMenus()) }
+    /// The row menu, double-click and keys of a list of tasks, keyed by task id.
+    /// L opens the label picker on the selected task; Delete deletes the selection.
+    func taskMenus(selection: Set<String>) -> some View { modifier(TaskMenus(selection: selection)) }
 }
 
 private struct TaskMenus: ViewModifier {
     @Environment(AppModel.self) private var model
+    let selection: Set<String>
 
     func body(content: Content) -> some View {
         content.contextMenu(forSelectionType: String.self) { ids in
-            if let task = ids.first.flatMap({ model.snapshot.allTasks[$0] }), ids.count == 1 {
+            let tasks = ids.compactMap { model.snapshot.allTasks[$0] }
+            if let task = tasks.first, tasks.count == 1 {
                 Button("Edit…") { model.editing = task }
                 Button(task["completed_at"].isNull ? "Complete" : "Reopen") { model.toggle(task) }
                 if task["recurrence"].isTruthy && task["completed_at"].isNull {
                     Button("Skip to Next Occurrence") { model.skip(task) }
                 }
+                Button("Labels…") { model.labelling = task.id }
+                Divider()
+            }
+            if !tasks.isEmpty {
+                Button(tasks.count == 1 ? "Delete" : "Delete \(tasks.count) Tasks", role: .destructive) {
+                    model.delete(tasks)
+                }
             }
         } primaryAction: { ids in
             model.editing = ids.first.flatMap { model.snapshot.allTasks[$0] }
+        }
+        .onKeyPress(characters: ["l", "L"], phases: .down) { _ in
+            guard selection.count == 1, let id = selection.first, model.snapshot.allTasks[id] != nil else {
+                return .ignored
+            }
+            model.labelling = id
+            return .handled
+        }
+        .onDeleteCommand {
+            model.delete(selection.compactMap { model.snapshot.allTasks[$0] })
         }
     }
 }
@@ -94,6 +115,8 @@ struct AddTaskField: View {
     @Environment(AppModel.self) private var model
     let place: Place
     var due: JSON = nil
+    /// A label page's label, which new tasks get.
+    var labels: [String] = []
     var focus: FocusState<Place?>.Binding
     @State private var title = ""
 
@@ -105,7 +128,7 @@ struct AddTaskField: View {
                 .focused(focus, equals: place)
                 .onSubmit {
                     guard !title.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-                    if model.add(title, to: place, due: due) { title = "" }
+                    if model.add(title, to: place, due: due, labels: labels) { title = "" }
                     focus.wrappedValue = place
                 }
                 .onKeyPress(.escape) {
@@ -123,6 +146,8 @@ struct TaskRow: View {
     let labels: [String: Row]
     /// For a task listed away from its project: "Project" or "Project › Parent task".
     var place: String?
+    /// The label page this row is on: its own chip is left out.
+    var labelPage: String?
     let toggle: () -> Void
 
     var body: some View {
@@ -150,9 +175,10 @@ struct TaskRow: View {
     private var details: some View {
         let due = formatDue(task["due"])
         let estimate = task["estimate_minutes"].int
-        let chips = (task["labels"].array ?? []).compactMap { $0.string.flatMap { labels[$0] } }
+        let chips = shownLabels(task["labels"], labels, skip: labelPage)
         let rule = task["recurrence"].string.flatMap { $0.isEmpty ? nil : $0 }
-        if due != nil || estimate != nil || !chips.isEmpty || rule != nil || place != nil {
+        let deadline = task["deadline"].string.flatMap(Day.init)
+        if due != nil || estimate != nil || !chips.isEmpty || rule != nil || place != nil || deadline != nil {
             HStack(spacing: 10) {
                 if let due {
                     Label(due.text, systemImage: "calendar")
@@ -164,16 +190,21 @@ struct TaskRow: View {
                         .help(rule)
                         .accessibilityLabel("Repeats \(rule)")
                 }
+                if let deadline {
+                    let late = deadline.description < isoToday() && task["completed_at"].isNull
+                    Label("Deadline \(formatDay(deadline))", systemImage: "flag.pattern.checkered")
+                        .foregroundStyle(late ? .red : .secondary)
+                }
                 if let estimate {
                     Label(formatMinutes(Int(estimate)), systemImage: "timer").foregroundStyle(.secondary)
                 }
-                ForEach(chips) { label in
-                    let color = Color(hex: label["color"].string) ?? .secondary
-                    Text(label["name"].string ?? "")
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .foregroundStyle(color)
-                        .background(color.opacity(0.15), in: .capsule)
+                ForEach(chips.prefix(rowChips)) { label in
+                    LabelChip(name: label["name"].string ?? "", color: label["color"].string)
+                }
+                if chips.count > rowChips {
+                    Text("+\(chips.count - rowChips)")
+                        .foregroundStyle(.secondary)
+                        .help(chips.map { $0["name"].string ?? "" }.joined(separator: ", "))
                 }
                 if let place {
                     Spacer()

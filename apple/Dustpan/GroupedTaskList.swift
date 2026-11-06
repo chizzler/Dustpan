@@ -16,6 +16,8 @@ struct GroupedTaskList: View {
         var warnings: [String] = []
         /// Where the Add field puts new tasks, when the page has one.
         var addDue: JSON?
+        /// The labels the Add field gives new tasks.
+        var addLabels: [String] = []
         var empty: String
     }
 
@@ -50,11 +52,11 @@ struct GroupedTaskList: View {
                 }
             }
             if let due = content.addDue {
-                AddTaskField(place: Place(projectId: nil), due: due, focus: $adding)
+                AddTaskField(place: Place(projectId: nil), due: due, labels: content.addLabels, focus: $adding)
                     .selectionDisabled()
             }
         }
-        .taskMenus()
+        .taskMenus(selection: selection)
         .navigationTitle(content.title)
         .toolbar {
             if content.addDue != nil {
@@ -62,6 +64,12 @@ struct GroupedTaskList: View {
                     Button("Add Task", systemImage: "plus") { adding = Place(projectId: nil) }
                         .keyboardShortcut("n")
                         .help("Add a task (⌘N)")
+                }
+            }
+            if case .label(let id) = page, let label = model.snapshot.labels[id] {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Edit Label", systemImage: "pencil") { model.editingLabel = LabelDraft(label: label) }
+                        .help("Edit this label")
                 }
             }
             if case .view(let id) = page, let view = model.snapshot.views.first(where: { $0.id == id }) {
@@ -90,16 +98,29 @@ struct GroupedTaskList: View {
                                  projects: snap.projectPaths)
             return Content(title: view["name"].string ?? "", groups: result.groups, query: view["query"].string,
                            error: result.error, warnings: result.warnings, empty: "No tasks match.")
+        case .label(let id):
+            guard let label = snap.labels[id] else { return Content(title: "Label", empty: "This label is gone.") }
+            return Content(title: label["name"].string ?? "",
+                           groups: labelGroups(label, snap.tasks, today: today, labels: snap.labelsInOrder,
+                                               projects: snap.projectPaths),
+                           addDue: .null, addLabels: [id],
+                           empty: "No open tasks have this label. Add one below, or press L on any task.")
         case .inbox, .project:
             return Content(title: "", empty: "")
         }
     }
 
+    private var labelPage: String? {
+        if case .label(let id) = page { id } else { nil }
+    }
+
     private func rows(_ tasks: [Row]) -> some View {
         ForEach(tasks) { task in
-            TaskRow(task: task, labels: model.snapshot.labels, place: model.snapshot.place(of: task)) {
+            TaskRow(task: task, labels: model.snapshot.labels, place: model.snapshot.place(of: task),
+                    labelPage: labelPage) {
                 withAnimation { model.toggle(task) }
             }
+            .labelPicker(for: task)
         }
     }
 }

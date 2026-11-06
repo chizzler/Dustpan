@@ -292,3 +292,25 @@ public func runView(_ view: Row, _ ctx: FilterContext, _ candidates: [Row], labe
                                          projects: projects, zone: ctx.zone),
                       count: found.count, warnings: found.warnings)
 }
+
+// MARK: - Label pages
+
+/// A label's open tasks across projects, grouped by project unless the label's own options say otherwise.
+public func labelGroups(_ label: Row, _ tasks: [Row], today: Day, labels: [Row],
+                        projects: [(id: String, path: String)], zone: TimeZone = .current) -> [ViewGroup] {
+    let iso = today.description
+    let own = tasks.filter { $0["completed_at"].isNull && isActive($0, today: iso) && labelIds($0).contains(label.id) }
+    let (groupBy, sortBy, sortDir) = viewOptions(label)
+    let order = sortBy == .position ? manualOrder(label["manual_order"], sortDir, zone: zone)
+        : compareTasks(sortBy, sortDir, zone: zone)
+    return groupTasks(sorted(own, order), by: groupBy, today: today, labels: labels, projects: projects, zone: zone)
+}
+
+/// Open, active tasks per label id, as the sidebar counts them.
+public func labelCounts(_ tasks: [Row], today: Day) -> [String: Int] {
+    var counts: [String: Int] = [:]
+    for task in tasks where task["completed_at"].isNull && isActive(task, today: today.description) {
+        for id in Set(labelIds(task)) { counts[id, default: 0] += 1 }
+    }
+    return counts
+}

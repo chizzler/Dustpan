@@ -312,4 +312,48 @@ import Testing
         try writer.edit("a", TaskEdit(title: "Mine"))
         #expect(try task("a")["title"] == "Mine")
     }
+
+    // MARK: slice 5: everyday editing
+
+    @Test func deleteTakesTheSubtreeAndUndoBringsItBack() throws {
+        try seed("task", "a", ["title": "A", "deleted_at": nil])
+        try seed("task", "b", ["title": "B", "parent_id": "a", "deleted_at": nil])
+        try seed("task", "c", ["title": "C", "deleted_at": nil])
+        let done = try writer.deleteTask("a")
+        #expect(try ["a", "b", "c"].map { try task($0)["deleted_at"] } == [.int(now), .int(now), .null])
+        try writer.revert(done.undo)
+        #expect(try ["a", "b"].map { try task($0)["deleted_at"] } == [.null, .null])
+    }
+
+    @Test func labelsEstimateAndDeadline() throws {
+        try seed("label", "l1", ["name": "Phone", "position": 1])
+        try seed("task", "a", ["title": "A"])
+        try writer.edit("a", TaskEdit(labels: ["phone", "Garden"], estimateMinutes: 45, deadline: "2026-11-20"))
+        let a = try task("a")
+        let ids = a["labels"].array?.compactMap(\.string) ?? []
+        #expect(ids.first == "l1")
+        #expect(try store.rows("label")[ids[1]]?["name"] == "Garden")
+        #expect(a["estimate_minutes"] == 45 && a["deadline"] == "2026-11-20")
+        for bad in [TaskEdit(estimateMinutes: 0), TaskEdit(estimateMinutes: 10081), TaskEdit(deadline: "2026-02-30")] {
+            #expect(throws: CannotEdit.self) { try writer.edit("a", bad) }
+        }
+        try writer.edit("a", TaskEdit(estimateMinutes: .null, deadline: .null))
+        #expect(try task("a")["estimate_minutes"].isNull && task("a")["deadline"].isNull)
+    }
+
+    @Test func deadlineRemindersFollowTheDeadlineNotTheDue() throws {
+        try seed("task", "a", ["title": "A", "deadline": "2026-11-20", "due": ["date": "2026-11-10"]])
+        let rid = try writer.addReminder("a", deadlineOffset: -1440)
+        func fireAt() throws -> JSON { try #require(try store.rows("reminder")[rid])["fire_at"] }
+        let nineOn = { (date: String) in JSON.int(dueInstant(["date": .string(date)])!) }
+        #expect(try fireAt() == nineOn("2026-11-19"))
+        try writer.edit("a", TaskEdit(due: ["date": "2026-11-12"]))
+        #expect(try fireAt() == nineOn("2026-11-19"))
+        try writer.edit("a", TaskEdit(deadline: "2026-11-25"))
+        #expect(try fireAt() == nineOn("2026-11-24"))
+        try writer.setOffset(rid, minutes: 0)
+        #expect(try fireAt() == nineOn("2026-11-25"))
+        try writer.edit("a", TaskEdit(deadline: .null))
+        #expect(try fireAt().isNull)
+    }
 }

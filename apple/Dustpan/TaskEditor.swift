@@ -1,8 +1,8 @@
 import DustpanCore
 import SwiftUI
 
-/// Edit a task's title, priority, due date, repeat, project and section. Save writes only what changed, in one batch.
-/// Reminders change at once: they're entities of their own.
+/// Edit a task's fields. Save writes only what changed, in one batch.
+/// Reminders and subtasks change at once: they're entities of their own.
 struct TaskEditor: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -14,6 +14,13 @@ struct TaskEditor: View {
     @State private var due: DueDraft
     @State private var recurrence: String
     @State private var place: Place
+    /// Label ids, or names of labels Save creates.
+    @State private var labels: [String]
+    @State private var showsLabelPicker = false
+    @State private var hasDeadline: Bool
+    @State private var deadline: Date
+    @State private var estimate: String
+    @State private var subtask = ""
     @State private var problem: String?
 
     init(task: Row) {
@@ -26,6 +33,11 @@ struct TaskEditor: View {
             bySettingHour: 9, minute: 0, second: 0, of: .now) ?? .now))
         _recurrence = State(initialValue: task["recurrence"].string ?? "")
         _place = State(initialValue: Place(projectId: task["project_id"].string, sectionId: task["section_id"].string))
+        _labels = State(initialValue: task["labels"].array?.compactMap(\.string) ?? [])
+        let storedDeadline = task["deadline"].string.flatMap(Day.init)
+        _hasDeadline = State(initialValue: storedDeadline != nil)
+        _deadline = State(initialValue: (storedDeadline ?? Day(.now)).noon)
+        _estimate = State(initialValue: estimateText(task["estimate_minutes"].int))
     }
 
     var body: some View {
@@ -39,10 +51,18 @@ struct TaskEditor: View {
                             .tag(p)
                     }
                 }
+                labelField
             }
             Section {
                 dueFields
                 repeatFields
+            }
+            Section {
+                Toggle("Deadline", isOn: $hasDeadline)
+                if hasDeadline {
+                    LabeledContent("On") { DayPicker(date: $deadline) }
+                }
+                TextField("Estimate", text: $estimate, prompt: Text("30m or 1h30"))
             }
             Section {
                 Picker("Project", selection: $place.projectId) {
@@ -62,6 +82,14 @@ struct TaskEditor: View {
                 }
             }
             reminders
+            subtasks
+            Section {
+                Button("Delete Task", role: .destructive) {
+                    dismiss()
+                    model.delete([task])
+                }
+                .help("Delete this task and its subtasks. Undo brings them back.")
+            }
             if let problem {
                 Text(problem).foregroundStyle(.red)
             }
@@ -73,6 +101,25 @@ struct TaskEditor: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save", action: save)
                     .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+    }
+
+    /// Chips with ×, and + for the picker.
+    private var labelField: some View {
+        LabeledContent("Labels") {
+            FlowLayout {
+                ForEach(labels, id: \.self) { ref in
+                    let label = model.snapshot.labels[ref]
+                    LabelChip(name: label?["name"].string ?? ref, color: label?["color"].string) {
+                        labels.removeAll { $0 == ref }
+                    }
+                }
+                Button("Add Label", systemImage: "plus") { showsLabelPicker = true }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .help("Add a label")
+                    .popover(isPresented: $showsLabelPicker, arrowEdge: .bottom) { LabelPicker(refs: $labels) }
             }
         }
     }
@@ -144,10 +191,51 @@ struct TaskEditor: View {
                         act { try model.addReminder(to: task.id, offsetMinutes: minutes) }
                     }
                 }
+                if task["deadline"].isTruthy {
+                    Divider()
+                    ForEach(deadlinePresets, id: \.self) { minutes in
+                        Button(deadlineOffsetLabel(minutes)) {
+                            act { try model.addReminder(to: task.id, deadlineOffset: minutes) }
+                        }
+                    }
+                }
                 Divider()
                 Button("At a Time…") { act { try model.addReminder(to: task.id, at: suggestedTime) } }
             }
             .fixedSize()
+        }
+    }
+
+    /// The task's own subtasks, completed ones struck through, and a line to add one.
+    private var subtasks: some View {
+        Section("Subtasks") {
+            let children = model.snapshot.allTasks.values
+                .filter { $0["parent_id"].string == task.id && $0["deleted_at"].isNull }
+                .sorted { a, b in
+                    let pa = a["position"].number ?? 0, pb = b["position"].number ?? 0
+                    return pa != pb ? pa < pb : a.id < b.id
+                }
+            ForEach(children) { child in
+                let done = !child["completed_at"].isNull
+                HStack {
+                    Button(done ? "Reopen" : "Complete", systemImage: done ? "checkmark.circle.fill" : "circle") {
+                        model.toggle(child)
+                    }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(priorityColor(child["priority"].int))
+                    Text(child["title"].string ?? "")
+                        .strikethrough(done)
+                        .foregroundStyle(done ? .secondary : .primary)
+                }
+            }
+            TextField("Add a subtask", text: $subtask)
+                .onSubmit {
+                    act {
+                        try model.addSubtask(subtask, to: task.id)
+                        subtask = ""
+                    }
+                }
         }
     }
 
@@ -190,13 +278,29 @@ struct TaskEditor: View {
         if place != Place(projectId: task["project_id"].string, sectionId: task["section_id"].string) {
             edit.place = place
         }
+        if labels != task["labels"].array?.compactMap(\.string) ?? [] { edit.labels = labels }
+        let newDeadline: JSON = hasDeadline ? .string(Day(deadline).description) : .null
+        if newDeadline != (task["deadline"].string.flatMap(Day.init).map { JSON.string($0.description) } ?? .null) {
+            edit.deadline = newDeadline
+        }
         return edit
     }
 
     private func save() {
         act {
-            try model.edit(task.id, changes)
+            var edit = changes
+            let minutes = try parseEstimate(estimate)
+            if minutes != task["estimate_minutes"].int { edit.estimateMinutes = minutes.map(JSON.int) ?? .null }
+            try model.edit(task.id, edit)
             dismiss()
         }
+    }
+}
+
+extension Day {
+    /// Noon on this day, here: a Date that names it in every nearby zone.
+    var noon: Date {
+        let (year, month, day) = parts
+        return Calendar.current.date(from: DateComponents(year: year, month: month, day: day, hour: 12)) ?? .now
     }
 }

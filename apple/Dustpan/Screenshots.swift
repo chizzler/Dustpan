@@ -9,6 +9,7 @@ extension AppModel {
         guard let folder = ProcessInfo.processInfo.environment["DUSTPAN_SCREENSHOT"], !folder.isEmpty else { return }
         let pages: [(String, Page)] = [("inbox", .inbox)]
             + projectsById.values.map { ($0.row["name"].string ?? $0.id, Page.project($0.id)) }.sorted { $0.0 < $1.0 }
+            + snapshot.labelsInOrder.map { ("label-" + ($0["name"].string ?? $0.id), Page.label($0.id)) }
         for (index, (name, page)) in pages.enumerated() {
             self.page = page
             try? await Task.sleep(for: .milliseconds(600))
