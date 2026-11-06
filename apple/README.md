@@ -53,6 +53,16 @@ Data goes in `~/Library/Application Support/Dustpan/`. The app isn't sandboxed, 
 
 Give each device its own token: Settings → Integrations → API tokens in the web app.
 
+Install or update the app in `/Applications`, from the repo root. Quit Dustpan first.
+
+```sh
+xcodebuild -project apple/Dustpan.xcodeproj -scheme Dustpan -configuration Release \
+  -derivedDataPath dev/data/mac-build -quiet build
+ditto dev/data/mac-build/Build/Products/Release/Dustpan.app /Applications/Dustpan.app
+```
+
+It's signed for this Mac only (ad hoc), which is enough to run it here.
+
 ## Versions
 
 The version is `MARKETING_VERSION` in the Xcode project. Tags are `mac-vX.Y.Z`, apart from the desktop's `vX.Y.Z`.
