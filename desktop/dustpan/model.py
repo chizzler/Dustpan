@@ -126,6 +126,53 @@ def live(row):
     return row.get("deleted_at") is None
 
 
+@dataclass(frozen=True)
+class Progress:
+    done: int = 0
+    total: int = 0
+    swept: int = 0  # done ones the broom hid on this device; still counted
+
+    def text(self):
+        swept = f" ({self.swept} swept)" if self.swept else ""
+        return f"{self.done} of {self.total} subtask{'s' if self.total > 1 else ''} completed{swept}"
+
+
+def progress_map(tasks, cleared=None):
+    """Each parent's progress over its direct, live subtasks: the web app's progressMap. See spec/progress.md.
+
+    tasks: every task. Parents without live subtasks are absent.
+    """
+    cleared = cleared or {}
+    counts = {}
+    for task in tasks:
+        parent = task.get("parent_id")
+        if not parent or not live(task):
+            continue
+        done, total, swept = counts.get(parent, (0, 0, 0))
+        if task.get("completed_at") is not None:
+            done += 1
+            swept += not completed_subtask_visible(task, cleared)
+        counts[parent] = (done, total + 1, swept)
+    return {parent: Progress(*c) for parent, c in counts.items()}
+
+
+def is_ready(parent, tasks):
+    """An open, live parent whose live subtasks are all done: ready to be offered for completion.
+
+    tasks: every task by id. Nothing completes it by itself (upstream design D5).
+    """
+    if parent is None or not live(parent) or parent.get("completed_at") is not None:
+        return False
+    children = [t for t in tasks.values() if t.get("parent_id") == parent.id and live(t)]
+    return bool(children) and all(t.get("completed_at") is not None for t in children)
+
+
+def ready_parent(task_id, tasks):
+    """After task_id was completed: its parent if that is now ready, else None."""
+    parent = tasks.get((tasks.get(task_id) or {}).get("parent_id"))
+    return parent if is_ready(parent, tasks) else None
+
+
 def snapshot(store):
     """Read everything the UI needs in one pass over the store."""
     projects = store.rows("project")
@@ -161,10 +208,28 @@ def snapshot(store):
     )
 
 
-def project_sections(snap, project_id, cleared=None):
+def sink_completed(nodes, settling=None):
+    """Each task's completed subtasks after its open ones, both in their own order. Display only: positions don't change.
+
+    settling: {task id: whether it sorts as done}, for tasks just ticked or reopened. They keep the place they had
+    until the window lets them settle.
+    """
+    settling = settling or {}
+
+    def done(node):
+        return settling.get(node.id, node.row.get("completed_at") is not None)
+
+    for node in nodes:
+        node.children.sort(key=done)  # stable: the order within open and within done is kept
+        sink_completed(node.children, settling)
+    return nodes
+
+
+def project_sections(snap, project_id, cleared=None, settling=None):
     """Sections of a project, each with its task trees. "No section" first.
 
     For the Inbox (None): its tasks, then the planned tasks without a project.
+    Completed subtasks come after open ones (sink_completed).
     """
     # Completed subtasks stay beneath an open ancestor until the user sweeps
     # them away. Completed top-level tasks still belong only in Completed.
@@ -178,7 +243,7 @@ def project_sections(snap, project_id, cleared=None):
             return None
         return parent.id
 
-    roots = [n for n in build_tree(rows, visible_parent) if n.row.get("completed_at") is None]
+    roots = sink_completed([n for n in build_tree(rows, visible_parent) if n.row.get("completed_at") is None], settling)
     if project_id is None:
         inbox = [n for n in roots if is_inbox_task(n.row, snap.all_tasks.get)]
         planned = [n for n in roots if not is_inbox_task(n.row, snap.all_tasks.get)]

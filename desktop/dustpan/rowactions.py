@@ -88,6 +88,7 @@ class RowActions:
     step(task_id, n): focus the row n rows away
     leaving(task_id): focus the next row once this one is gone
     edit(task_id), complete(task_id), reopen(task_id), delete_task(task_id), pick_labels(task_id) if labels
+    prompt, accept_prompt(), dismiss_prompt(): optional; while prompt isn't None, Enter and Esc answer it
     fold_state(task_id): True or False for a task whose subtasks are folded or shown, else None; fold(task_id, fold)
     places(): [(label, target, [(label, target)])] for Move to; days(): [(label, target)] for the date items
 
@@ -124,6 +125,11 @@ class RowActions:
             return False
         if done and action == "complete":
             action = "reopen"  # c completes or reopens, as in the web app
+        # While the window offers to complete a parent, Enter accepts and Esc dismisses (spec/progress.md).
+        offer = {"open": "accept_prompt", "unselect": "dismiss_prompt"}.get(action)
+        if offer and getattr(self.window, "prompt", None) is not None:
+            self.later(getattr(self.window, offer))
+            return True
         if action == "step":
             self.window.step(task_id, arg)
         elif action == "unselect":

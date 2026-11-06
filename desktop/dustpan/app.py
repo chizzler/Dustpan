@@ -27,8 +27,8 @@ from .labelpicker import LabelPicker  # noqa: E402
 from .labels import ROW_CHIPS, carrying, duplicates, in_order, picker_order, remember, shown  # noqa: E402
 from .markdown import first_line  # noqa: E402
 from .querybar import QueryBar  # noqa: E402
-from .model import (CLEARED_SUBTASKS, FOLDED_TASKS, count_open, folded_after, order_key, project_path,  # noqa: E402
-                    project_sections, snapshot, unfolded_down_to)
+from .model import (CLEARED_SUBTASKS, FOLDED_TASKS, count_open, folded_after, is_ready, order_key,  # noqa: E402
+                    progress_map, project_path, project_sections, ready_parent, snapshot, unfolded_down_to)
 from .reminders import describe, is_due, snooze_until  # noqa: E402
 from .rowactions import RowActions, TaskRow  # noqa: E402
 from .store import Store  # noqa: E402
@@ -36,8 +36,8 @@ from .sync import ClockSkew, Syncer, UnsupportedAccount  # noqa: E402
 from .views import (LOGBOOK_PAGE, WEEK_START, compare_tasks, group_tasks, in_anytime, in_today,  # noqa: E402
                     logbook, manual_order, open_count, run_query, run_view, sorted_tasks, today_groups,
                     upcoming_groups, view_options)
-from .widgets import (CSS, FOLD_PX, INDENT_PX, Dot, ThemeFollower, broom_button, escape, flash, label_chip,  # noqa: E402
-                      on_right_click, popup_menu, save_screenshot, scroll_into_view)
+from .widgets import (CSS, FOLD_PX, INDENT_PX, Dot, Pie, ThemeFollower, broom_button, escape, flash,  # noqa: E402
+                      label_chip, on_right_click, popup_menu, save_screenshot, scroll_into_view)
 from .writes import CannotEdit, Writer, descendants, live, project_descendants  # noqa: E402
 
 SYNC_INTERVAL_S = 30
@@ -54,6 +54,7 @@ OPTIONAL_PAGES = ((ANYTIME, "Anytime", "task-due-symbolic"), (COMPLETED, "Comple
                   (FILTER, "Filter", "edit-find-symbolic"), (TRASH, "Trash", "user-trash-symbolic"))
 HIDDEN_PAGES = "hidden_pages"  # store meta: the optional pages hidden on this device
 FILTER_DELAY_MS = 150  # the Filter page's results wait for a pause in typing
+SETTLE_MS = 3000  # a ticked or reopened subtask keeps its place until this long after the last tick
 RECENT_LABELS = "recent_labels"  # store meta: labels assigned lately on this device, newest first
 # On first start, reminders that fired longer ago than this are not shown.
 STALE_REMINDER_MS = 24 * 60 * 60_000
@@ -88,6 +89,8 @@ class Window(Adw.ApplicationWindow):
         self.folds = {}  # task id -> whether its subtasks are folded, for each row with subtasks on the page
         self.flash_task = None  # the task to highlight once the page is rebuilt
         self.focus_task = None  # the task row to focus once the page is rebuilt
+        self.settling = {}  # task id -> whether it sorts as done, until the ticks settle (model.sink_completed)
+        self.settle_timer = 0
         self.row_actions = RowActions(self)
         self.completed_limit = LOGBOOK_PAGE  # how much of the Completed page is shown
         self.filter_query = ""  # the Filter page's query, kept across rebuilds
@@ -138,6 +141,11 @@ class Window(Adw.ApplicationWindow):
                             Autoscroll(self.content, lambda dy: self.page_drop and self.page_drop.scrolled(dy))]
         content_view = Adw.ToolbarView(content=self.content)
         content_view.add_top_bar(header)
+        # Offers to complete a parent once its last subtask is ticked (spec/progress.md).
+        self.prompt = None  # (parent id, page) while the banner shows
+        self.banner = Adw.Banner(button_label="Complete")
+        self.banner.connect("button-clicked", lambda _b: self.accept_prompt())
+        content_view.add_top_bar(self.banner)
 
         split = Adw.NavigationSplitView(
             sidebar=Adw.NavigationPage(child=sidebar_view, title="Dustpan"),
@@ -308,6 +316,7 @@ class Window(Adw.ApplicationWindow):
             if live(reminder):
                 self.reminders_by_task.setdefault(reminder.get("task_id"), []).append(reminder)
         self.check_reminders()
+        self.progress = progress_map(self.snap.all_tasks.values(), self.store.get_meta(CLEARED_SUBTASKS) or {})
         prefs = self.store.rows("user_prefs").get("me")
         prefs = prefs.values if prefs else {}
         self.time_format = prefs.get("time_format", "system")
@@ -453,6 +462,7 @@ class Window(Adw.ApplicationWindow):
             self.selected = TODAY
             self.adding = None
         self.title.set_title(row.name)
+        self.check_prompt()
         is_view, is_archived, is_label = key.startswith(VIEW), key.startswith(ARCHIVED), key.startswith(LABEL)
         self.add_button.set_visible(not is_view and not is_archived and key not in NO_ADDING)
         self.edit_button.set_visible(is_view or is_label or self.page_project() is not None)
@@ -470,6 +480,8 @@ class Window(Adw.ApplicationWindow):
             self.focus_task = self.focused_task()
         opened = key != self.shown
         self.shown = key
+        if opened:
+            self.settle()  # leaving the page settles its ticks
 
         column = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin_top=12, margin_bottom=24,
                          margin_start=16, margin_end=16)
@@ -575,7 +587,7 @@ class Window(Adw.ApplicationWindow):
 
     def fill_project(self, column, project_id):
         """A project's or the Inbox's sections. Each real list takes drops: between rows, inside one, at its ends."""
-        sections = project_sections(self.snap, project_id, self.store.get_meta(CLEARED_SUBTASKS) or {})
+        sections = project_sections(self.snap, project_id, self.store.get_meta(CLEARED_SUBTASKS) or {}, self.settling)
         if not any(s.tasks for s in sections) and len(sections) == 1 and self.adding is None:
             self.note(column, "Nothing to do here.")
         for sec in sections:
@@ -1080,9 +1092,16 @@ class Window(Adw.ApplicationWindow):
                 d.get("completed_at") is None for d in descendants(task.id, self.snap.all_tasks)))
         self.row_actions.attach(row, task.id, done)
 
-        check = Gtk.Button(child=Gtk.Image(icon_name="object-select-symbolic"), valign=Gtk.Align.START,
-                           tooltip_text="Reopen" if done else "Complete (c)", focusable=False)
+        progress = None if done else self.progress.get(task.id)
+        tick = Gtk.Image(icon_name="object-select-symbolic")
+        if progress:
+            inside = Gtk.Overlay(child=Pie(progress.done, progress.total))
+            inside.add_overlay(tick)
+        tip = "Reopen" if done else "Complete (c)" + (f"\n{progress.text()}" if progress else "")
+        check = Gtk.Button(child=inside if progress else tick, valign=Gtk.Align.START, focusable=False, tooltip_text=tip)
         check.add_css_class("task-check")
+        if progress:
+            check.update_property([Gtk.AccessibleProperty.DESCRIPTION], [progress.text()])
         priority = task.get("priority")
         if done:
             check.add_css_class("done")
@@ -1096,7 +1115,8 @@ class Window(Adw.ApplicationWindow):
             chevron = Gtk.Button(icon_name="pan-end-symbolic" if fold else "pan-down-symbolic", focusable=False,
                                  tooltip_text="Unfold subtasks (→)" if fold else "Fold subtasks (←)",
                                  css_classes=["flat", "fold-chevron"])
-            chevron.update_state([Gtk.AccessibleState.EXPANDED], [not fold])
+            # An int: GTK holds "expanded" as true, false or undefined, and a Python bool is refused.
+            chevron.update_state([Gtk.AccessibleState.EXPANDED], [int(not fold)])
             chevron.connect("clicked", lambda _b: self.set_folded(task.id, not fold))
             slot.set_child(chevron)
         lead.append(slot)
@@ -1139,6 +1159,9 @@ class Window(Adw.ApplicationWindow):
                                   tooltip_text="\n".join(describe(r) for r in reminders)))
         if minutes := task.get("estimate_minutes"):
             meta.append(Gtk.Label(label=format_minutes(minutes), css_classes=["dim-label"]))
+        if progress:  # as upstream, for now; the owner expects to drop it for the pie alone
+            meta.append(Gtk.Label(label=f"{progress.done}/{progress.total}", css_classes=["dim-label"],
+                                  tooltip_text=progress.text()))
         if hidden:
             meta.append(Gtk.Label(label=f"{hidden} subtask{'s' if hidden > 1 else ''}", css_classes=["dim-label"],
                                   tooltip_text="Folded away. → or the arrow shows them."))
@@ -1152,8 +1175,11 @@ class Window(Adw.ApplicationWindow):
         if meta.get_first_child():
             line.append(meta)
         if placed:
-            line.append(Gtk.Label(label=self.place_of(task), hexpand=True, xalign=1, valign=Gtk.Align.END,
-                                  ellipsize=Pango.EllipsizeMode.END, css_classes=["dim-label"]))
+            place = Gtk.Button(child=Gtk.Label(label=self.place_of(task), ellipsize=Pango.EllipsizeMode.END),
+                               hexpand=True, halign=Gtk.Align.END, valign=Gtk.Align.END, focusable=False,
+                               tooltip_text="Show in its project", css_classes=["flat", "dim-label", "task-place"])
+            place.connect("clicked", lambda _b: self.show_in_project(task.id))
+            line.append(place)
         if line.get_first_child():
             text.append(line)
         row.append(text)
@@ -1264,13 +1290,68 @@ class Window(Adw.ApplicationWindow):
         self.after_edit()
         return result
 
-    def complete(self, task_id):
+    def hold_place(self, task_id):
+        """A ticked or reopened task keeps its place until SETTLE_MS after the last one; then they all move."""
+        task = self.snap.all_tasks.get(task_id)
+        if task is not None:
+            self.settling.setdefault(task_id, task.get("completed_at") is not None)
+        if self.settle_timer:
+            GLib.source_remove(self.settle_timer)
+        self.settle_timer = GLib.timeout_add(SETTLE_MS, self.on_settle)
+
+    def on_settle(self):
+        self.settle_timer = 0
+        if self.settling:
+            self.settling = {}
+            self.refresh_view()
+        return GLib.SOURCE_REMOVE
+
+    def settle(self):
+        """Settle now, without a redraw: the page is being drawn."""
+        if self.settle_timer:
+            GLib.source_remove(self.settle_timer)
+            self.settle_timer = 0
+        self.settling = {}
+
+    def complete(self, task_id, offer_parent=True):
         task = self.store.rows("task").get(task_id)
+        self.hold_place(task_id)
         done = self.run(self.writer.complete, task_id)
         if done and done.undo:
             title = task.get("title", "")
             text = f"“{title}” next due {self.day_text(done.next_due)}" if done.next_due else f"Completed “{title}”"
             self.toast(text, undo=lambda: self.run(self.writer.revert, done.undo))
+        if done and offer_parent and (parent := ready_parent(task_id, self.snap.all_tasks)):
+            self.prompt = (parent.id, self.selected)
+            self.check_prompt()
+
+    def check_prompt(self):
+        """Show the banner while its parent is still ready on its page; else take it away."""
+        if self.prompt is not None:
+            parent_id, page = self.prompt
+            parent = self.snap.all_tasks.get(parent_id)
+            if page != self.selected or not is_ready(parent, self.snap.all_tasks):
+                self.prompt = None
+            else:
+                self.banner.set_title(escape(f"All subtasks of “{parent.get('title', '')}” are done"))
+        self.banner.set_revealed(self.prompt is not None)
+
+    def accept_prompt(self):
+        """Complete the offered parent. False when no offer shows."""
+        if self.prompt is None:
+            return False
+        parent_id = self.prompt[0]
+        self.prompt = None
+        self.complete(parent_id, offer_parent=False)
+        self.check_prompt()
+        return True
+
+    def dismiss_prompt(self):
+        if self.prompt is None:
+            return False
+        self.prompt = None
+        self.check_prompt()
+        return True
 
     def delete_task(self, task_id):
         task = self.store.rows("task").get(task_id)
@@ -1279,6 +1360,7 @@ class Window(Adw.ApplicationWindow):
             self.toast(f"Deleted “{task.get('title', '')}”", undo=lambda: self.run(self.writer.revert, done.undo))
 
     def reopen(self, task_id):
+        self.hold_place(task_id)
         done = self.run(self.writer.reopen, task_id)
         if done and done.undo:
             self.toast("Reopened", undo=lambda: self.run(self.writer.revert, done.undo))
@@ -1354,6 +1436,20 @@ class Window(Adw.ApplicationWindow):
     def show_project(self, project_id):
         self.selected = project_id
         self.after_edit()
+
+    def show_in_project(self, task_id):
+        """Open the task's project, or the Inbox, with the task and its subtasks unfolded, in view and focused."""
+        task = self.snap.all_tasks.get(task_id)
+        if task is None:
+            return
+        folded = self.store.get_meta(FOLDED_TASKS) or []
+        if (shown := unfolded_down_to(folded, task_id, self.snap.all_tasks)) != folded:
+            self.store.set_meta(FOLDED_TASKS, shown)
+        self.selected = task.get("project_id") or INBOX
+        self.adding = None
+        self.flash_task = self.focus_task = task_id
+        self.refresh_view()
+        self.split.set_show_content(True)
 
     def project_name(self, project_id):
         return project_path(project_id, self.store.rows("project"))

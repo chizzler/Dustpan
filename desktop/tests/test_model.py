@@ -1,6 +1,7 @@
 import unittest
 
-from dustpan.model import build_tree, folded_after, project_sections, snapshot, unfolded_down_to
+from dustpan.model import (Progress, build_tree, folded_after, progress_map, project_sections, ready_parent, snapshot,
+                           unfolded_down_to)
 from dustpan.store import Clock, Row, Store
 
 
@@ -107,7 +108,7 @@ class SnapshotTest(unittest.TestCase):
         self.put("task", "top_done", title="Top done", project_id="p", completed_at=10)
         snap = snapshot(self.store)
         self.assertEqual(ids(project_sections(snap, "p")[0].tasks),
-                         [("parent", [("done", [("nested", [])]), ("open", [])])])
+                         [("parent", [("open", []), ("done", [("nested", [])])])])
         cleared = {"done": [10, "parent"], "nested": [10, "done"]}
         self.assertEqual(ids(project_sections(snap, "p", cleared)[0].tasks),
                          [("parent", [("open", [])])])
@@ -116,7 +117,30 @@ class SnapshotTest(unittest.TestCase):
                          [("parent", [("done", []), ("open", [])])])
         self.put("task", "done", completed_at=20)
         self.assertEqual(ids(project_sections(snapshot(self.store), "p", cleared)[0].tasks),
-                         [("parent", [("done", []), ("open", [])])])
+                         [("parent", [("open", []), ("done", [])])])
+
+    def test_completed_subtasks_sink_below_open_ones_at_every_level(self):
+        self.put("project", "p", name="P")
+        self.put("task", "parent", title="Parent", project_id="p")
+        for tid, pos, done in [("a", 1, 5), ("b", 2, None), ("c", 3, 6), ("d", 4, None)]:
+            self.put("task", tid, title=tid, project_id="p", parent_id="parent", position=pos, completed_at=done)
+        self.put("task", "b1", title="b1", project_id="p", parent_id="b", position=1, completed_at=7)
+        self.put("task", "b2", title="b2", project_id="p", parent_id="b", position=2)
+        snap = snapshot(self.store)
+        self.assertEqual(ids(project_sections(snap, "p")[0].tasks),
+                         [("parent", [("b", [("b2", []), ("b1", [])]), ("d", []), ("a", []), ("c", [])])])
+        self.assertEqual([t.get("position") for t in (snap.all_tasks["a"], snap.all_tasks["c"])], [1, 3])
+
+    def test_settling_tasks_keep_their_place(self):
+        self.put("project", "p", name="P")
+        self.put("task", "parent", title="Parent", project_id="p")
+        for tid, pos, done in [("a", 1, 5), ("b", 2, None), ("c", 3, 6), ("d", 4, None)]:
+            self.put("task", tid, title=tid, project_id="p", parent_id="parent", position=pos, completed_at=done)
+        snap = snapshot(self.store)
+        # a was just ticked (it was open), d was just reopened (it was done)
+        settling = {"a": False, "d": True}
+        self.assertEqual(ids(project_sections(snap, "p", settling=settling)[0].tasks),
+                         [("parent", [("a", []), ("b", []), ("c", []), ("d", [])])])
 
     def test_open_child_of_completed_parent_is_top_level(self):
         self.put("project", "p", name="P")
@@ -144,4 +168,39 @@ class FoldTest(unittest.TestCase):
         self.assertEqual(unfolded_down_to(["a", "b", "c", "x"], "b", self.TASKS), ["c", "x"])
         self.assertEqual(unfolded_down_to(["a", "x"], None, self.TASKS), ["a", "x"])
         self.assertEqual(unfolded_down_to(["loop1", "x"], "loop2", self.TASKS), ["x"])
+def task(task_id, parent=None, done=None, deleted=None):
+    return Row(task_id, {"parent_id": parent, "completed_at": done, "deleted_at": deleted})
 
+
+class ProgressTest(unittest.TestCase):
+    """OpenSpec subtasks, "Parent progress" and "Completing a parent"."""
+
+    def test_counts_direct_live_subtasks(self):
+        tasks = [task("trip"), task("a", "trip", done="t1"), task("b", "trip", done="t2"), task("c", "trip", done="t3"),
+                 task("d", "trip"), task("e", "trip"), task("gone", "trip", deleted="t4"),
+                 task("grand", "a", done="t5"), task("solo")]
+        progress = progress_map(tasks)
+        self.assertEqual(progress["trip"], Progress(3, 5))
+        self.assertEqual(progress["a"], Progress(1, 1))
+        self.assertNotIn("solo", progress)
+        self.assertEqual(progress["trip"].text(), "3 of 5 subtasks completed")
+
+    def test_swept_subtasks_still_count(self):
+        tasks = [task("trip"), task("a", "trip", done="t1"), task("b", "trip", done="t2"), task("c", "trip")]
+        progress = progress_map(tasks, {"a": ["t1", "trip"], "b": ["older", "trip"]})
+        self.assertEqual(progress["trip"], Progress(2, 3, swept=1))
+        self.assertEqual(progress["trip"].text(), "2 of 3 subtasks completed (1 swept)")
+        self.assertEqual(Progress(0, 1).text(), "0 of 1 subtask completed")
+
+    def test_ready_parent_after_the_last_open_subtask(self):
+        tasks = {t.id: t for t in [task("trip"), task("a", "trip", done="t1"), task("b", "trip", done="t2"),
+                                   task("gone", "trip", deleted="t3"), task("top", done="t4")]}
+        self.assertIs(ready_parent("b", tasks), tasks["trip"])
+        self.assertIsNone(ready_parent("top", tasks))
+        tasks["c"] = task("c", "trip")
+        self.assertIsNone(ready_parent("b", tasks))
+
+    def test_no_offer_for_a_done_or_deleted_parent(self):
+        for parent in (task("trip", done="t0"), task("trip", deleted="t0")):
+            tasks = {t.id: t for t in [parent, task("a", "trip", done="t1")]}
+            self.assertIsNone(ready_parent("a", tasks))

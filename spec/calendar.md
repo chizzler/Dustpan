@@ -19,8 +19,8 @@ What the desktop client implements from `docs/calendar-views.md`, `docs/place-ta
 | Slice | Scope | Status |
 | --- | --- | --- |
 | 12a | The window and its toggle. Month: six weeks, open tasks per day, deadlines, day load. Drop a task on a day. | done, tried and approved |
-| 12b | Week and Day: a time grid, blocks as tall as their estimate, the Unscheduled lane, the line for now. Drops on a 15-minute slot or the lane (brought forward from 12c). | built |
-| 12c | Stretch a block to change its estimate, keyboard and menu moves on the grid, grid hours and day length in settings. | built |
+| 12b | Week and Day: a time grid, blocks as tall as their estimate, the Unscheduled lane, the line for now. Drops on a 15-minute slot or the lane (brought forward from 12c). | done, tried and approved |
+| 12c | Stretch a block to change its estimate, keyboard and menu moves on the grid, grid hours and day length in settings. | done; stretching tried and approved, the keys, menu and settings not yet tried |
 | 12d | Repeating tasks' coming dates (`occurrences.vectors.json`) and multi-day bars (`span`). | |
 | Later | Plan (two weeks), Year, stacked months, other calendars' events. | |
 
