@@ -50,4 +50,15 @@ systemctl stop opentodo
 systemctl start opentodo   # systemd hands the files back to the service's user
 ```
 
-Each client re-seeds the server with anything newer than the archive on its next sync.
+The desktop client's sync is designed to re-seed the server with data newer than the archive.
+A full restore followed by a real client sync has not yet been rehearsed.
+
+To rehearse without touching the server, restore a pulled archive into a scratch folder and serve it on another port:
+
+```sh
+BIN=dev/bin/v0.22.0/opentodo-linux-amd64
+$BIN restore --data-dir /tmp/rehearsal ~/.local/share/dustpan/backups/server/<archive>
+OPENTODO_ADDR=127.0.0.1:8099 OPENTODO_DATA_DIR=/tmp/rehearsal OPENTODO_PUSH=off $BIN
+```
+
+Rehearsed on 2026-11-05: a v0.18.0 archive restored, migrated and served under v0.22.0.

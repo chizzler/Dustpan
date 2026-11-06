@@ -1,5 +1,7 @@
 """Small widgets and helpers shared by the window and its dialogs."""
 
+import math
+
 import gi
 
 gi.require_version("Gtk", "4.0")
@@ -34,6 +36,11 @@ button.task-check.p2 { border-color: var(--dustpan-p2); background: alpha(var(--
 button.task-check.p3 { border-color: var(--dustpan-p3); background: alpha(var(--dustpan-p3), 0.12); }
 button.task-check.done { border-color: alpha(currentColor, 0.3); background: alpha(currentColor, 0.15); }
 button.task-check.done image { opacity: 0.7; }
+button.task-check .task-pie { color: alpha(currentColor, 0.45); transition: opacity 150ms; }
+button.task-check.p1 .task-pie { color: var(--dustpan-p1); }
+button.task-check.p2 .task-pie { color: var(--dustpan-p2); }
+button.task-check.p3 .task-pie { color: var(--dustpan-p3); }
+button.task-check:hover .task-pie, button.task-check:focus-visible .task-pie { opacity: 0.3; }
 button.subtask-broom { min-width: 24px; min-height: 24px; padding: 0;
   border: 1px solid alpha(currentColor, 0.12); background: alpha(currentColor, 0.02);
   margin: -4px 0; }  /* as tall as a line of text, so a row doesn't grow when its broom appears */
@@ -58,6 +65,8 @@ button.fold-chevron image { -gtk-icon-size: 12px; }
 @keyframes flash { from { background-color: alpha(var(--accent-bg-color), 0.3); } to { background-color: transparent; } }
 .flash { animation: flash 700ms ease-out; }
 .task-meta { font-size: 0.85em; }
+button.task-place { min-height: 0; padding: 0 4px; margin: 0 -4px; font-weight: normal; }
+button.task-place:hover label { text-decoration: underline; }
 .danger-button { min-height: 44px; padding: 0 36px; margin-top: 12px; font-weight: bold;
                  background: var(--destructive-bg-color); color: var(--destructive-fg-color); }
 .danger-button:hover { background: color-mix(in srgb, var(--destructive-bg-color) 85%, white); }
@@ -99,6 +108,43 @@ class Dot(Gtk.Widget):
         snap.push_rounded_clip(clip)
         snap.append_color(self.rgba, rect)
         snap.pop()
+
+
+class Pie(Gtk.Widget):
+    """A parent's progress inside its check circle (spec/progress.md), in the CSS colour of .task-pie.
+
+    A wedge from 12 o'clock, clockwise, for done/total. None done: a faint inner ring.
+    """
+
+    GAP = 2  # between the pie and the circle's border
+
+    def __init__(self, done, total):
+        super().__init__(css_classes=["task-pie"], can_target=False)
+        self.fraction = done / total if total else 0
+
+    def do_snapshot(self, snap):
+        width, height = self.get_width(), self.get_height()
+        cx, cy = width / 2, height / 2
+        r = min(width, height) / 2 - self.GAP
+        if r <= 0:
+            return
+        color = self.get_color()
+        path = Gsk.PathBuilder.new()
+        if self.fraction <= 0:
+            path.add_circle(Graphene.Point().init(cx, cy), r - 0.5)
+            faint = color.copy()
+            faint.alpha *= 0.6
+            snap.append_stroke(path.to_path(), Gsk.Stroke.new(1), faint)
+            return
+        if self.fraction >= 1:
+            path.add_circle(Graphene.Point().init(cx, cy), r)
+        else:
+            angle = 2 * math.pi * self.fraction
+            path.move_to(cx, cy)
+            path.line_to(cx, cy - r)
+            path.svg_arc_to(r, r, 0, self.fraction > 0.5, True, cx + r * math.sin(angle), cy - r * math.cos(angle))
+            path.close()
+        snap.append_fill(path.to_path(), Gsk.FillRule.WINDING, color)
 
 
 def broom_button():

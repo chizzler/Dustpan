@@ -1,7 +1,8 @@
 # Client spec
 
-The parts of OpenTodo's protocol that Dustpan clients implement.
+The parts of OpenTodo's protocol that the Omarchy client implements.
 OpenTodo's own docs are the reference. This file records what we use, what we skip, and where we differ.
+The Mac client has its own Swift core and [guide](../apple/README.md); its read-only slice 1 is built and approved.
 
 Pinned to **OpenTodo v0.22.0**. Local clone: `../opentodo`, beside this repo, at tag `v0.22.0`. The tests read its vectors.
 Most of the client was ported from v0.18.0 and still matches. The v1 API only grows from v0.22.0.
@@ -29,11 +30,13 @@ When the pin moves, re-read the sync doc's schema table and diff the vectors.
 | 7 | Projects and sections: create, nest, rename, colour, archive, delete | [projects.md](projects.md) | done 2026-11-01 |
 | 8 | Task notes in Markdown: write, preview, first line on the row | [notes.md](notes.md) | done 2026-11-02, tried and approved |
 | 9 | Labels: chips, a picker, labels in the sidebar, rename, recolour, reorder, merge, delete | [labels.md](labels.md) | done 2026-11-02, tried and approved; drop on a label 2026-11-02 |
-| 10 | Built-in Anytime and Completed pages, and the Filter page (the query helper) | [views.md](views.md) | done 2026-11-02; the Filter page tried and approved |
-| 11 | Trash: restore, permanent deletion, offline queue and retention | [trash.md](trash.md) | done 2026-11-03; automated GTK smoke test passed, owner trial pending |
-| 11 | Catch up with v0.22.0: time sectors (show, filter, quick add, write rules), the `notes` filter terms | [sectors.md](sectors.md) | done 2026-11-04, owner trial pending |
-| 12 | Calendar, in a companion window: Month, then Week and Day, placing, repeating and multi-day tasks | [calendar.md](calendar.md) | 12a done 2026-11-04, tried and approved; 12b and 12c built, owner trial pending |
+| 10 | Built-in Anytime and Completed pages, and the Filter page (the query helper) | [views.md](views.md) | done 2026-11-02, tried and approved (Filter 2026-11-02; Anytime and Completed 2026-11-04) |
+| 11 | Trash: restore, permanent deletion, offline queue and retention | [trash.md](trash.md) | done 2026-11-03, tried and approved 2026-11-04 |
+| Server update | Catch up with v0.22.0: time sectors (show, filter, quick add, write rules), the `notes` filter terms | [sectors.md](sectors.md) | done 2026-11-04, owner trial pending |
+| 12 | Calendar, in a companion window: Month, then Week and Day, placing, repeating and multi-day tasks | [calendar.md](calendar.md) | 12a, 12b and 12c done 2026-11-04, tried and approved (12c: the keys, menu and grid settings not yet tried); 12d to come |
 | — | Fold a task's subtasks away in project and Inbox lists | [folding.md](folding.md) | done 2026-11-04, tried and approved (0.12.3) |
+| — | Subtask progress: a pie in the parent's circle, and the offer to complete the parent | [progress.md](progress.md) | built 2026-11-05 (0.12.4); pie tried and approved, prompt trial pending |
+| — | Clickable project label on grouped rows; completed subtasks settle below open siblings | [dev diary](../dev-diary.md) | built 2026-11-06 (0.12.4); project link tried and approved, settling trial pending |
 
 ## Behind the server
 

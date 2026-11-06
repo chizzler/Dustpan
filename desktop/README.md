@@ -134,6 +134,7 @@ Before 1.0: the minor number follows the slices (0.12 is slice 12), the patch nu
 
 | Version | Date | What |
 | --- | --- | --- |
+| 0.12.4 | 2026-11-06 | Subtask progress and an offer to complete the parent; clickable project labels on grouped rows; completed subtasks settle below open siblings after 3 seconds. |
 | 0.12.3 | 2026-11-04 | Fold a task's subtasks away in project and Inbox lists: a chevron before the check, ← and →, and the row menu. Per device. Every row has a leading slot, so checks line up on every page. |
 | 0.12.2 | 2026-11-04 | Slice 12c: stretch a block's bottom edge to change its estimate; keys and a menu move tasks on the calendar; grid hours and day length in settings. A click on a calendar task selects it, a double-click opens it. |
 | 0.12.1 | 2026-11-04 | Fixes: the highlight and the list no longer jump when a task is ticked; the calendar grid keeps its place on every edit; the broom no longer grows its row; `calendar.py` renamed `calendar_rules.py`. |
