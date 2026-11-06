@@ -8,3 +8,9 @@ __pycache__/
 
 # Where the server is: kept out of git
 deploy/deploy.env
+
+# Swift and Xcode
+.build/
+.swiftpm/
+xcuserdata/
+.DS_Store
