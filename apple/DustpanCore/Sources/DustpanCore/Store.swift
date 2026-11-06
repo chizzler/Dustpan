@@ -245,7 +245,7 @@ public struct FieldClock: Hashable, Sendable {
 }
 
 /// One entity folded from its fields.
-public struct Row: Hashable, Sendable {
+public struct Row: Hashable, Identifiable, Sendable {
     public let id: String
     public var values: [String: JSON] = [:]
     public var clocks: [String: FieldClock] = [:]

@@ -16,11 +16,13 @@ struct ContentView: View {
             NavigationSplitView {
                 Sidebar()
             } detail: {
-                TaskList(page: model.page ?? .inbox)
+                // A page of its own: selection and focus start fresh.
+                TaskList(page: model.page ?? .inbox).id(model.page)
             }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) { SyncStatus() }
             }
+            .overlay(alignment: .bottom) { ToastView() }
             .frame(minWidth: 640, minHeight: 400)
         }
     }
@@ -33,7 +35,7 @@ struct SyncStatus: View {
         switch model.status {
         case .idle:
             Button("Sync", systemImage: "arrow.clockwise") { Task { await model.sync() } }
-                .help("Sync now (⌘R)")
+                .help(idleHelp)
         case .syncing:
             ProgressView().controlSize(.small).help("Syncing…")
         case .offline(let message):
@@ -46,5 +48,51 @@ struct SyncStatus: View {
                 .foregroundStyle(.red)
                 .help("\(message). Click to try again.")
         }
+    }
+}
+
+extension SyncStatus {
+    /// "Synced 14:02 · live · 2 waiting. Sync now (⌘R)"
+    private var idleHelp: String {
+        var parts = [model.lastSynced.map { "Synced \($0.formatted(date: .omitted, time: .shortened))" } ?? "Not synced yet"]
+        if model.live { parts.append("live") }
+        if model.waiting > 0 { parts.append("\(model.waiting) waiting") }
+        return parts.joined(separator: " · ") + ". Sync now (⌘R)"
+    }
+}
+
+/// The latest action's message, with Undo when it has one. Goes after 5 seconds.
+struct ToastView: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.undoManager) private var undoManager
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ZStack {
+            if let toast = model.toast { bubble(toast) }
+        }
+        .animation(.snappy, value: model.toast)
+    }
+
+    private func bubble(_ toast: Toast) -> some View {
+        HStack(spacing: 12) {
+            Text(toast.message).lineLimit(2)
+            if toast.undoable {
+                Button("Undo", action: undo).buttonStyle(.borderless)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .glassEffect(.regular, in: .capsule)
+        .padding(.bottom, 16)
+        .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+        .task(id: toast.id) { await expire(toast) }
+    }
+
+    private func undo() { undoManager?.undo() }
+
+    private func expire(_ toast: Toast) async {
+        try? await Task.sleep(for: .seconds(5))
+        if model.toast?.id == toast.id { model.toast = nil }
     }
 }

@@ -9,6 +9,7 @@ struct DustpanApp: App {
             ContentView()
                 .environment(model)
                 .task { await model.start() }
+                .task { await model.listen() }
         }
         .commands {
             CommandGroup(after: .toolbar) {

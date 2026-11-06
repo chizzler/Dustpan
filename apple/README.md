@@ -1,7 +1,7 @@
 # Dustpan for Mac
 
 The Mac client. SwiftUI, with the protocol in a Swift package the iPhone app will share. No third-party packages:
-Foundation, SwiftUI and the system's SQLite.
+Foundation, SwiftUI, CryptoKit and the system's SQLite.
 
 Needs Xcode 27 and macOS 26 or later.
 
@@ -35,9 +35,15 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `DustpanCore/Sources/DustpanCore/Api.swift` | HTTP client, `URLSession` |
 | `DustpanCore/Sources/DustpanCore/Config.swift` | The config file and where the database lives |
 | `DustpanCore/Sources/DustpanCore/Model.swift` | Display rules: trees, sections, the Inbox, counts |
-| `DustpanCore/Sources/DustpanCore/Dates.swift` | Due date display |
+| `DustpanCore/Sources/DustpanCore/Dates.swift` | Due date display, the instant a due denotes, and the editor's due |
+| `DustpanCore/Sources/DustpanCore/Writes.swift` | Local edits: one batch per action, applied and queued, with Undo |
+| `DustpanCore/Sources/DustpanCore/Reminders.swift` | Reminders that follow their dates, and default reminders |
+| `DustpanCore/Sources/DustpanCore/Ids.swift` | Deterministic ids |
+| `DustpanCore/Sources/DustpanCore/Events.swift` | The live update stream |
 | `DustpanCore/Sources/dustpan-cli/` | `sync` and `tree`, for checking against the desktop client |
-| `Dustpan/` | The Mac app: window, sidebar, task list |
+| `Dustpan/` | The Mac app: window, sidebar, task list, editor |
+
+The tests read OpenTodo's vectors from the clone beside this repo (`../opentodo`, or `OPENTODO_SRC`), and skip them without it.
 
 Each Swift file is a port of the desktop module of the same name, and its tests are ports of the desktop's.
 `dustpan-cli tree` prints the same text as `dev/client.sh tree`, so the two can be diffed.
@@ -70,4 +76,5 @@ Before 1.0 the minor number follows the Mac client's own slices.
 
 | Version | Date | What |
 | --- | --- | --- |
+| 0.2.0 | 2026-11-06 | Slice 2, basic writes: add, complete and reopen with Undo, an editor for title, priority, due, project and section. Sync 250 ms after an edit, and the live stream. |
 | 0.1.0 | 2026-11-06 | Slice 1, read-only: sync, the local store, the Inbox and nested projects with sections, subtasks, priorities, due dates, estimates and labels. Syncs at start, every 30 s and on ⌘R. |

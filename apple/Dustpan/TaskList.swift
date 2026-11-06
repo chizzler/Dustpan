@@ -3,28 +3,49 @@ import SwiftUI
 
 struct TaskList: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.undoManager) private var undoManager
     let page: Page
+    @State private var selection: Set<String> = []
+    @State private var editing: Row?
+    /// The list whose Add field has the focus.
+    @FocusState private var adding: Place?
 
     var body: some View {
-        let snap = model.snapshot
         let (title, projectId) = heading
-        let sections = projectSections(snap, projectId)
-        Group {
-            if sections.allSatisfy(\.tasks.isEmpty) && sections.count == 1 {
-                ContentUnavailableView("Nothing here", systemImage: "checkmark.circle")
-            } else {
-                List {
-                    ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
-                        if section.name.isEmpty {
-                            rows(section.tasks)
-                        } else {
-                            Section(section.name) { rows(section.tasks) }
-                        }
+        let sections = projectSections(model.snapshot, projectId)
+        List(selection: $selection) {
+            ForEach(sections.enumerated(), id: \.offset) { _, section in
+                let place = Place(projectId: projectId, sectionId: section.id)
+                if section.name.isEmpty {
+                    rows(section.tasks)
+                    addRow(place, section)
+                } else {
+                    Section(section.name) {
+                        rows(section.tasks)
+                        addRow(place, section)
                     }
                 }
             }
         }
+        .contextMenu(forSelectionType: String.self) { ids in
+            if let task = ids.first.flatMap({ model.snapshot.allTasks[$0] }), ids.count == 1 {
+                Button("Edit…") { editing = task }
+                Button(task["completed_at"].isNull ? "Complete" : "Reopen") {
+                    model.toggle(task, undoManager: undoManager)
+                }
+            }
+        } primaryAction: { ids in
+            editing = ids.first.flatMap { model.snapshot.allTasks[$0] }
+        }
         .navigationTitle(title)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Add Task", systemImage: "plus") { adding = Place(projectId: projectId) }
+                    .keyboardShortcut("n")
+                    .help("Add a task (⌘N)")
+            }
+        }
+        .sheet(item: $editing, content: TaskEditor.init)
     }
 
     /// The page's title and project. A project that's gone shows the Inbox.
@@ -37,8 +58,18 @@ struct TaskList: View {
 
     private func rows(_ nodes: [Node]) -> some View {
         ForEach(flatten(nodes, depth: 0), id: \.node.id) { item in
-            TaskRow(task: item.node.row, labels: model.snapshot.labels)
-                .padding(.leading, CGFloat(item.depth) * 24)
+            TaskRow(task: item.node.row, labels: model.snapshot.labels) {
+                withAnimation { model.toggle(item.node.row, undoManager: undoManager) }
+            }
+            .padding(.leading, CGFloat(item.depth) * 24)
+        }
+    }
+
+    @ViewBuilder
+    private func addRow(_ place: Place, _ section: DustpanCore.Section) -> some View {
+        if section.isList {
+            AddTaskField(place: place, focus: $adding)
+                .selectionDisabled()
         }
     }
 
@@ -47,16 +78,50 @@ struct TaskList: View {
     }
 }
 
+/// The last row of a list: type a title and press Return to add a task there.
+private struct AddTaskField: View {
+    @Environment(AppModel.self) private var model
+    let place: Place
+    var focus: FocusState<Place?>.Binding
+    @State private var title = ""
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "plus").foregroundStyle(.tint).accessibilityHidden(true)
+            TextField("Add task", text: $title)
+                .textFieldStyle(.plain)
+                .focused(focus, equals: place)
+                .onSubmit {
+                    guard !title.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                    if model.add(title, to: place) { title = "" }
+                    focus.wrappedValue = place
+                }
+                .onKeyPress(.escape) {
+                    title = ""
+                    focus.wrappedValue = nil
+                    return .handled
+                }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
 struct TaskRow: View {
     let task: Row
     let labels: [String: Row]
+    let toggle: () -> Void
 
     var body: some View {
         let done = !task["completed_at"].isNull
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: done ? "checkmark.circle.fill" : "circle")
-                .foregroundStyle(priorityColor)
-                .fontWeight(task["priority"].int.map { $0 < 4 } == true ? .bold : .regular)
+            Button(done ? "Reopen" : "Complete", systemImage: done ? "checkmark.circle.fill" : "circle",
+                   action: toggle)
+                .labelStyle(.iconOnly)
+                .buttonStyle(.plain)
+                .foregroundStyle(priorityColor(task["priority"].int))
+                .bold(task["priority"].int.map { $0 < 4 } ?? false)
+                .contentShape(.circle)
+                .help(done ? "Reopen" : "Complete")
             VStack(alignment: .leading, spacing: 3) {
                 Text(task["title"].string ?? "")
                     .strikethrough(done)
@@ -81,26 +146,27 @@ struct TaskRow: View {
                 if let estimate {
                     Label(formatMinutes(Int(estimate)), systemImage: "timer").foregroundStyle(.secondary)
                 }
-                ForEach(chips, id: \.id) { label in
+                ForEach(chips) { label in
                     let color = Color(hex: label["color"].string) ?? .secondary
                     Text(label["name"].string ?? "")
                         .padding(.horizontal, 6)
                         .padding(.vertical, 1)
                         .foregroundStyle(color)
-                        .background(color.opacity(0.15), in: Capsule())
+                        .background(color.opacity(0.15), in: .capsule)
                 }
             }
             .labelStyle(.titleAndIcon)
         }
     }
+}
 
-    private var priorityColor: Color {
-        switch task["priority"].int {
-        case 1: .red
-        case 2: .orange
-        case 3: .blue
-        default: .secondary
-        }
+/// p1 red, p2 orange, p3 blue; p4 is no priority.
+func priorityColor(_ priority: Int64?) -> Color {
+    switch priority {
+    case 1: .red
+    case 2: .orange
+    case 3: .blue
+    default: .secondary
     }
 }
 

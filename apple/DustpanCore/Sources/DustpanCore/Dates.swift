@@ -109,3 +109,80 @@ public func isoToday(now: Date = Date(), zone: TimeZone = .current) -> String {
     let c = gregorian(zone).dateComponents([.year, .month, .day], from: now)
     return String(format: "%04d-%02d-%02d", c.year!, c.month!, c.day!)
 }
+
+// MARK: - Instants
+
+/// The time a date-only due counts as, for reminders.
+let defaultReminderHour = 9
+
+/// Unix ms of a wall time in zone. A gap moves forward to the transition; an overlap takes the first.
+func zonedInstant(_ wall: WallTime, in zone: TimeZone) -> Int64 {
+    let asUTC = Int64(gregorian(.gmt).date(from: wall.dateComponents)!.timeIntervalSince1970)
+    func offset(at seconds: Int64) -> Int64 {
+        Int64(zone.secondsFromGMT(for: Date(timeIntervalSince1970: TimeInterval(seconds))))
+    }
+    let before = offset(at: asUTC - 86_400), after = offset(at: asUTC + 86_400)
+    let fits = [asUTC - before, asUTC - after].filter { asUTC - offset(at: $0) == $0 }
+    if let first = fits.min() { return first * 1000 }
+    // In a gap: the transition lies between the two readings. Find it to the minute.
+    var low = asUTC - before, high = asUTC - after
+    if low > high { swap(&low, &high) }
+    while high - low > 60 {
+        let mid = (low + (high - low) / 2) / 60 * 60
+        if offset(at: mid) == offset(at: low) { low = mid } else { high = mid }
+    }
+    return high * 1000
+}
+
+/// Unix ms a due denotes. Zoned: its wall time in its zone. Floating: local time, 09:00 without a time.
+public func dueInstant(_ due: JSON, localZone: TimeZone = .current) -> Int64? {
+    guard let (y, m, d) = due["date"].string.flatMap(parseDate) else { return nil }
+    let time = due["time"].string.flatMap(parseTime)
+    let wall = WallTime(year: y, month: m, day: d, hour: time?.0 ?? defaultReminderHour, minute: time?.1 ?? 0)
+    let zone = time != nil ? due["tz"].string.flatMap(TimeZone.init(identifier:)) ?? localZone : localZone
+    return zonedInstant(wall, in: zone)
+}
+
+// MARK: - Editing
+
+/// A due as the editor holds it: a moment, shown in the due's own zone.
+///
+/// A zoned due keeps its zone while its date or time changes. Clearing the time drops the zone.
+public struct DueDraft: Equatable, Sendable {
+    /// The day, and the time when hasTime, read in zone.
+    public var date: Date
+    public var hasTime: Bool
+    /// The due's zone, or this device's for a floating due.
+    public let zone: TimeZone
+    let tz: String?
+
+    /// A new due on date's day in this device's zone.
+    public init(date: Date, hasTime: Bool = false, zone: TimeZone = .current) {
+        (self.date, self.hasTime, self.zone, tz) = (date, hasTime, zone, nil)
+    }
+
+    /// The draft of a stored due. Nil when there's none.
+    public init?(_ due: JSON, localZone: TimeZone = .current) {
+        guard let (y, m, d) = due["date"].string.flatMap(parseDate) else { return nil }
+        let time = due["time"].string.flatMap(parseTime)
+        tz = time != nil ? due["tz"].string.flatMap { TimeZone(identifier: $0) == nil ? nil : $0 } : nil
+        zone = tz.flatMap(TimeZone.init(identifier:)) ?? localZone
+        hasTime = time != nil
+        let wall = WallTime(year: y, month: m, day: d, hour: time?.0 ?? defaultReminderHour, minute: time?.1 ?? 0)
+        guard let date = gregorian(zone).date(from: wall.dateComponents) else { return nil }
+        self.date = date
+    }
+
+    /// The zone's name, when the due has one of its own.
+    public var zoneName: String? { hasTime ? tz : nil }
+
+    public var json: JSON {
+        let c = gregorian(zone).dateComponents([.year, .month, .day, .hour, .minute], from: date)
+        var due: [String: JSON] = ["date": .string(String(format: "%04d-%02d-%02d", c.year!, c.month!, c.day!))]
+        if hasTime {
+            due["time"] = .string(String(format: "%02d:%02d", c.hour!, c.minute!))
+            if let tz { due["tz"] = .string(tz) }
+        }
+        return .object(due)
+    }
+}
