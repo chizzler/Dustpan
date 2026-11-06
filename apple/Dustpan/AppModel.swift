@@ -1,3 +1,4 @@
+import AppKit
 import DustpanCore
 import Foundation
 import Observation
@@ -68,6 +69,17 @@ final class AppModel {
     /// Why the app can't start: no config, or no database.
     private(set) var setupProblem: String?
     var page: Page? = .today
+    /// The task being dragged, and the drop under the pointer.
+    private(set) var drag: TaskDrag?
+    private(set) var dropMark: DropMark?
+    /// The task just dropped: its row flashes and comes into view.
+    private(set) var flash: String?
+    /// Where the pointer is over the row it hovers, from the row's left: a drag's grab point.
+    @ObservationIgnored var hoverX: Double = 0
+    @ObservationIgnored private var markTick = 0
+    @ObservationIgnored private var spring: Task<Void, Never>?
+    /// A sync waits until the drop, so the page isn't rebuilt under the pointer.
+    @ObservationIgnored private var syncAfterDrag = false
 
     private let store: Store?
     private let api: Api?
@@ -131,6 +143,10 @@ final class AppModel {
     /// Exchange with the server. A call while one runs makes it go round again.
     func sync() async {
         guard let syncer else { return }
+        guard drag == nil else {
+            syncAfterDrag = true
+            return
+        }
         guard status != .syncing else {
             syncAgain = true
             return
@@ -410,9 +426,10 @@ final class AppModel {
 
     /// Run an action and offer its Undo in the toast and in Edit ▸ Undo. Redo runs the action again.
     /// Without a message, there's no toast: Edit ▸ Undo alone.
+    @discardableResult
     private func undoable(_ name: String, _ action: @escaping (Writer) throws -> Done,
-                          message: ((Done) -> String)?) {
-        guard let done = perform(action), !done.undo.isEmpty else { return }
+                          message: ((Done) -> String)?) -> Done? {
+        guard let done = perform(action), !done.undo.isEmpty else { return nil }
         if let message { show(Toast(message: message(done), undoable: undoManager != nil)) }
         undoManager?.registerUndo(withTarget: self) { model in
             model.toast = nil
@@ -421,6 +438,7 @@ final class AppModel {
             model.undoManager?.setActionName(name)
         }
         undoManager?.setActionName(name)
+        return done
     }
 
     /// Edit ▸ Undo for an edit made in a sheet. Redo isn't offered: the sheet's values are gone.
@@ -432,6 +450,95 @@ final class AppModel {
     /// A new toast replaces the shown one, so Undo always means the latest action.
     private func show(_ toast: Toast) {
         self.toast = toast
+    }
+
+    // MARK: drag and drop
+
+    /// A row starts a drag. It ends when the mouse button is up, dropped or not.
+    func beginDrag(_ taskId: String) {
+        drag = TaskDrag(taskId: taskId, grabX: hoverX)
+        Task {
+            while NSEvent.pressedMouseButtons & 1 != 0 { try? await Task.sleep(for: .milliseconds(100)) }
+            endDrag()
+        }
+    }
+
+    private func endDrag() {
+        guard drag != nil else { return }
+        drag = nil
+        dropMark = nil
+        spring?.cancel()
+        if syncAfterDrag {
+            syncAfterDrag = false
+            Task { await sync() }
+        }
+    }
+
+    func mark(_ mark: DropMark) {
+        markTick += 1
+        if dropMark != mark { dropMark = mark }
+    }
+
+    /// The pointer left a target. The mark goes unless another target takes over soon, so it doesn't flicker
+    /// in the gaps between rows.
+    func unmark() {
+        let tick = markTick
+        Task {
+            try? await Task.sleep(for: .milliseconds(150))
+            if markTick == tick {
+                dropMark = nil
+                spring?.cancel()
+            }
+        }
+    }
+
+    /// Holding a drag over a sidebar row for 700 ms opens its page, so the task can be placed exactly.
+    func springLoad(_ page: Page, from key: String) {
+        spring?.cancel()
+        spring = Task {
+            try? await Task.sleep(for: .milliseconds(700))
+            if !Task.isCancelled && drag != nil && dropMark == .target(key) { self.page = page }
+        }
+    }
+
+    /// Apply a drop as one batch with Undo, then flash the task where it landed.
+    func drop(_ taskId: String, on target: DropTarget) {
+        spring?.cancel()
+        guard let task = snapshot.allTasks[taskId] else { return }
+        let names = dropNames(target, task)
+        if case .label(let id) = target, task["labels"].array?.contains(.string(id)) == true {
+            show(Toast(message: "Already has @\(names[id] ?? "")"))
+            return
+        }
+        let done = undoable("Move", { try $0.drop(taskId, on: target) }) { _ in
+            describeDrop(target, task: task, names: names) { formatDay($0) }
+        }
+        guard done != nil else { return }
+        flash = taskId
+        Task {
+            try? await Task.sleep(for: .milliseconds(700))
+            if flash == taskId { flash = nil }
+        }
+    }
+
+    /// The names describeDrop needs: projects, sections, tasks and labels the drop refers to.
+    private func dropNames(_ target: DropTarget, _ task: Row) -> [String: String] {
+        var ids = [task["parent_id"].string]
+        switch target {
+        case .place(let place): ids += [place.projectId, place.sectionId, place.parentId]
+        case .project(let id): ids.append(id)
+        case .label(let id): ids.append(id)
+        case .day: break
+        }
+        let sections = snapshot.sectionsByProject.values.joined()
+        var names: [String: String] = [:]
+        for id in ids.compactMap({ $0 }) {
+            names[id] = snapshot.liveProjects.first { $0.id == id }?["name"].string
+                ?? sections.first { $0.id == id }?["name"].string
+                ?? snapshot.labels[id]?["name"].string
+                ?? snapshot.allTasks[id]?["title"].string
+        }
+        return names
     }
 
     // MARK: reads

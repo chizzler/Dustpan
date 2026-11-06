@@ -388,63 +388,66 @@ public final class Writer {
 
     /// Write the changed fields of one task, in one batch.
     public func edit(_ taskId: String, _ edit: TaskEdit) throws {
-        try commit {
-            let tasks = try store.rows("task")
-            let task = try liveTask(tasks, taskId)
-            var patch: [String: JSON] = [:]
-            var out: [Change] = []
-            if let title = edit.title {
-                let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !title.isEmpty else { throw CannotEdit("A task needs a title") }
-                patch["title"] = .string(title)
-            }
-            if let priority = edit.priority {
-                guard (1...4).contains(priority) else { throw CannotEdit("Priority is 1 to 4") }
-                patch["priority"] = .int(priority)
-            }
-            if let due = edit.due {
-                patch["due"] = try checkDue(due)
-                if due.isNull && task["recurrence"].isTruthy && edit.recurrence == nil { patch["recurrence"] = .null }
-                if !due.isNull && task["start"].string == "someday" { patch["start"] = .null }
-            }
-            if let text = edit.recurrence?.trimmingCharacters(in: .whitespacesAndNewlines) {
-                if text.isEmpty {
-                    patch["recurrence"] = .null
-                } else {
-                    let rule: Rule
-                    do { rule = try Rule(parsing: text) } catch { throw CannotEdit("Repeat: \(error)") }
-                    patch["recurrence"] = .string(rule.canonical)
-                    // A rule needs a due date: the first occurrence from today.
-                    if (patch["due"] ?? task["due"]).isNull {
-                        patch["due"] = ["date": .string(rule.first(from: try today()).description)]
-                    }
-                }
-            }
-            if let labels = edit.labels {
-                let (ids, created) = try resolveLabels(labels)
-                patch["labels"] = .array(ids.map(JSON.string))
-                out += created
-            }
-            if let minutes = edit.estimateMinutes {
-                if !minutes.isNull {
-                    guard let n = minutes.int, (1...maxEstimate).contains(n) else {
-                        throw CannotEdit("An estimate is 1 minute to 1 week")
-                    }
-                }
-                patch["estimate_minutes"] = minutes
-            }
-            if let deadline = edit.deadline {
-                if !deadline.isNull {
-                    guard let text = deadline.string, isRealDate(text) else { throw CannotEdit("That isn't a valid date") }
-                }
-                patch["deadline"] = deadline
-            }
-            if let place = edit.place {
-                out += try planMove(tasks, task, to: place, into: &patch)
-            }
-            // New labels come first in the batch, so they exist before the task refers to them.
-            return patch.isEmpty ? out : out + [Change("task", taskId, patch)]
+        try commit { try planEdit(taskId, edit) }
+    }
+
+    /// The changes edit makes, for use inside another plan.
+    func planEdit(_ taskId: String, _ edit: TaskEdit) throws -> [Change] {
+        let tasks = try store.rows("task")
+        let task = try liveTask(tasks, taskId)
+        var patch: [String: JSON] = [:]
+        var out: [Change] = []
+        if let title = edit.title {
+            let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { throw CannotEdit("A task needs a title") }
+            patch["title"] = .string(title)
         }
+        if let priority = edit.priority {
+            guard (1...4).contains(priority) else { throw CannotEdit("Priority is 1 to 4") }
+            patch["priority"] = .int(priority)
+        }
+        if let due = edit.due {
+            patch["due"] = try checkDue(due)
+            if due.isNull && task["recurrence"].isTruthy && edit.recurrence == nil { patch["recurrence"] = .null }
+            if !due.isNull && task["start"].string == "someday" { patch["start"] = .null }
+        }
+        if let text = edit.recurrence?.trimmingCharacters(in: .whitespacesAndNewlines) {
+            if text.isEmpty {
+                patch["recurrence"] = .null
+            } else {
+                let rule: Rule
+                do { rule = try Rule(parsing: text) } catch { throw CannotEdit("Repeat: \(error)") }
+                patch["recurrence"] = .string(rule.canonical)
+                // A rule needs a due date: the first occurrence from today.
+                if (patch["due"] ?? task["due"]).isNull {
+                    patch["due"] = ["date": .string(rule.first(from: try today()).description)]
+                }
+            }
+        }
+        if let labels = edit.labels {
+            let (ids, created) = try resolveLabels(labels)
+            patch["labels"] = .array(ids.map(JSON.string))
+            out += created
+        }
+        if let minutes = edit.estimateMinutes {
+            if !minutes.isNull {
+                guard let n = minutes.int, (1...maxEstimate).contains(n) else {
+                    throw CannotEdit("An estimate is 1 minute to 1 week")
+                }
+            }
+            patch["estimate_minutes"] = minutes
+        }
+        if let deadline = edit.deadline {
+            if !deadline.isNull {
+                guard let text = deadline.string, isRealDate(text) else { throw CannotEdit("That isn't a valid date") }
+            }
+            patch["deadline"] = deadline
+        }
+        if let place = edit.place {
+            out += try planMove(tasks, task, to: place, into: &patch)
+        }
+        // New labels come first in the batch, so they exist before the task refers to them.
+        return patch.isEmpty ? out : out + [Change("task", taskId, patch)]
     }
 
     /// Add a move to patch. Returns the changes for descendants.
@@ -460,8 +463,12 @@ public final class Writer {
         if sectionId != task["section_id"].string { patch["section_id"] = sectionId.json }
         if task["parent_id"].isTruthy { patch["parent_id"] = .null }
         patch["position"] = endOfList(tasks, projectId: projectId, sectionId: sectionId, skip: task.id)
-        // Subtasks follow their parent into another project, out of its sections.
-        return descendants(of: task.id, in: tasks).filter { $0["project_id"].string != projectId }.map { d in
+        return carrySubtree(tasks, task.id, to: projectId)
+    }
+
+    /// Subtasks follow their parent into another project, out of its sections.
+    func carrySubtree(_ tasks: [String: Row], _ taskId: String, to projectId: String?) -> [Change] {
+        descendants(of: taskId, in: tasks).filter { $0["project_id"].string != projectId }.map { d in
             var patch: [String: JSON] = ["project_id": projectId.json]
             if d["section_id"].isTruthy { patch["section_id"] = .null }
             return Change("task", d.id, patch)
@@ -810,5 +817,98 @@ extension Writer {
             if wanted == current { return [] }
             return created + [Change("task", taskId, ["labels": .array(wanted.map(JSON.string))])]
         }
+    }
+}
+
+// MARK: - Drag and drop (spec/dragdrop.md)
+
+extension Writer {
+    /// Apply a drop target to an open task, as one batch.
+    /// Returns Done whose undo restores every field written. Nothing changed: an empty undo.
+    public func drop(_ taskId: String, on target: DropTarget) throws -> Done {
+        try undoable {
+            let tasks = try store.rows("task")
+            let task = try liveTask(tasks, taskId)
+            guard task["completed_at"].isNull else { throw CannotEdit("Only open tasks can be moved") }
+            switch target {
+            case .place(let place):
+                return try planPlace(tasks, task, place)
+            case .project(let projectId):
+                return try planEdit(taskId, TaskEdit(place: Place(projectId: projectId)))
+            case .day(let day):
+                let due = task["due"]
+                if due["date"].string == day.description { return [] }
+                var fields = due.object ?? [:]
+                fields["date"] = .string(day.description)
+                return try planEdit(taskId, TaskEdit(due: .object(fields)))
+            case .label(let labelId):
+                _ = try liveLabel(labelId)
+                let labels = labelIds(task)
+                if labels.contains(labelId) { return [] }
+                return [Change("task", taskId, ["labels": .array((labels + [labelId]).map(JSON.string))])]
+            }
+        }
+    }
+
+    /// The changes that put an open task at a Placement: one position write, unless the list needs renumbering.
+    /// The list is a parent's open subtasks, or the open top-level tasks of one section.
+    func planPlace(_ tasks: [String: Row], _ task: Row, _ place: Placement) throws -> [Change] {
+        let (projectId, sectionId, parentId) = (place.projectId, place.sectionId, place.parentId)
+        try checkProject(projectId)
+        if parentId == nil { try checkSection(sectionId, in: projectId) }
+        let open = tasks.values.filter { t in
+            isLive(t) && t["completed_at"].isNull && t["project_id"].string == projectId
+        }
+        var parents: [String: String?] = [:]
+        func walk(_ nodes: [Node], _ parent: String?) {
+            for node in nodes {
+                parents[node.id] = .some(parent)
+                walk(node.children, node.id)
+            }
+        }
+        walk(buildTree(open) { $0["parent_id"].string }, nil)
+        if let parentId {
+            let below = Set(descendants(of: task.id, in: tasks).map(\.id))
+            if parents[parentId] == nil || parentId == task.id || below.contains(parentId) {
+                throw CannotEdit("A task can't go under itself")
+            }
+        }
+        let sections = Set(try store.rows("section").values.filter { s in
+            isLive(s) && s["project_id"].string == projectId
+        }.map(\.id))
+        func sectionOf(_ t: Row) -> String? { t["section_id"].string.flatMap { sections.contains($0) ? $0 : nil } }
+
+        let siblings = open.filter { t in
+            guard let shown = parents[t.id] else { return false }
+            return parentId == nil ? shown == nil && sectionOf(t) == sectionId : shown == parentId
+        }
+        let others = siblings.sorted(by: orderLess).map(\.id).filter { $0 != task.id }
+        let anchor = place.before ?? place.after
+        var index = others.count
+        if let anchor {
+            guard let i = others.firstIndex(of: anchor) else { throw CannotEdit("That task is no longer in the list") }
+            index = i + (place.after != nil ? 1 : 0)
+        }
+
+        var patch: [String: JSON] = [:], out: [Change] = []
+        let sameProject = projectId == task["project_id"].string
+        if !sameProject {
+            patch["project_id"] = projectId.json
+            out = carrySubtree(tasks, task.id, to: projectId)
+        }
+        // In its own project the parent is the one the tree shows; a stale reference stays unwritten.
+        let currentParent = sameProject ? parents[task.id] ?? nil : task["parent_id"].string
+        if parentId != currentParent { patch["parent_id"] = parentId.json }
+        if parentId == nil && sectionId != (sameProject ? sectionOf(task) : task["section_id"].string) {
+            patch["section_id"] = sectionId.json
+        } else if parentId != nil && !sameProject && task["section_id"].isTruthy {
+            patch["section_id"] = .null  // that section belongs to the old project
+        }
+        // A task from another list isn't among siblings, so it always gets a position here.
+        let moves = planOrder(siblings.map { (id: $0.id, position: $0["position"].number ?? 0) }, moving: task.id,
+                              to: index, fallback: Double(now()))
+        return moves.map { move in
+            Change("task", move.id, (move.id == task.id ? patch : [:]).merging(["position": position(move.position)]) { $1 })
+        } + out
     }
 }

@@ -23,37 +23,48 @@ struct GroupedTaskList: View {
 
     var body: some View {
         let content = self.content
-        List(selection: $selection) {
-            if let query = content.query {
-                Text(query)
-                    .font(.callout.monospaced())
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .selectionDisabled()
-            }
-            if let error = content.error {
-                Label("This query can't run here: \(error)", systemImage: "exclamationmark.octagon")
-                    .foregroundStyle(.red)
-                    .selectionDisabled()
-            }
-            ForEach(content.warnings, id: \.self) { warning in
-                Label(warning, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.orange)
-                    .selectionDisabled()
-            }
-            if content.groups.isEmpty && content.error == nil {
-                Text(content.empty).foregroundStyle(.secondary).selectionDisabled()
-            }
-            ForEach(content.groups) { group in
-                if group.heading.isEmpty {
-                    rows(group.tasks)
-                } else {
-                    Section(group.heading) { rows(group.tasks) }
+        ScrollViewReader { proxy in
+            List(selection: $selection) {
+                if let query = content.query {
+                    Text(query)
+                        .font(.callout.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .selectionDisabled()
+                }
+                if let error = content.error {
+                    Label("This query can't run here: \(error)", systemImage: "exclamationmark.octagon")
+                        .foregroundStyle(.red)
+                        .selectionDisabled()
+                }
+                ForEach(content.warnings, id: \.self) { warning in
+                    Label(warning, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                        .selectionDisabled()
+                }
+                if content.groups.isEmpty && content.error == nil {
+                    Text(content.empty).foregroundStyle(.secondary).selectionDisabled()
+                }
+                ForEach(content.groups) { group in
+                    if group.heading.isEmpty {
+                        rows(group.tasks)
+                    } else {
+                        Section {
+                            rows(group.tasks)
+                        } header: {
+                            heading(group)
+                        }
+                    }
+                }
+                if let due = content.addDue {
+                    AddTaskField(place: Place(projectId: nil), due: due, labels: content.addLabels, focus: $adding)
+                        .selectionDisabled()
                 }
             }
-            if let due = content.addDue {
-                AddTaskField(place: Place(projectId: nil), due: due, labels: content.addLabels, focus: $adding)
-                    .selectionDisabled()
+            .onChange(of: model.flash) { _, id in
+                guard let id, content.groups.contains(where: { $0.tasks.contains { $0.id == id } }) else { return }
+                selection = [id]
+                withAnimation { proxy.scrollTo(id) }
             }
         }
         .taskMenus(selection: selection)
@@ -120,7 +131,24 @@ struct GroupedTaskList: View {
                     labelPage: labelPage) {
                 withAnimation { model.toggle(task) }
             }
+            .taskDrag(task)
+            .flashes(task.id)
             .labelPicker(for: task)
+        }
+    }
+
+    /// A day's heading on Today and Upcoming takes drops: the task becomes due that day.
+    @ViewBuilder
+    private func heading(_ group: ViewGroup) -> some View {
+        let day: Day? = switch page {
+        case .today: group.key == "today" ? model.today : nil
+        case .upcoming: Day(group.key)
+        default: nil
+        }
+        if let day {
+            Text(group.heading).taskDrop("day:\(day)", .day(day))
+        } else {
+            Text(group.heading)
         }
     }
 }

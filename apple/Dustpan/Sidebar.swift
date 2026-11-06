@@ -14,11 +14,13 @@ struct Sidebar: View {
         let snap = model.snapshot
         List(selection: $model.page) {
             Label("Today", systemImage: "star")
+                .taskDrop("today", .day(model.today))
                 .badge(todayCount(snap.tasks, today: model.today))
                 .tag(Page.today)
             Label("Upcoming", systemImage: "calendar")
                 .tag(Page.upcoming)
             Label("Inbox", systemImage: "tray")
+                .taskDrop("inbox", .project(nil), opens: .inbox)
                 .badge(countOpen(snap, nil, today: today))
                 .tag(Page.inbox)
             Section("Projects") {
@@ -88,6 +90,7 @@ private struct ProjectRows: View {
                 .foregroundStyle(Color(hex: node.row["color"].string) ?? .secondary)
                 .imageScale(.small)
         }
+        .taskDrop("project:\(node.id)", .project(node.id), opens: .project(node.id))
         .badge(countOpen(model.snapshot, node.id, today: today))
         .tag(Page.project(node.id))
     }
@@ -158,6 +161,7 @@ private struct LabelRows: View {
                 .foregroundStyle(Color(hex: label["color"].string) ?? .secondary)
                 .imageScale(.small)
         }
+        .taskDrop("label:\(label.id)", .label(label.id))
         .badge(count)
         .tag(Page.label(label.id))
     }

@@ -11,18 +11,30 @@ struct TaskList: View {
     var body: some View {
         let (title, projectId) = heading
         let sections = projectSections(model.snapshot, projectId)
-        List(selection: $selection) {
-            ForEach(sections.enumerated(), id: \.offset) { _, section in
-                let place = Place(projectId: projectId, sectionId: section.id)
-                if section.name.isEmpty {
-                    rows(section.tasks)
-                    addRow(place, section)
-                } else {
-                    Section(section.name) {
-                        rows(section.tasks)
-                        addRow(place, section)
+        ScrollViewReader { proxy in
+            List(selection: $selection) {
+                ForEach(sections.enumerated(), id: \.offset) { _, section in
+                    let place = Place(projectId: projectId, sectionId: section.id)
+                    let items = flatten(section.tasks, depth: 0, parent: nil)
+                    let list = section.isList ? DropList(projectId: projectId, sectionId: section.id,
+                                                         slots: items.filter(\.isOpen).map(\.slot)) : nil
+                    if section.name.isEmpty {
+                        rows(items, list)
+                        addRow(place, section, list)
+                    } else {
+                        Section {
+                            rows(items, list)
+                            addRow(place, section, list)
+                        } header: {
+                            heading(section.name, list)
+                        }
                     }
                 }
+            }
+            .onChange(of: model.flash) { _, id in
+                guard let id else { return }
+                selection = [id]
+                withAnimation { proxy.scrollTo(id) }
             }
         }
         .taskMenus(selection: selection)
@@ -44,26 +56,128 @@ struct TaskList: View {
         return ("Inbox", nil)
     }
 
-    private func rows(_ nodes: [Node]) -> some View {
-        ForEach(flatten(nodes, depth: 0), id: \.node.id) { item in
-            TaskRow(task: item.node.row, labels: model.snapshot.labels) {
-                withAnimation { model.toggle(item.node.row) }
-            }
-            .padding(.leading, CGFloat(item.depth) * 24)
-            .labelPicker(for: item.node.row)
+    private func rows(_ items: [ListItem], _ list: DropList?) -> some View {
+        ForEach(items) { item in
+            PlacedTaskRow(item: item, list: item.isOpen ? list : nil)
         }
     }
 
     @ViewBuilder
-    private func addRow(_ place: Place, _ section: DustpanCore.Section) -> some View {
+    private func addRow(_ place: Place, _ section: DustpanCore.Section, _ list: DropList?) -> some View {
         if section.isList {
             AddTaskField(place: place, focus: $adding)
                 .selectionDisabled()
+                .listDrop(list, at: .end)
         }
     }
 
-    private func flatten(_ nodes: [Node], depth: Int) -> [(node: Node, depth: Int)] {
-        nodes.flatMap { [($0, depth)] + flatten($0.children, depth: depth + 1) }
+    /// A section's heading: a drop there goes to the top of the section.
+    private func heading(_ name: String, _ list: DropList?) -> some View {
+        Text(name).listDrop(list, at: .head)
+    }
+
+    private func flatten(_ nodes: [Node], depth: Int, parent: String?) -> [ListItem] {
+        nodes.flatMap { node in
+            [ListItem(node: node, slot: Slot(node.id, depth, parent))]
+                + flatten(node.children, depth: depth + 1, parent: node.id)
+        }
+    }
+}
+
+/// A task in a project list, in display order.
+private struct ListItem: Identifiable {
+    let node: Node
+    let slot: Slot
+    var id: String { node.id }
+    var isOpen: Bool { node.row["completed_at"].isNull }
+}
+
+/// A task row in a project or the Inbox: indented, draggable, and a drop target when the list takes drops.
+private struct PlacedTaskRow: View {
+    @Environment(AppModel.self) private var model
+    let item: ListItem
+    let list: DropList?
+    @State private var height: Double = 28
+
+    var body: some View {
+        let task = item.node.row
+        let id = task.id
+        let drop = mark
+        TaskRow(task: task, labels: model.snapshot.labels) {
+            withAnimation { model.toggle(task) }
+        }
+        .taskDrag(task, subtasks: openBelow(item.node))
+        .padding(.leading, Double(item.slot.depth) * indentWidth)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(.rect)
+        .onGeometryChange(for: Double.self) { $0.size.height } action: { height = $0 }
+        .overlay(alignment: .bottomLeading) {
+            if let drop, drop.prev == id { DropLine(depth: drop.depth) }
+        }
+        .overlay(alignment: .topLeading) {
+            if let drop, drop.prev == nil, drop.next == id { DropLine(depth: drop.depth) }
+        }
+        .overlay {
+            if drop?.ring == id {
+                RoundedRectangle(cornerRadius: 5).strokeBorder(.tint, lineWidth: 2).padding(-2).allowsHitTesting(false)
+            }
+        }
+        .flashes(id)
+        .modifier(RowDrop(list: list, index: list?.slots.firstIndex(of: item.slot), height: height))
+        .labelPicker(for: task)
+    }
+
+    /// The drop shown in this row's list.
+    private var mark: Drop? {
+        guard let list, case .list(list.key, let drop) = model.dropMark else { return nil }
+        return drop
+    }
+
+    private func openBelow(_ node: Node) -> Int {
+        node.children.reduce(0) { $0 + ($1.row["completed_at"].isNull ? 1 + openBelow($1) : 0) }
+    }
+}
+
+private struct RowDrop: ViewModifier {
+    @Environment(AppModel.self) private var model
+    let list: DropList?
+    let index: Int?
+    let height: Double
+
+    func body(content: Content) -> some View {
+        if let list, let index {
+            content.onDrop(of: [.text], delegate: ListDrop(model: model, list: list) { y in
+                .row(index, dropZone(y, height: height))
+            })
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    /// A list's heading or Add field as a drop target. Its line shows here when the list is empty.
+    @ViewBuilder
+    func listDrop(_ list: DropList?, at hit: ListHit) -> some View {
+        if let list { modifier(ListEndDrop(list: list, hit: hit)) } else { self }
+    }
+}
+
+private struct ListEndDrop: ViewModifier {
+    @Environment(AppModel.self) private var model
+    let list: DropList
+    let hit: ListHit
+
+    func body(content: Content) -> some View {
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
+            .overlay(alignment: .topLeading) {
+                if case .end = hit, case .list(list.key, let drop) = model.dropMark, drop.prev == nil, drop.next == nil {
+                    DropLine(depth: 0)
+                }
+            }
+            .onDrop(of: [.text], delegate: ListDrop(model: model, list: list) { _ in hit })
     }
 }
 
