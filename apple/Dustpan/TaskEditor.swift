@@ -236,6 +236,10 @@ struct TaskEditor: View {
                         subtask = ""
                     }
                 }
+            let preview = model.quickAddPreview(subtask)
+            if !preview.isEmpty {
+                Text(preview).font(.caption).foregroundStyle(.secondary)
+            }
         }
     }
 

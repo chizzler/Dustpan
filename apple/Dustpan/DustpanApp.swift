@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct DustpanApp: App {
     @State private var model = AppModel()
+    @AppStorage("outlineSpike") private var outlineSpike = false
 
     var body: some Scene {
         Window("Dustpan", id: "main") {
@@ -19,6 +20,7 @@ struct DustpanApp: App {
                     .disabled(model.setupProblem != nil)
             }
             CommandGroup(after: .toolbar) {
+                Toggle("Outline Task List (Spike)", isOn: $outlineSpike)
                 Button("Sync Now") { Task { await model.sync() } }
                     .keyboardShortcut("r")
                     .disabled(model.setupProblem != nil)

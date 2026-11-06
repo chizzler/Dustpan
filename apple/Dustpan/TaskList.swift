@@ -9,7 +9,7 @@ struct TaskList: View {
     @FocusState private var adding: Place?
 
     var body: some View {
-        let (title, projectId) = heading
+        let (title, projectId) = model.listHeading(page)
         let sections = projectSections(model.snapshot, projectId)
         ScrollViewReader { proxy in
             List(selection: $selection) {
@@ -17,7 +17,7 @@ struct TaskList: View {
                     let place = Place(projectId: projectId, sectionId: section.id)
                     let items = flatten(section.tasks, depth: 0, parent: nil)
                     let list = section.isList ? DropList(projectId: projectId, sectionId: section.id,
-                                                         slots: items.filter(\.isOpen).map(\.slot)) : nil
+                                                         slots: openSlots(section.tasks)) : nil
                     if section.name.isEmpty {
                         rows(items, list)
                         addRow(place, section, list)
@@ -37,7 +37,7 @@ struct TaskList: View {
                 withAnimation { proxy.scrollTo(id) }
             }
         }
-        .taskMenus(selection: selection)
+        .taskMenus(selection: $selection)
         .navigationTitle(title)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -46,14 +46,6 @@ struct TaskList: View {
                     .help("Add a task (⌘N)")
             }
         }
-    }
-
-    /// The page's title and project. A project that's gone shows the Inbox.
-    private var heading: (String, String?) {
-        if case .project(let id) = page, let node = model.projectsById[id] {
-            return (node.row["name"].string ?? "", id)
-        }
-        return ("Inbox", nil)
     }
 
     private func rows(_ items: [ListItem], _ list: DropList?) -> some View {
@@ -106,10 +98,7 @@ private struct PlacedTaskRow: View {
         TaskRow(task: task, labels: model.snapshot.labels) {
             withAnimation { model.toggle(task) }
         }
-        .taskDrag(task, subtasks: openBelow(item.node))
-        .padding(.leading, Double(item.slot.depth) * indentWidth)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(.rect)
+        .taskDrag(task, subtasks: openBelow(item.node), indent: Double(item.slot.depth) * indentWidth)
         .onGeometryChange(for: Double.self) { $0.size.height } action: { height = $0 }
         .overlay(alignment: .bottomLeading) {
             if let drop, drop.prev == id { DropLine(depth: drop.depth) }
@@ -183,13 +172,13 @@ private struct ListEndDrop: ViewModifier {
 
 extension View {
     /// The row menu, double-click and keys of a list of tasks, keyed by task id.
-    /// L opens the label picker on the selected task; Delete deletes the selection.
-    func taskMenus(selection: Set<String>) -> some View { modifier(TaskMenus(selection: selection)) }
+    /// L opens the label picker on the selected task; Delete deletes the selection; Esc clears it.
+    func taskMenus(selection: Binding<Set<String>>) -> some View { modifier(TaskMenus(selection: selection)) }
 }
 
 private struct TaskMenus: ViewModifier {
     @Environment(AppModel.self) private var model
-    let selection: Set<String>
+    @Binding var selection: Set<String>
 
     func body(content: Content) -> some View {
         content.contextMenu(forSelectionType: String.self) { ids in
@@ -221,6 +210,7 @@ private struct TaskMenus: ViewModifier {
         .onDeleteCommand {
             model.delete(selection.compactMap { model.snapshot.allTasks[$0] })
         }
+        .onExitCommand { selection = [] }
     }
 }
 
@@ -235,21 +225,31 @@ struct AddTaskField: View {
     @State private var title = ""
 
     var body: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "plus").foregroundStyle(.tint).accessibilityHidden(true)
-            TextField("Add task", text: $title)
-                .textFieldStyle(.plain)
-                .focused(focus, equals: place)
-                .onSubmit {
-                    guard !title.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-                    if model.add(title, to: place, due: due, labels: labels) { title = "" }
-                    focus.wrappedValue = place
-                }
-                .onKeyPress(.escape) {
-                    title = ""
-                    focus.wrappedValue = nil
-                    return .handled
-                }
+        let preview = model.quickAddPreview(title)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 8) {
+                Image(systemName: "plus").foregroundStyle(.tint).accessibilityHidden(true)
+                TextField("Add task", text: $title, prompt: Text("Add task, like “Call Sam tomorrow 3pm #Work @phone p1”"))
+                    .textFieldStyle(.plain)
+                    .focused(focus, equals: place)
+                    .onSubmit {
+                        guard !title.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+                        if model.add(title, to: place, due: due, labels: labels) { title = "" }
+                        focus.wrappedValue = place
+                    }
+                    .onKeyPress(.escape) {
+                        title = ""
+                        focus.wrappedValue = nil
+                        return .handled
+                    }
+            }
+            if !preview.isEmpty {
+                Text(preview)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 24)
+                    .accessibilityLabel("Will set: \(preview)")
+            }
         }
         .padding(.vertical, 2)
     }

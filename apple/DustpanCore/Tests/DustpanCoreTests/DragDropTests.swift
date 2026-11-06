@@ -103,6 +103,31 @@ private func spot(_ parent: String? = nil, before: String? = nil, after: String?
         #expect(top.prev == nil && top.next == "a")
     }
 
+    /// An outline view proposes a parent and a child; the same rules decide what that means.
+    @Test func outlineProposals() {
+        func outline(_ parent: String?, before: String? = nil, inside: Bool = false, moving: String = "x") -> Drop? {
+            resolveDrop(rows, projectId: "p1", sectionId: "s1", parent: parent, before: before, inside: inside, moving: moving)
+        }
+        #expect(outline("b", inside: true)?.ring == "b")
+        #expect(outline("b", inside: true)?.target == spot("b"))
+        #expect(outline("a", before: "a2")?.target == spot("a", before: "a2"))
+        #expect(outline("a")?.target == spot("a", after: "a2"))
+        #expect(outline(nil, before: "b")?.target == spot(before: "b"))
+        #expect(outline(nil)?.target == spot(after: "c"))
+        // A row without subtasks takes the task as its first.
+        #expect(outline("a1x", before: nil)?.target == spot("a1x"))
+        // Never under itself; before its own subtree is the gap it left.
+        #expect(outline("a1", moving: "a") == nil)
+        #expect(outline(nil, before: "a1", moving: "a")?.target == spot(before: "b"))
+        #expect(outline("gone") == nil)
+    }
+
+    @Test func openSlotsSkipCompletedRows() {
+        let done = Row(id: "d", values: ["completed_at": 5])
+        let tree = [Node(row: Row(id: "a"), children: [Node(row: Row(id: "a1")), Node(row: done)]), Node(row: Row(id: "b"))]
+        #expect(openSlots(tree) == [Slot("a", 0), Slot("a1", 1, "a"), Slot("b", 0)])
+    }
+
     @Test func describesEachKindOfChange() {
         let names = ["p1": "Home", "p2": "Work", "s1": "Doing", "a": "Plan trip", "l1": "errand"]
         func text(_ target: DropTarget, _ fields: [String: JSON] = [:]) -> String {

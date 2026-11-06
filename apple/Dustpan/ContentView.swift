@@ -4,6 +4,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.undoManager) private var undoManager
+    @AppStorage("outlineSpike") private var outlineSpike = false
 
     var body: some View {
         @Bindable var model = model
@@ -21,6 +22,8 @@ struct ContentView: View {
                 // A page of its own: selection and focus start fresh.
                 Group {
                     switch model.page ?? .today {
+                    case .inbox where outlineSpike: OutlinePage(page: .inbox)
+                    case .project(let id) where outlineSpike: OutlinePage(page: .project(id))
                     case .inbox: TaskList(page: .inbox)
                     case .project(let id): TaskList(page: .project(id))
                     case let page: GroupedTaskList(page: page)

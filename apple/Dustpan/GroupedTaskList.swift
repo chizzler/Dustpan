@@ -67,7 +67,7 @@ struct GroupedTaskList: View {
                 withAnimation { proxy.scrollTo(id) }
             }
         }
-        .taskMenus(selection: selection)
+        .taskMenus(selection: $selection)
         .navigationTitle(content.title)
         .toolbar {
             if content.addDue != nil {

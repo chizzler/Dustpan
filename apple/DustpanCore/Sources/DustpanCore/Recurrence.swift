@@ -233,7 +233,7 @@ extension Rule {
 
 // MARK: - Calendar arithmetic
 
-private func addMonths(_ day: Day, _ n: Int) -> Day {
+func addMonths(_ day: Day, _ n: Int) -> Day {
     let (y, m, d) = day.parts
     let index = y * 12 + (m - 1) + n
     let (ny, nm) = (index / 12, index % 12 + 1)
@@ -252,7 +252,7 @@ private func step(_ n: Int, _ unit: Rule.Unit, from anchor: Day, times k: Int) -
 private func lastDay(_ y: Int, _ m: Int) -> Day { Day(year: y, month: m, day: monthLength(y, m)) }
 
 extension Rule {
-    private func inMonth(_ y: Int, _ m: Int) -> Day {
+    func inMonth(_ y: Int, _ m: Int) -> Day {
         switch pattern {
         case .monthDay(let d): return Day(year: y, month: m, day: min(d, monthLength(y, m)))
         case .lastDay: return lastDay(y, m)

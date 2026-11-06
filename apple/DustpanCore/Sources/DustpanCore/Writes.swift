@@ -288,28 +288,35 @@ public final class Writer {
                         parentId: String? = nil, due: JSON = nil, labels: [String] = []) throws -> String {
         let taskId = newId()
         try commit {
-            let tasks = try store.rows("task")
-            let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !title.isEmpty else { throw CannotEdit("A task needs a title") }
-            var (projectId, sectionId) = (projectId, sectionId)
-            if let parentId {
-                projectId = try liveTask(tasks, parentId)["project_id"].string
-                sectionId = nil
-            }
-            try checkProject(projectId)
-            try checkSection(sectionId, in: projectId)
-            var patch: [String: JSON] = [
-                "title": .string(title), "description": "", "project_id": projectId.json,
-                "parent_id": parentId.json, "priority": 4, "due": try checkDue(due),
-                "labels": [], "position": newPosition(tasks), "created_at": .int(now()), "completed_at": nil,
-                "deleted_at": nil, "estimate_minutes": nil,
-            ]
-            if let sectionId { patch["section_id"] = .string(sectionId) }
+            var patch = try newTask(title, projectId: projectId, sectionId: sectionId, parentId: parentId, due: due)
             let (ids, created) = try resolveLabels(labels)
             patch["labels"] = .array(ids.map(JSON.string))
             return created + [Change("task", taskId, patch)]
         }
         return taskId
+    }
+
+    /// The fields of a new task at the end of its list. A subtask takes its parent's project and no section.
+    func newTask(_ title: String, projectId: String?, sectionId: String?, parentId: String?,
+                 due: JSON) throws -> [String: JSON] {
+        let tasks = try store.rows("task")
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { throw CannotEdit("A task needs a title") }
+        var (projectId, sectionId) = (projectId, sectionId)
+        if let parentId {
+            projectId = try liveTask(tasks, parentId)["project_id"].string
+            sectionId = nil
+        }
+        try checkProject(projectId)
+        try checkSection(sectionId, in: projectId)
+        var patch: [String: JSON] = [
+            "title": .string(title), "description": "", "project_id": projectId.json,
+            "parent_id": parentId.json, "priority": 4, "due": try checkDue(due),
+            "labels": [], "position": newPosition(tasks), "created_at": .int(now()), "completed_at": nil,
+            "deleted_at": nil, "estimate_minutes": nil,
+        ]
+        if let sectionId { patch["section_id"] = .string(sectionId) }
+        return patch
     }
 
     /// Complete a task and its open descendants, or roll a repeating task to its next occurrence.
@@ -910,5 +917,89 @@ extension Writer {
         return moves.map { move in
             Change("task", move.id, (move.id == task.id ? patch : [:]).merging(["position": position(move.position)]) { $1 })
         } + out
+    }
+}
+
+// MARK: - Quick add (spec/quickadd.md)
+
+extension Writer {
+    /// What a quick-add line sets, read with the user's preferences.
+    public func parseLine(_ line: String) throws -> QuickAddResult {
+        let projects = try store.rows("project").values.filter(isLive)
+        return parseQuickAdd(line, quickAddContext(prefs: try store.rows("user_prefs")["me"]?.values ?? [:],
+                                              projects: Array(projects), today: try today(), now: clockNow()))
+    }
+
+    /// HH:MM on this device now.
+    private func clockNow() -> String {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: Date(ms: now()))
+        return clockText(c.hour ?? 0, c.minute ?? 0)
+    }
+
+    /// Add a task from a quick-add line, in one batch with its new labels, reminders and time spent.
+    ///
+    /// The page's project and section, or due date, apply unless the line sets its own. labels: the page's label ids,
+    /// added to any the line names. A subtask (parentId) always takes its parent's project. Returns its id.
+    @discardableResult
+    public func quickAdd(_ line: String, projectId: String? = nil, sectionId: String? = nil, due: JSON = nil,
+                         parentId: String? = nil, labels: [String] = []) throws -> String {
+        let taskId = newId()
+        try commit {
+            let parsed = try parseLine(line)
+            let live = Set(try liveLabels().map(\.id))
+            let (ids, created) = try resolveLabels(labels.filter(live.contains) + parsed.labels)
+            let ownPlace = parsed.projectId != nil
+            var task = try newTask(parsed.title, projectId: ownPlace ? parsed.projectId : projectId,
+                                   sectionId: ownPlace ? nil : sectionId, parentId: parentId,
+                                   due: parsed.due.isNull && !parsed.someday && parsed.sector == nil ? due : parsed.due)
+            task["labels"] = .array(ids.map(JSON.string))
+            if let priority = parsed.priority { task["priority"] = .int(Int64(priority)) }
+            if let minutes = parsed.estimateMinutes { task["estimate_minutes"] = .int(Int64(minutes)) }
+            // Optional fields are written only when set.
+            let extras: [String: JSON?] = [
+                "deadline": parsed.deadline.map { .string($0.description) },
+                "start": parsed.someday ? "someday" : nil,
+                "evening": parsed.evening ? true : nil,
+                "day_part": parsed.evening ? nil : parsed.dayPart.map(JSON.string),
+                "energy": parsed.energy.map(JSON.string),
+                "sector": parsed.sector.map(JSON.string),
+                "recurrence": parsed.recurrence.map(JSON.string),
+            ]
+            for case let (name, value?) in extras { task[name] = value }
+            var changes = created + [Change("task", taskId, task)]
+            let today = try today(), now = clockNow()
+            for typed in parsed.reminders {
+                changes.append(Change("reminder", newId(), typedReminder(taskId, due: task["due"] ?? nil, typed,
+                                                                          today: today, now: now)))
+            }
+            if let spent = parsed.spentMinutes, let me = try store.meta("user_id").string {
+                let end = self.now()
+                changes.append(Change("time_entry", newId(), [
+                    "task_id": .string(taskId), "user_id": .string(me), "started_at": .int(end - Int64(spent) * 60_000),
+                    "ended_at": .int(end), "device_id": .string(try store.device()), "note": "", "created_at": .int(end),
+                    "deleted_at": nil,
+                ]))
+            }
+            return changes
+        }
+        return taskId
+    }
+
+    /// A reminder typed in quick add, resolved against the task's due.
+    private func typedReminder(_ taskId: String, due: JSON, _ typed: TypedReminder, today: Day,
+                               now: String) -> [String: JSON] {
+        var fields: [String: JSON] = [
+            "task_id": .string(taskId), "delivered_at": nil, "dismissed_at": nil, "created_at": .int(self.now()),
+            "deleted_at": nil,
+        ]
+        switch resolveReminder(typed, due: due, today: today, now: now) {
+        case .relative(let minutes):
+            (fields["kind"], fields["offset_minutes"]) = ("relative", .int(Int64(minutes)))
+            fields["fire_at"] = relativeFireAt(due, .int(Int64(minutes)))
+        case .absolute(let day, let time):
+            (fields["kind"], fields["offset_minutes"]) = ("absolute", nil)
+            fields["fire_at"] = dueInstant(["date": .string(day.description), "time": .string(time)]).map(JSON.int) ?? nil
+        }
+        return fields
     }
 }

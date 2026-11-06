@@ -120,6 +120,39 @@ public func resolveDrop(_ rows: [Slot], projectId: String?, sectionId: String?, 
     return dropAtGap(kept, projectId: projectId, sectionId: sectionId, gap: gap, depth: depth)
 }
 
+/// The drop for an outline view's proposal: under parent (nil is the top level), before the open row before,
+/// or at the end of parent's children when before is nil. inside: on parent itself, as its last subtask.
+/// As with a pointer, the dragged subtree stands for the gap it left, and nothing goes under it. Nil when it can't go there.
+public func resolveDrop(_ rows: [Slot], projectId: String?, sectionId: String?, parent: String?, before: String?,
+                        inside: Bool = false, moving: String) -> Drop? {
+    let (kept, at) = withoutSubtree(rows, moving)
+    var (depth, start) = (0, 0)
+    if let parent {
+        guard let p = kept.firstIndex(where: { $0.id == parent }) else { return nil }
+        let hasChildren = p + 1 < kept.count && kept[p + 1].depth > kept[p].depth
+        if inside || !hasChildren {
+            return Drop(target: .place(Placement(projectId, sectionId, parent: parent)), ring: parent)
+        }
+        (depth, start) = (kept[p].depth + 1, p + 1)
+    }
+    let gap: Int
+    if let before, let i = kept.firstIndex(where: { $0.id == before }) {
+        gap = i
+    } else if let before, rows.contains(where: { $0.id == before }) {
+        gap = at ?? kept.count
+    } else {
+        gap = kept[start...].firstIndex { $0.depth < depth } ?? kept.count
+    }
+    return dropAtGap(kept, projectId: projectId, sectionId: sectionId, gap: gap, depth: depth)
+}
+
+/// The open rows of a task tree in display order, as Slots. Completed rows hold only completed children.
+public func openSlots(_ nodes: [Node], depth: Int = 0, parent: String? = nil) -> [Slot] {
+    nodes.filter { $0.row["completed_at"].isNull }.flatMap { node in
+        [Slot(node.id, depth, parent)] + openSlots(node.children, depth: depth + 1, parent: node.id)
+    }
+}
+
 /// The drop into the gap before rows[gap], at the level depth picks.
 ///
 /// The level is held between the row below's depth (it can't be orphaned) and the row above's depth.

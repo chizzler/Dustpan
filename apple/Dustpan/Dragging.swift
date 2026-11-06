@@ -98,8 +98,9 @@ struct TargetDrop: DropDelegate {
 
 extension View {
     /// Let an open task's row be dragged. Remembers where the pointer holds it.
-    func taskDrag(_ task: Row, subtasks: Int = 0) -> some View {
-        modifier(TaskDragSource(task: task, subtasks: subtasks))
+    /// The whole row width drags, so a press-and-drag never selects the rows it crosses. indent: its nesting.
+    func taskDrag(_ task: Row, subtasks: Int = 0, indent: Double = 0) -> some View {
+        modifier(TaskDragSource(task: task, subtasks: subtasks, indent: indent))
     }
 
     /// The row of a task just dropped flashes for 700 ms.
@@ -115,22 +116,32 @@ private struct TaskDragSource: ViewModifier {
     @Environment(AppModel.self) private var model
     let task: Row
     let subtasks: Int
+    let indent: Double
 
     func body(content: Content) -> some View {
+        let row = content
+            .padding(.leading, indent)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
         if task["completed_at"].isNull {
-            content
+            row
                 .onContinuousHover { phase in
-                    if case .active(let point) = phase { model.hoverX = point.x }
+                    if case .active(let point) = phase { model.hoverX = point.x - indent }
                 }
                 .onDrag {
-                    model.beginDrag(task.id)
+                    model.startDrag(task.id, grabX: model.hoverX)
+                    // SwiftUI's onDrag reports no end: the drag is over when the mouse button is up.
+                    Task {
+                        while NSEvent.pressedMouseButtons & 1 != 0 { try? await Task.sleep(for: .milliseconds(100)) }
+                        model.endDrag()
+                    }
                     return NSItemProvider(object: task.id as NSString)
                 } preview: {
                     DragPill(title: task["title"].string ?? "", subtasks: subtasks)
                 }
                 .opacity(model.drag?.taskId == task.id ? 0.4 : 1)
         } else {
-            content
+            row
         }
     }
 }

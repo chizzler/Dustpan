@@ -1,4 +1,3 @@
-import AppKit
 import DustpanCore
 import Foundation
 import Observation
@@ -281,15 +280,34 @@ final class AppModel {
         }
     }
 
-    /// Add a task at the end of a list. False when it can't be added.
-    func add(_ title: String, to place: Place, due: JSON = nil, labels: [String] = []) -> Bool {
+    /// Add a task from a quick-add line at the end of a list. The page's place, due and labels fill in
+    /// what the line leaves out. False when it can't be added.
+    func add(_ line: String, to place: Place, due: JSON = nil, labels: [String] = []) -> Bool {
         perform {
-            try $0.addTask(title, projectId: place.projectId, sectionId: place.sectionId, due: due, labels: labels)
+            try $0.quickAdd(line, projectId: place.projectId, sectionId: place.sectionId, due: due, labels: labels)
         } != nil
     }
 
-    func addSubtask(_ title: String, to parentId: String) throws {
-        try apply { try $0.addTask(title, parentId: parentId) }
+    func addSubtask(_ line: String, to parentId: String) throws {
+        try apply { try $0.quickAdd(line, parentId: parentId) }
+    }
+
+    /// What a quick-add line will set besides the title, as "Tomorrow 15:00 · Work · @phone · p1".
+    func quickAddPreview(_ line: String) -> String {
+        guard !line.trimmingCharacters(in: .whitespaces).isEmpty, let parsed = try? writer?.parseLine(line) else {
+            return ""
+        }
+        let reminders = parsed.reminders.count
+        let parts: [String?] = [
+            formatDue(parsed.due)?.text, parsed.someday ? "Someday" : nil, parsed.sector,
+            parsed.evening ? "This evening" : nil, parsed.dayPart,
+            parsed.deadline.map { "Deadline \(formatDay($0))" },
+            parsed.projectId.map { id in snapshot.projectPaths.first { $0.id == id }?.path ?? "Project" },
+        ] + parsed.labels.map { "@\($0)" } + [
+            parsed.priority.map { "p\($0)" }, parsed.estimateMinutes.map(formatMinutes), parsed.recurrence,
+            reminders > 0 ? "\(reminders) reminder\(reminders == 1 ? "" : "s")" : nil,
+        ]
+        return parts.compactMap { $0 }.joined(separator: " · ")
     }
 
     /// Delete tasks and their subtasks. One Undo brings them all back.
@@ -454,16 +472,12 @@ final class AppModel {
 
     // MARK: drag and drop
 
-    /// A row starts a drag. It ends when the mouse button is up, dropped or not.
-    func beginDrag(_ taskId: String) {
-        drag = TaskDrag(taskId: taskId, grabX: hoverX)
-        Task {
-            while NSEvent.pressedMouseButtons & 1 != 0 { try? await Task.sleep(for: .milliseconds(100)) }
-            endDrag()
-        }
+    /// A drag starts. Its source calls endDrag when it ends, dropped or not.
+    func startDrag(_ taskId: String, grabX: Double = 0) {
+        drag = TaskDrag(taskId: taskId, grabX: grabX)
     }
 
-    private func endDrag() {
+    func endDrag() {
         guard drag != nil else { return }
         drag = nil
         dropMark = nil
@@ -542,6 +556,14 @@ final class AppModel {
     }
 
     // MARK: reads
+
+    /// A list page's title and project. A project that's gone shows the Inbox.
+    func listHeading(_ page: Page) -> (title: String, projectId: String?) {
+        if case .project(let id) = page, let node = flatProjects.first(where: { $0.node.id == id })?.node {
+            return (node.row["name"].string ?? "", id)
+        }
+        return ("Inbox", nil)
+    }
 
     var today: Day { (try? writer?.today()) ?? Day(.now) }
 
