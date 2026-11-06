@@ -10,6 +10,7 @@ struct DustpanApp: App {
                 .environment(model)
                 .task { await model.start() }
                 .task { await model.listen() }
+                .task { await model.remind() }
         }
         .commands {
             CommandGroup(after: .toolbar) {

@@ -186,3 +186,26 @@ public struct DueDraft: Equatable, Sendable {
         return .object(due)
     }
 }
+
+// MARK: - Days
+
+/// user_prefs.day_start: "HH:MM" from 00:00 to 06:00. Anything else reads as midnight.
+func dayStartMinutes(_ value: JSON) -> Int {
+    guard let text = value.string, text.count == 5, text.dropFirst(2).first == ":",
+          let (h, m) = parseTime(text), h * 60 + m <= 6 * 60 else { return 0 }
+    return h * 60 + m
+}
+
+/// Today, where a day begins dayStart minutes after midnight.
+func logicalToday(dayStart: Int, now: Date, zone: TimeZone = .current) -> Day {
+    Day(now.addingTimeInterval(-Double(dayStart) * 60), in: zone)
+}
+
+/// "Mon 9 Nov".
+public func formatDay(_ day: Day, locale: Locale = .current) -> String {
+    let f = DateFormatter()
+    f.locale = locale
+    f.timeZone = .gmt
+    f.dateFormat = "EEE d MMM"
+    return f.string(from: Date(timeIntervalSince1970: Double(day.number) * 86_400))
+}

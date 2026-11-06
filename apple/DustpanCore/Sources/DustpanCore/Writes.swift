@@ -20,21 +20,25 @@ public struct CannotEdit: Error, LocalizedError, Equatable {
     public var errorDescription: String? { message }
 }
 
-/// What an action did: the changes that undo it.
+/// What an action did: the changes that undo it, and where a repeating task moved on to.
 public struct Done: Sendable {
     public var undo: [Change] = []
+    public var nextDue: Day?
 }
 
-/// The task fields `Writer.edit` takes. Slice 2: title, priority, due, project and section.
+/// The task fields `Writer.edit` takes: title, priority, due, repeat rule, project and section.
 public struct TaskEdit: Equatable, Sendable {
     public var title: String?
     public var priority: Int64?
     /// nil leaves the due alone; .null clears it.
     public var due: JSON?
+    /// A rule to parse; "" stops the repeat.
+    public var recurrence: String?
     public var place: Place?
 
-    public init(title: String? = nil, priority: Int64? = nil, due: JSON? = nil, place: Place? = nil) {
-        (self.title, self.priority, self.due, self.place) = (title, priority, due, place)
+    public init(title: String? = nil, priority: Int64? = nil, due: JSON? = nil, recurrence: String? = nil,
+                place: Place? = nil) {
+        (self.title, self.priority, self.due, self.recurrence, self.place) = (title, priority, due, recurrence, place)
     }
 
     public var isEmpty: Bool { self == TaskEdit() }
@@ -70,11 +74,7 @@ func checkDue(_ due: JSON) throws(CannotEdit) -> JSON {
 }
 
 /// YYYY-MM-DD, and the day exists.
-func isRealDate(_ text: String) -> Bool {
-    guard text.count == 10, let (y, m, d) = parseDate(text) else { return false }
-    let c = DateComponents(year: y, month: m, day: d)
-    return c.isValidDate(in: gregorian(.gmt))
-}
+func isRealDate(_ text: String) -> Bool { Day(text) != nil }
 
 /// A position as JSON: a whole number stays an integer, as the other clients write it.
 func position(_ value: Double) -> JSON {
@@ -105,11 +105,21 @@ public final class Writer {
     let store: Store
     let clock: HybridClock
     let now: () -> Int64
+    let fixedToday: (() -> Day)?
 
-    public init(store: Store, clock: HybridClock? = nil, now: @escaping () -> Int64 = wallMs) {
+    public init(store: Store, clock: HybridClock? = nil, now: @escaping () -> Int64 = wallMs,
+                today: (() -> Day)? = nil) {
         self.store = store
         self.now = now
+        self.fixedToday = today
         self.clock = clock ?? HybridClock(store: store, now: now)
+    }
+
+    /// The logical today, after the user's day start.
+    public func today() throws -> Day {
+        if let fixedToday { return fixedToday() }
+        let dayStart = dayStartMinutes(try store.rows("user_prefs")["me"]?["day_start"] ?? .null)
+        return logicalToday(dayStart: dayStart, now: Date(ms: now()))
     }
 
     /// Run plan in one transaction and write the changes it returns as one batch, with one timestamp.
@@ -289,20 +299,52 @@ public final class Writer {
         return taskId
     }
 
-    /// Complete a task and its open descendants.
-    ///
-    /// Repeating tasks roll forward instead, which comes with recurrence: until then they're refused.
+    /// Complete a task and its open descendants, or roll a repeating task to its next occurrence.
     public func complete(_ taskId: String) throws -> Done {
         try commit {
             let tasks = try store.rows("task")
             let task = try liveTask(tasks, taskId)
             guard task["completed_at"].isNull else { return ([], Done()) }
-            if task["recurrence"].isTruthy { throw CannotEdit("Repeating tasks can't be completed on the Mac yet") }
-            let now = JSON.int(now())
+            let now = now()
+            if let rule = seriesRule(task),
+               let rolled = try planCompletion(task, rule, tasks: tasks.values, now: now, today: today()) {
+                return (rolled.changes, undoMove(task, rolled, now: now))
+            }
             let done = [task] + descendants(of: taskId, in: tasks).filter { $0["completed_at"].isNull }
-            return (done.map { Change("task", $0.id, ["completed_at": now]) },
+            return (done.map { Change("task", $0.id, ["completed_at": .int(now)]) },
                     Done(undo: done.map { Change("task", $0.id, ["completed_at": nil]) }))
         }
+    }
+
+    /// Move a repeating task to its next occurrence without completing it.
+    public func skip(_ taskId: String) throws -> Done {
+        try moveOn(taskId, refusal: "Only an open repeating task can be skipped",
+                   last: "This is the last occurrence. Complete or delete it instead", planSkip)
+    }
+
+    /// "This occurrence only": a standalone copy of the current occurrence, and the series moves on.
+    public func detach(_ taskId: String) throws -> Done {
+        try moveOn(taskId, refusal: "Only an open repeating task has occurrences",
+                   last: "This is the last occurrence. Edit the task itself instead", planDetach)
+    }
+
+    private func moveOn(_ taskId: String, refusal: String, last: String,
+                        _ plan: (Row, Rule, Int64, Day) throws -> MoveOn?) throws -> Done {
+        try commit {
+            let task = try liveTask(try store.rows("task"), taskId)
+            guard let rule = seriesRule(task) else { throw CannotEdit(refusal) }
+            let now = now()
+            guard let moved = try plan(task, rule, now, try today()) else { throw CannotEdit(last) }
+            return (moved.changes, undoMove(task, moved, now: now))
+        }
+    }
+
+    /// Undo for a series that moved on: its old dates back, and the record or copy deleted.
+    private func undoMove(_ series: Row, _ moved: MoveOn, now: Int64) -> Done {
+        let patch = moved.changes.first { $0.id == series.id }?.patch ?? [:]
+        var undo = [Change("task", series.id, Dictionary(uniqueKeysWithValues: patch.keys.map { ($0, series[$0]) }))]
+        if let created = moved.createdId { undo.append(Change("task", created, ["deleted_at": .int(now)])) }
+        return Done(undo: undo, nextDue: moved.next)
     }
 
     /// Reopen one completed task. Its subtasks stay as they are.
@@ -338,8 +380,21 @@ public final class Writer {
             }
             if let due = edit.due {
                 patch["due"] = try checkDue(due)
-                if due.isNull && task["recurrence"].isTruthy { patch["recurrence"] = .null }
+                if due.isNull && task["recurrence"].isTruthy && edit.recurrence == nil { patch["recurrence"] = .null }
                 if !due.isNull && task["start"].string == "someday" { patch["start"] = .null }
+            }
+            if let text = edit.recurrence?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                if text.isEmpty {
+                    patch["recurrence"] = .null
+                } else {
+                    let rule: Rule
+                    do { rule = try Rule(parsing: text) } catch { throw CannotEdit("Repeat: \(error)") }
+                    patch["recurrence"] = .string(rule.canonical)
+                    // A rule needs a due date: the first occurrence from today.
+                    if (patch["due"] ?? task["due"]).isNull {
+                        patch["due"] = ["date": .string(rule.first(from: try today()).description)]
+                    }
+                }
             }
             if let place = edit.place {
                 out = try planMove(tasks, task, to: place, into: &patch)
@@ -366,6 +421,49 @@ public final class Writer {
             var patch: [String: JSON] = ["project_id": projectId.json]
             if d["section_id"].isTruthy { patch["section_id"] = .null }
             return Change("task", d.id, patch)
+        }
+    }
+
+    // MARK: reminders
+
+    /// A reminder offsetMinutes from the task's due time. Returns its id.
+    @discardableResult
+    public func addReminder(_ taskId: String, offsetMinutes: Int64) throws -> String {
+        guard abs(offsetMinutes) <= maxReminderOffset else {
+            throw CannotEdit("A reminder can be at most a year from the due time")
+        }
+        let reminderId = newId()
+        try commit {
+            let task = try liveTask(try store.rows("task"), taskId)
+            return [Change("reminder", reminderId, [
+                "task_id": .string(taskId), "kind": "relative", "offset_minutes": .int(offsetMinutes),
+                "fire_at": relativeFireAt(task["due"], .int(offsetMinutes)), "delivered_at": nil,
+                "dismissed_at": nil, "created_at": .int(now()), "deleted_at": nil,
+            ])]
+        }
+        return reminderId
+    }
+
+    public func deleteReminder(_ reminderId: String) throws {
+        try changeReminder(reminderId, ["deleted_at": .int(now())])
+    }
+
+    /// Fire again at until.
+    public func snooze(_ reminderId: String, until: Int64) throws {
+        try changeReminder(reminderId, ["fire_at": .int(until), "delivered_at": nil, "dismissed_at": nil])
+    }
+
+    /// Silence the current firing.
+    public func dismiss(_ reminderId: String) throws {
+        try changeReminder(reminderId, ["dismissed_at": .int(now())])
+    }
+
+    private func changeReminder(_ reminderId: String, _ patch: [String: JSON]) throws {
+        try commit {
+            guard let reminder = try store.rows("reminder")[reminderId], isLive(reminder) else {
+                throw CannotEdit("That reminder no longer exists")
+            }
+            return [Change("reminder", reminderId, patch)]
         }
     }
 }

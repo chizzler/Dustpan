@@ -21,3 +21,9 @@ func defaultReminderId(userId: String, taskId: String) -> String {
 
 /// A fresh random id for a new entity or op.
 func newId() -> String { UUID().uuidString.lowercased() }
+
+/// The completed occurrence record of a series on one day.
+func occurrenceId(_ seriesId: String, _ day: Day) -> String { nameId("occurrence", "\(seriesId):\(day)") }
+
+/// The "this occurrence only" copy of a series on one day.
+func detachedId(_ seriesId: String, _ day: Day) -> String { nameId("occurrence", "\(seriesId):detach:\(day)") }

@@ -11,7 +11,8 @@ import Testing
     init() throws {
         store = try memoryStore()
         let now = now
-        writer = Writer(store: store, clock: HybridClock(store: store, now: { now }), now: { now })
+        writer = Writer(store: store, clock: HybridClock(store: store, now: { now }), now: { now },
+                        today: { Day("2026-11-02")! })
         try store.setMeta("user_id", "me")
     }
 
@@ -80,10 +81,89 @@ import Testing
         #expect(try task("b")["completed_by"].isNull)
     }
 
-    @Test func repeatingTasksAreNotCompletedYet() throws {
+    @Test func completingASeriesRecordsTheOccurrenceAndMovesOn() throws {
+        try seed("task", "s", ["title": "Water plants", "recurrence": "every 3 days", "priority": 2,
+                               "due": ["date": "2026-11-01", "time": "08:00"], "deadline": "2026-11-03",
+                               "fields.f1": "x"])
+        let done = try writer.complete("s")
+        let series = try task("s")
+        #expect(series["completed_at"].isNull)
+        #expect(series["due"] == ["date": "2026-11-04", "time": "08:00"])
+        #expect(series["deadline"] == "2026-11-06")
+        #expect(done.nextDue == Day("2026-11-04"))
+        let record = try task(occurrenceId("s", Day("2026-11-01")!))
+        #expect(record["series_id"] == "s" && record["recurrence"].isNull)
+        #expect(record["due"] == ["date": "2026-11-01", "time": "08:00"])
+        #expect(record["completed_by"] == "me" && record["priority"] == 2)
+        #expect(record["fields.f1"] == "x" && record["deadline"] == "2026-11-03")
+        #expect(Set(try outbox().map(\.ts)).count == 1)
+    }
+
+    @Test func undoOfASeriesCompletionPutsItBack() throws {
         try seed("task", "s", ["title": "S", "recurrence": "every day", "due": ["date": "2026-11-02"]])
-        #expect(throws: CannotEdit.self) { try writer.complete("s") }
+        let done = try writer.complete("s")
+        try writer.revert(done.undo)
+        #expect(try task("s")["due"] == ["date": "2026-11-02"])
+        #expect(try task(occurrenceId("s", Day("2026-11-02")!))["deleted_at"].isTruthy)
+    }
+
+    @Test func lastOccurrenceCompletesTheSeries() throws {
+        try seed("task", "s", ["title": "S", "recurrence": "every day for 1 time", "due": ["date": "2026-11-02"]])
+        let done = try writer.complete("s")
+        #expect(!(try task("s")["completed_at"].isNull))
+        #expect(done.nextDue == nil)
+    }
+
+    @Test func skipMovesOnWithoutARecordAndAHabitRecordsIt() throws {
+        try seed("task", "s", ["title": "S", "recurrence": "every day", "due": ["date": "2026-11-02"]])
+        #expect(try writer.skip("s").nextDue == Day("2026-11-03"))
+        #expect(try task("s")["due"] == ["date": "2026-11-03"])
+        #expect(try store.rows("task")[occurrenceId("s", Day("2026-11-02")!)] == nil)
+        try seed("task", "h", ["title": "H", "recurrence": "every day", "due": ["date": "2026-11-02"], "habit": true])
+        try writer.skip("h")
+        #expect(try task(occurrenceId("h", Day("2026-11-02")!))["skipped"] == true)
+    }
+
+    @Test func skipRefusesTheLastOccurrenceAndPlainTasks() throws {
+        try seed("task", "s", ["title": "S", "recurrence": "every day until 2026-11-02", "due": ["date": "2026-11-02"]])
+        try seed("task", "p", ["title": "P"])
+        #expect(throws: CannotEdit.self) { try writer.skip("s") }
+        #expect(throws: CannotEdit.self) { try writer.detach("p") }
         #expect(try store.outboxCount() == 0)
+    }
+
+    @Test func detachMakesAnOpenCopy() throws {
+        try seed("task", "s", ["title": "S", "recurrence": "every week", "due": ["date": "2026-11-02"]])
+        try writer.detach("s")
+        let copy = try task(detachedId("s", Day("2026-11-02")!))
+        #expect(copy["completed_at"].isNull && copy["series_id"] == "s" && copy["title"] == "S")
+        #expect(try task("s")["due"] == ["date": "2026-11-09"])
+    }
+
+    @Test func settingARuleStoresItCanonicalAndDatesAnUndatedTask() throws {
+        try seed("task", "a", ["title": "A", "due": nil])
+        try writer.edit("a", TaskEdit(recurrence: "Every  Mon, fri"))
+        #expect(try task("a")["recurrence"] == "every monday, friday")
+        #expect(try task("a")["due"] == ["date": "2026-11-02"])  // a Monday
+        #expect(throws: CannotEdit.self) { try writer.edit("a", TaskEdit(recurrence: "every blue moon")) }
+        try writer.edit("a", TaskEdit(recurrence: ""))
+        #expect(try task("a")["recurrence"].isNull)
+    }
+
+    @Test func reminderActions() throws {
+        let due: JSON = ["date": "2026-11-06", "time": "15:00"]
+        try seed("task", "a", ["title": "A", "due": due])
+        let rid = try writer.addReminder("a", offsetMinutes: -10)
+        func reminder() throws -> Row { try #require(try store.rows("reminder")[rid]) }
+        #expect(try reminder()["fire_at"] == .int(dueInstant(due)! - 10 * 60_000))
+        try writer.dismiss(rid)
+        #expect(try reminder()["dismissed_at"] == .int(now))
+        try writer.snooze(rid, until: now + 600_000)
+        #expect(try reminder()["dismissed_at"].isNull && reminder()["fire_at"] == .int(now + 600_000))
+        try writer.deleteReminder(rid)
+        #expect(try reminder()["deleted_at"] == .int(now))
+        #expect(throws: CannotEdit.self) { try writer.dismiss(rid) }
+        #expect(throws: CannotEdit.self) { try writer.addReminder("a", offsetMinutes: 600_000) }
     }
 
     @Test func addWithADueDateAndReopen() throws {

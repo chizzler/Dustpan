@@ -92,3 +92,111 @@ func planDefaultReminder(userId: String, taskId: String, before: [String: JSON]?
         "created_at": .int(now), "deleted_at": nil,
     ])]
 }
+
+// MARK: - The editor
+
+/// Offsets from the due time offered in the editor, in minutes.
+public let relativePresets: [Int64] = [0, -10, -30, -60, -1440]
+
+/// "At due time", "30 minutes before", "2 hours after", "1 day before".
+public func offsetLabel(_ minutes: Int64) -> String {
+    if minutes == 0 { return "At due time" }
+    var n = abs(minutes)
+    let unit: String
+    if n % 1440 == 0 {
+        (n, unit) = (n / 1440, "day")
+    } else if n % 60 == 0 {
+        (n, unit) = (n / 60, "hour")
+    } else {
+        unit = "minute"
+    }
+    return "\(n) \(unit)\(n == 1 ? "" : "s") \(minutes < 0 ? "before" : "after")"
+}
+
+/// One line for a reminder in the editor.
+public func describe(reminder r: Row) -> String {
+    let offset = r["offset_minutes"].int ?? 0
+    switch r["kind"].string {
+    case "relative": return offsetLabel(offset)
+    case "deadline": return offset == 0 ? "On the deadline" : offsetLabel(offset) + " the deadline"
+    default:
+        guard let fireAt = r["fire_at"].int else { return "No time" }
+        return Date(ms: fireAt).formatted(.dateTime.weekday().day().month().year().hour().minute())
+    }
+}
+
+extension Date {
+    public init(ms: Int64) { self.init(timeIntervalSince1970: Double(ms) / 1000) }
+}
+
+// MARK: - Firing
+
+/// Dismissed for the current firing. A dismissal older than fire_at was for an earlier one.
+func isDismissed(_ r: Row) -> Bool {
+    guard let dismissed = r["dismissed_at"].int, let fireAt = r["fire_at"].int else { return false }
+    return dismissed >= fireAt
+}
+
+/// Fired, live, not dismissed, and its task is live and open.
+func isDue(_ r: Row, task: Row?, now: Int64) -> Bool {
+    guard isLive(r), let fireAt = r["fire_at"].int, fireAt <= now, !isDismissed(r), let task else { return false }
+    return task["completed_at"].isNull && isLive(task)
+}
+
+/// A task whose project, or any project above it, is deleted. Its reminders don't fire.
+func inTrash(_ task: Row, _ projects: [String: Row]) -> Bool {
+    var seen = Set<String>()
+    var projectId = task["project_id"].string
+    while let id = projectId, !id.isEmpty, seen.insert(id).inserted {
+        guard let project = projects[id] else { return false }
+        if !project["deleted_at"].isNull { return true }
+        projectId = project["parent_id"].string
+    }
+    return false
+}
+
+/// A reminder to show, with its task.
+public struct Alert: Sendable {
+    public let reminder: Row
+    public let task: Row
+}
+
+public struct ReminderCheck: Sendable {
+    /// Newly due.
+    public var show: [Alert] = []
+    /// Reminder ids shown before and no longer due: dismissed or snoozed anywhere, or the task completed.
+    public var withdraw: [String] = []
+    /// The next firing after now.
+    public var next: Int64?
+}
+
+/// On the first check, reminders that fired longer ago than this are marked as seen, not shown.
+let staleReminderMs: Int64 = 24 * 60 * 60_000
+
+/// Which reminders to show and withdraw, once per firing on this device.
+/// The "notified" meta key maps reminder id to the fire_at already shown.
+public func checkReminders(_ store: Store, now: Int64) throws -> ReminderCheck {
+    try store.transaction {
+        let tasks = try store.rows("task"), projects = try store.rows("project")
+        let stored = try store.meta("notified")
+        let firstRun = stored.isNull
+        let notified = stored.object ?? [:]
+        var current: [String: JSON] = [:]
+        var check = ReminderCheck()
+        for reminder in try store.rows("reminder").values.sorted(by: { $0.id < $1.id }) {
+            guard let fireAt = reminder["fire_at"].int else { continue }
+            if fireAt > now {
+                if isLive(reminder) { check.next = min(check.next ?? fireAt, fireAt) }
+                continue
+            }
+            let task = reminder["task_id"].string.flatMap { tasks[$0] }
+            guard isDue(reminder, task: task, now: now), let task, !inTrash(task, projects) else { continue }
+            current[reminder.id] = .int(fireAt)
+            if notified[reminder.id]?.int == fireAt || (firstRun && now - fireAt > staleReminderMs) { continue }
+            check.show.append(Alert(reminder: reminder, task: task))
+        }
+        check.withdraw = notified.keys.filter { current[$0] == nil }.sorted()
+        if current != notified || firstRun { try store.setMeta("notified", .object(current)) }
+        return check
+    }
+}

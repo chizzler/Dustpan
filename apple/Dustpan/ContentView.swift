@@ -3,8 +3,10 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.undoManager) private var undoManager
 
     var body: some View {
+        @Bindable var model = model
         if let problem = model.setupProblem {
             ContentUnavailableView {
                 Label("Dustpan isn't set up", systemImage: "gearshape")
@@ -23,6 +25,8 @@ struct ContentView: View {
                 ToolbarItem(placement: .primaryAction) { SyncStatus() }
             }
             .overlay(alignment: .bottom) { ToastView() }
+            .sheet(item: $model.editing, content: TaskEditor.init)
+            .onChange(of: undoManager, initial: true) { model.undoManager = undoManager }
             .frame(minWidth: 640, minHeight: 400)
         }
     }

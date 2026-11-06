@@ -38,6 +38,10 @@ final class AppModel {
     /// The live stream is connected.
     private(set) var live = false
     var toast: Toast?
+    /// The task open in the editor.
+    var editing: Row?
+    /// The window's, so Undo works from the toast, Edit ▸ Undo and the editor alike.
+    @ObservationIgnored weak var undoManager: UndoManager?
     /// Why the app can't start: no config, or no database.
     private(set) var setupProblem: String?
     var page: Page? = .inbox
@@ -49,6 +53,9 @@ final class AppModel {
     private var syncAgain = false
     private var lastSync = ContinuousClock.now
     private var editSync: Task<Void, Never>?
+    private let notifier = Notifier()
+    /// Reminders are checked once notifications are allowed.
+    private var reminding = false
 
     init() {
         do {
@@ -63,6 +70,7 @@ final class AppModel {
             (store, api, syncer, writer) = (nil, nil, nil, nil)
             setupProblem = "\(error)"
         }
+        notifier.model = self
     }
 
     // MARK: sync
@@ -141,6 +149,60 @@ final class AppModel {
         } catch {
             status = .failed("\(error)")
         }
+        checkReminders()
+    }
+
+    // MARK: reminders
+
+    /// Show reminders as they come due: at the next firing or every 30 seconds, and after every change.
+    func remind() async {
+        guard store != nil, await notifier.requestPermission() else { return }
+        reminding = true
+        while !Task.isCancelled {
+            let wait = checkReminders().map { Duration.milliseconds(max($0 - wallMs(), 1000)) } ?? Self.pollInterval
+            try? await Task.sleep(for: min(wait, Self.pollInterval))
+        }
+    }
+
+    /// Show what's newly due and withdraw what no longer is. Returns the next firing.
+    @discardableResult
+    private func checkReminders() -> Int64? {
+        guard reminding, let store else { return nil }
+        do {
+            let check = try DustpanCore.checkReminders(store, now: wallMs())
+            notifier.withdraw(check.withdraw)
+            for alert in check.show {
+                notifier.show(alert, body: formatDue(alert.task["due"]).map { "Due \($0.text)" }
+                    ?? describe(reminder: alert.reminder))
+            }
+            return check.next
+        } catch {
+            status = .failed("\(error)")
+            return nil
+        }
+    }
+
+    func snooze(_ reminderId: String) {
+        perform { try $0.snooze(reminderId, until: wallMs() + 10 * 60_000) }
+    }
+
+    func dismiss(_ reminderId: String) {
+        perform { try $0.dismiss(reminderId) }
+    }
+
+    func addReminder(to taskId: String, offsetMinutes: Int64) throws {
+        try apply { try $0.addReminder(taskId, offsetMinutes: offsetMinutes) }
+    }
+
+    func deleteReminder(_ reminderId: String) throws {
+        try apply { try $0.deleteReminder(reminderId) }
+    }
+
+    /// Show a task in its list, open in the editor.
+    func open(_ taskId: String) {
+        guard let task = snapshot.allTasks[taskId], task["deleted_at"].isNull else { return }
+        page = task["project_id"].string.map(Page.project) ?? .inbox
+        editing = task
     }
 
     // MARK: edits
@@ -176,26 +238,41 @@ final class AppModel {
         try apply { try $0.edit(taskId, edit) }
     }
 
-    /// Complete an open task, or reopen a completed one. Undo puts it back.
-    func toggle(_ task: Row, undoManager: UndoManager?) {
+    /// Complete an open task, or reopen a completed one. A repeating task moves on. Undo puts it back.
+    func toggle(_ task: Row) {
         let title = task["title"].string ?? ""
         if task["completed_at"].isNull {
-            undoable("Complete", "Completed “\(title)”", undoManager) { try $0.complete(task.id) }
+            undoable("Complete", { try $0.complete(task.id) }) { done in
+                done.nextDue.map { "“\(title)” next due \(formatDay($0))" } ?? "Completed “\(title)”"
+            }
         } else {
-            undoable("Reopen", "Reopened “\(title)”", undoManager) { try $0.reopen(task.id) }
+            undoable("Reopen", { try $0.reopen(task.id) }) { _ in "Reopened “\(title)”" }
         }
     }
 
+    func skip(_ task: Row) {
+        undoable("Skip", { try $0.skip(task.id) }, message: movedOn("Skipped"))
+    }
+
+    /// Split off this occurrence as a task of its own.
+    func detach(_ task: Row) {
+        undoable("Split Off", { try $0.detach(task.id) }, message: movedOn("Split off a copy"))
+    }
+
+    private func movedOn(_ verb: String) -> (Done) -> String {
+        { done in "\(verb). Next due \(done.nextDue.map { formatDay($0) } ?? "")" }
+    }
+
     /// Run an action and offer its Undo in the toast and in Edit ▸ Undo. Redo runs the action again.
-    private func undoable(_ name: String, _ message: String, _ undoManager: UndoManager?,
-                          _ action: @escaping (Writer) throws -> Done) {
+    private func undoable(_ name: String, _ action: @escaping (Writer) throws -> Done,
+                          message: @escaping (Done) -> String) {
         guard let done = perform(action), !done.undo.isEmpty else { return }
-        show(Toast(message: message, undoable: undoManager != nil))
+        show(Toast(message: message(done), undoable: undoManager != nil))
         undoManager?.registerUndo(withTarget: self) { model in
             model.toast = nil
             guard model.perform({ try $0.revert(done.undo) }) != nil else { return }
-            undoManager?.registerUndo(withTarget: model) { $0.undoable(name, message, undoManager, action) }
-            undoManager?.setActionName(name)
+            model.undoManager?.registerUndo(withTarget: model) { $0.undoable(name, action, message: message) }
+            model.undoManager?.setActionName(name)
         }
         undoManager?.setActionName(name)
     }
@@ -206,6 +283,8 @@ final class AppModel {
     }
 
     // MARK: reads
+
+    var today: Day { (try? writer?.today()) ?? Day(.now) }
 
     /// Every visible project by id, nested ones included.
     var projectsById: [String: Node] {

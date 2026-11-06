@@ -3,10 +3,8 @@ import SwiftUI
 
 struct TaskList: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.undoManager) private var undoManager
     let page: Page
     @State private var selection: Set<String> = []
-    @State private var editing: Row?
     /// The list whose Add field has the focus.
     @FocusState private var adding: Place?
 
@@ -29,13 +27,14 @@ struct TaskList: View {
         }
         .contextMenu(forSelectionType: String.self) { ids in
             if let task = ids.first.flatMap({ model.snapshot.allTasks[$0] }), ids.count == 1 {
-                Button("Edit…") { editing = task }
-                Button(task["completed_at"].isNull ? "Complete" : "Reopen") {
-                    model.toggle(task, undoManager: undoManager)
+                Button("Edit…") { model.editing = task }
+                Button(task["completed_at"].isNull ? "Complete" : "Reopen") { model.toggle(task) }
+                if task["recurrence"].isTruthy && task["completed_at"].isNull {
+                    Button("Skip to Next Occurrence") { model.skip(task) }
                 }
             }
         } primaryAction: { ids in
-            editing = ids.first.flatMap { model.snapshot.allTasks[$0] }
+            model.editing = ids.first.flatMap { model.snapshot.allTasks[$0] }
         }
         .navigationTitle(title)
         .toolbar {
@@ -45,7 +44,6 @@ struct TaskList: View {
                     .help("Add a task (⌘N)")
             }
         }
-        .sheet(item: $editing, content: TaskEditor.init)
     }
 
     /// The page's title and project. A project that's gone shows the Inbox.
@@ -59,7 +57,7 @@ struct TaskList: View {
     private func rows(_ nodes: [Node]) -> some View {
         ForEach(flatten(nodes, depth: 0), id: \.node.id) { item in
             TaskRow(task: item.node.row, labels: model.snapshot.labels) {
-                withAnimation { model.toggle(item.node.row, undoManager: undoManager) }
+                withAnimation { model.toggle(item.node.row) }
             }
             .padding(.leading, CGFloat(item.depth) * 24)
         }
@@ -137,11 +135,18 @@ struct TaskRow: View {
         let due = formatDue(task["due"])
         let estimate = task["estimate_minutes"].int
         let chips = (task["labels"].array ?? []).compactMap { $0.string.flatMap { labels[$0] } }
-        if due != nil || estimate != nil || !chips.isEmpty {
+        let rule = task["recurrence"].string.flatMap { $0.isEmpty ? nil : $0 }
+        if due != nil || estimate != nil || !chips.isEmpty || rule != nil {
             HStack(spacing: 10) {
                 if let due {
                     Label(due.text, systemImage: "calendar")
                         .foregroundStyle(due.state == .overdue ? .red : due.state == .today ? .green : .secondary)
+                }
+                if let rule {
+                    Image(systemName: "repeat")
+                        .foregroundStyle(.secondary)
+                        .help(rule)
+                        .accessibilityLabel("Repeats \(rule)")
                 }
                 if let estimate {
                     Label(formatMinutes(Int(estimate)), systemImage: "timer").foregroundStyle(.secondary)

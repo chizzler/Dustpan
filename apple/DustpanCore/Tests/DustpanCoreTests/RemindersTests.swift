@@ -81,3 +81,49 @@ import Testing
         #expect(DueDraft(["date": "soon"]) == nil)
     }
 }
+
+@Suite struct ReminderFiring {
+    let store: Store
+    let now: Int64 = 100 * 86_400_000
+
+    init() throws { store = try memoryStore() }
+
+    func seed(_ entity: String, _ id: String, _ fields: [String: JSON]) throws {
+        for (name, value) in fields {
+            try store.apply(Op(id: "\(id)-\(name)-\(value)", entity: entity, entityId: id, field: name, value: value,
+                               ts: wallMs(), device: "other"))
+        }
+    }
+
+    @Test func labels() {
+        #expect([0, -30, -60, 120, -1440, -2880].map(offsetLabel)
+                == ["At due time", "30 minutes before", "1 hour before", "2 hours after", "1 day before",
+                    "2 days before"])
+    }
+
+    @Test func oncePerFiringThenWithdrawn() throws {
+        try seed("task", "t", ["title": "T"])
+        try seed("reminder", "r", ["task_id": "t", "kind": "relative", "fire_at": .int(now - 60_000)])
+        try seed("reminder", "later", ["task_id": "t", "kind": "relative", "fire_at": .int(now + 60_000)])
+        let first = try checkReminders(store, now: now)
+        #expect(first.show.map(\.reminder.id) == ["r"] && first.next == now + 60_000)
+        #expect(try checkReminders(store, now: now).show.isEmpty)
+        try seed("reminder", "r", ["dismissed_at": .int(now)])
+        #expect(try checkReminders(store, now: now).withdraw == ["r"])
+        // Snoozed past the dismissal: a new firing.
+        try seed("reminder", "r", ["fire_at": .int(now + 1)])
+        #expect(try checkReminders(store, now: now + 1).show.map(\.reminder.id) == ["r"])
+    }
+
+    @Test func firstRunSkipsStaleOnesAndTrashedProjectsAndDoneTasks() throws {
+        try seed("project", "p", ["name": "P", "deleted_at": 1])
+        try seed("task", "t", ["title": "T"])
+        try seed("task", "gone", ["title": "G", "project_id": "p"])
+        try seed("task", "done", ["title": "D", "completed_at": 1])
+        try seed("reminder", "stale", ["task_id": "t", "fire_at": .int(now - staleReminderMs - 1)])
+        try seed("reminder", "trashed", ["task_id": "gone", "fire_at": .int(now - 1)])
+        try seed("reminder", "finished", ["task_id": "done", "fire_at": .int(now - 1)])
+        #expect(try checkReminders(store, now: now).show.isEmpty)
+        #expect(try store.meta("notified") == ["stale": .int(now - staleReminderMs - 1)])
+    }
+}

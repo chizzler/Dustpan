@@ -28,6 +28,8 @@ public struct Snapshot: Sendable {
     public var tasks: [Row] = []
     /// Every task by id.
     public var allTasks: [String: Row] = [:]
+    /// Live reminders by task id, soonest first. Ones without a time come last.
+    public var remindersByTask: [String: [Row]] = [:]
 
     public init() {}
 }
@@ -113,6 +115,15 @@ public func snapshot(_ store: Store) throws -> Snapshot {
     }
     snap.sectionsByProject = snap.sectionsByProject.mapValues { $0.sorted(by: orderLess) }
     snap.projects = buildTree(visibleProjects) { $0["parent_id"].string }
+    for reminder in try store.rows("reminder").values where isLive(reminder) {
+        if let taskId = reminder["task_id"].string { snap.remindersByTask[taskId, default: []].append(reminder) }
+    }
+    snap.remindersByTask = snap.remindersByTask.mapValues { rows in
+        rows.sorted { a, b in
+            let fa = a["fire_at"].int ?? .max, fb = b["fire_at"].int ?? .max
+            return fa != fb ? fa < fb : bytesLess(a.id, b.id)
+        }
+    }
     return snap
 }
 
