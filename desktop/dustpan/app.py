@@ -5,6 +5,7 @@ import sys
 import threading
 import time
 from datetime import date, datetime
+from pathlib import Path
 
 import gi
 
@@ -112,7 +113,13 @@ class Window(Adw.ApplicationWindow):
         self.sidebar.add_controller(keys)
         sidebar_scroll = self.sidebar_scroll = Gtk.ScrolledWindow(child=self.sidebar, vexpand=True)
         sidebar_view = Adw.ToolbarView(content=sidebar_scroll)
-        sidebar_header = Adw.HeaderBar(title_widget=Adw.WindowTitle(title="Dustpan"))
+        icon_file = Path(__file__).resolve().parents[1] / "data/io.github.chizzler.Dustpan.svg"
+        logo = Gtk.Image.new_from_gicon(Gio.FileIcon.new(Gio.File.new_for_path(str(icon_file))))
+        logo.set_pixel_size(25)
+        brand = Gtk.Box(spacing=8, valign=Gtk.Align.CENTER)
+        brand.append(logo)
+        brand.append(Gtk.Label(label="Dustpan", css_classes=["brand-title"]))
+        sidebar_header = Adw.HeaderBar(title_widget=brand)
         pages = Gtk.Button(icon_name="view-more-symbolic", tooltip_text="Show or hide pages", css_classes=["flat"])
         pages.connect("clicked", lambda b: popup_menu(b, self.pages_menu()))
         sidebar_header.pack_start(pages)

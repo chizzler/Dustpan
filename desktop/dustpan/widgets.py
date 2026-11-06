@@ -48,6 +48,7 @@ button.subtask-broom:hover { border-color: alpha(currentColor, 0.22); background
 button.fold-chevron { min-width: 16px; min-height: 18px; padding: 0; border-radius: 4px; opacity: 0.55; }
 button.fold-chevron:hover { opacity: 1; }
 button.fold-chevron image { -gtk-icon-size: 12px; }
+.brand-title { font-family: "Author", sans-serif; font-size: 22px; font-weight: 700; }
 .sidebar-heading { padding-bottom: 5px; border-bottom: 2px solid alpha(currentColor, 0.22); }
 .sidebar-heading-mark { background: var(--accent-bg-color); border-radius: 1px; }
 .sidebar-heading-label { font-size: 0.78em; font-weight: 700; color: alpha(currentColor, 0.72); }
