@@ -1,7 +1,7 @@
 # Drag and drop
 
 Slice 6. Drag a task to change where it lives: its place in a list, its parent, its section, its project, its date or its labels.
-Status: designed 2026-11-01. 6a built 2026-11-01, tried and approved. 6b built 2026-11-01, tried and approved. 6c not built.
+Status: designed 2026-11-01. 6a built 2026-11-01, tried and approved. 6b built 2026-11-01, tried and approved. 6c partly built: the sidebar, 2026-11-02.
 The Mac client's slice 6a (2026-11-06) follows the same rules; see "On the Mac" at the end.
 
 ## What slice 5 had
@@ -279,13 +279,28 @@ Built 2026-11-02. Projects, labels and views can be dragged within their own gro
 Mac slice 6a, 2026-11-06. `DragDrop.swift` ports the rules here (`Placement` is the desktop's `Place`, which
 the Swift code already used for a project and section), and `Writer.drop` ports `Writer.drop`. The tests are ports.
 
-SwiftUI has no one target over a whole list with row bounds, so the window differs from GTK:
+**The SwiftUI list** (the default):
 - **Each row is its own drop target** (`ListDrop`, an `onDrop` delegate), and so are a section's heading and its
   Add field (the end of the section). The pointer's y in the row picks the zone, its x the level, as above.
   Leaving a target keeps the mark for 150 ms, so it doesn't flicker in the gaps between rows.
+- **The whole row width drags**, so a press-and-drag beside the text never selects the rows it crosses.
+  Esc clears a selection.
 - **The grab point** comes from the pointer's last hover position over the row, since `onDrag` doesn't give one.
-- **The drag ends** when the mouse button is up: SwiftUI's `onDrag` reports no end, so the model watches the button.
+- **The drag ends** when the mouse button is up: `onDrag` reports no end, so its source watches the button.
+  macOS 26's `onDragSessionUpdated` and `onDropSessionUpdated` would report both, with `draggable(containerItemID:)`;
+  not used yet.
 - **Autoscroll** is whatever the system list does during a drag. Not written by hand.
-- Escape and drops outside a target cancel, as before. Calendar targets don't exist on the Mac yet; 6b (keys and
-  the row menu's moves) comes later.
 
+**The `NSOutlineView` spike** (View ▸ Outline Task List, project and Inbox pages only), added 2026-11-07:
+- AppKit draws the drop line or ring, proposes a parent and child index, scrolls, and opens collapsed rows on hover.
+- `resolveDrop(_:projectId:sectionId:parent:before:inside:moving:)` turns that proposal into the same `Drop`,
+  so both lists share one rule. Section headings are flat group rows, and a drop on one means the top of its section.
+- The outline view reports the drag's start and end itself.
+- Not there yet: the row menu, keys, an Add field per section, the label picker, the Inbox's planned tasks.
+
+**Why the spike:** SwiftUI's own list moves (`onMove`, macOS 27's `reorderable`) are flat, with no "inside" and no
+level, and nested drag and drop in a SwiftUI `List` has a poor record. `NSOutlineView` is where macOS does tree
+drag and drop. Whether the task list moves to it is still open.
+
+Escape and drops outside a target cancel, as before. Calendar targets don't exist on the Mac yet; 6b (keys and
+the row menu's moves) and the sidebar's project and view reordering (from 6c) come later.

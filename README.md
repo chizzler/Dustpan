@@ -23,7 +23,8 @@ deploy/pull-backups.sh --install  # daily copies of the server's archives and th
 Both clients read their URL and token from `~/.config/dustpan/config`.
 
 The Omarchy client reports 0.12.4; its latest release tag is v0.12.3 (see [versions](desktop/README.md#versions)).
-The Mac client is at 0.1.0, read-only and tried and approved (see [Mac versions](apple/README.md#versions)). The server is pinned to OpenTodo v0.22.0.
+The Mac client is at 0.7.0: slices 1 to 6a and quick add (4b) are built; 0.4.1 is installed (see [Mac versions](apple/README.md#versions)).
+The server is pinned to OpenTodo v0.22.0.
 
 ## Development
 
