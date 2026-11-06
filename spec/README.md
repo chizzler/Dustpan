@@ -2,7 +2,7 @@
 
 The parts of OpenTodo's protocol that the Omarchy client implements.
 OpenTodo's own docs are the reference. This file records what we use, what we skip, and where we differ.
-Mac client work is happening on another machine and is not covered here yet.
+The Mac client has its own Swift core and [guide](../apple/README.md); its read-only slice 1 is built and approved.
 
 Pinned to **OpenTodo v0.22.0**. Local clone: `../opentodo`, beside this repo, at tag `v0.22.0`. The tests read its vectors.
 Most of the client was ported from v0.18.0 and still matches. The v1 API only grows from v0.22.0.
