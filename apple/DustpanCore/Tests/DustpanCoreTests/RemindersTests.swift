@@ -88,10 +88,10 @@ import Testing
 
     init() throws { store = try memoryStore() }
 
-    func seed(_ entity: String, _ id: String, _ fields: [String: JSON]) throws {
+    func seed(_ entity: String, _ id: String, _ fields: [String: JSON], ts: Int64 = 1) throws {
         for (name, value) in fields {
-            try store.apply(Op(id: "\(id)-\(name)-\(value)", entity: entity, entityId: id, field: name, value: value,
-                               ts: wallMs(), device: "other"))
+            try store.apply(Op(id: "\(id)-\(name)-\(ts)", entity: entity, entityId: id, field: name, value: value,
+                               ts: ts, device: "other"))
         }
     }
 
@@ -108,10 +108,10 @@ import Testing
         let first = try checkReminders(store, now: now)
         #expect(first.show.map(\.reminder.id) == ["r"] && first.next == now + 60_000)
         #expect(try checkReminders(store, now: now).show.isEmpty)
-        try seed("reminder", "r", ["dismissed_at": .int(now)])
+        try seed("reminder", "r", ["dismissed_at": .int(now)], ts: 2)
         #expect(try checkReminders(store, now: now).withdraw == ["r"])
         // Snoozed past the dismissal: a new firing.
-        try seed("reminder", "r", ["fire_at": .int(now + 1)])
+        try seed("reminder", "r", ["fire_at": .int(now + 1)], ts: 3)
         #expect(try checkReminders(store, now: now + 1).show.map(\.reminder.id) == ["r"])
     }
 

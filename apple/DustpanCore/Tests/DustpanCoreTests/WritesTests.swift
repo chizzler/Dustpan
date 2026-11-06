@@ -166,6 +166,21 @@ import Testing
         #expect(throws: CannotEdit.self) { try writer.addReminder("a", offsetMinutes: 600_000) }
     }
 
+    @Test func remindersAtATimeAndNewOffsets() throws {
+        let due: JSON = ["date": "2026-11-06", "time": "15:00"]
+        try seed("task", "a", ["title": "A", "due": due])
+        let at = try writer.addReminder("a", at: 123_000)
+        let absolute = try #require(try store.rows("reminder")[at])
+        #expect(absolute["kind"] == "absolute" && absolute["fire_at"] == 123_000 && absolute["offset_minutes"].isNull)
+        let rid = try writer.addReminder("a", offsetMinutes: 0)
+        try writer.dismiss(rid)
+        try writer.setOffset(rid, minutes: -60)
+        let moved = try #require(try store.rows("reminder")[rid])
+        #expect(moved["offset_minutes"] == -60 && moved["fire_at"] == .int(dueInstant(due)! - 3_600_000))
+        #expect(moved["dismissed_at"].isNull)
+        #expect(throws: CannotEdit.self) { try writer.setOffset(at, minutes: -10) }
+    }
+
     @Test func addWithADueDateAndReopen() throws {
         let id = try writer.addTask("Call", due: ["date": "2026-11-02"])
         #expect(try task(id)["due"] == ["date": "2026-11-02"])

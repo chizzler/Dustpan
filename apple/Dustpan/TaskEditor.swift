@@ -83,12 +83,17 @@ struct TaskEditor: View {
             // Without a due date there's nothing to repeat from.
             .onChange(of: hasDue) { if !hasDue { recurrence = "" } }
         if hasDue {
-            DatePicker("Date", selection: $due.date, displayedComponents: due.hasTime ? [.date, .hourAndMinute] : .date)
-                .environment(\.timeZone, due.zone)
-            Toggle("Time", isOn: $due.hasTime)
-            if let zone = due.zoneName {
-                LabeledContent("Time zone", value: zone)
+            Group {
+                LabeledContent("Date") { DayPicker(date: $due.date) }
+                Toggle("Time", isOn: $due.hasTime)
+                if due.hasTime {
+                    DatePicker("At", selection: $due.date, displayedComponents: .hourAndMinute)
+                    if let zone = due.zoneName {
+                        LabeledContent("Time zone", value: zone)
+                    }
+                }
             }
+            .environment(\.timeZone, due.zone)
         }
     }
 
@@ -129,19 +134,7 @@ struct TaskEditor: View {
     private var reminders: some View {
         Section("Reminders") {
             let rows = model.snapshot.remindersByTask[task.id] ?? []
-            ForEach(rows) { reminder in
-                LabeledContent {
-                    Button("Delete Reminder", systemImage: "trash") { act { try model.deleteReminder(reminder.id) } }
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.borderless)
-                        .help("Delete reminder")
-                } label: {
-                    Text(describe(reminder: reminder))
-                    if reminder["fire_at"].isNull {
-                        Text("No \(reminder["kind"] == "deadline" ? "deadline" : "due date"), so it won't fire")
-                    }
-                }
-            }
+            ForEach(rows) { ReminderRow(reminder: $0, act: act) }
             if rows.isEmpty {
                 Text("None").foregroundStyle(.secondary)
             }
@@ -151,9 +144,20 @@ struct TaskEditor: View {
                         act { try model.addReminder(to: task.id, offsetMinutes: minutes) }
                     }
                 }
+                Divider()
+                Button("At a Time…") { act { try model.addReminder(to: task.id, at: suggestedTime) } }
             }
             .fixedSize()
         }
+    }
+
+    /// For a new reminder at a time: the due time when it's still ahead, else the next whole hour.
+    private var suggestedTime: Date {
+        if task["due"]["time"].isTruthy, let instant = dueInstant(task["due"]).map(Date.init(ms:)), instant > .now {
+            return instant
+        }
+        return Calendar.current.nextDate(after: .now, matching: DateComponents(minute: 0),
+                                         matchingPolicy: .nextTime) ?? .now
     }
 
     private func act(_ action: () throws -> Void) {

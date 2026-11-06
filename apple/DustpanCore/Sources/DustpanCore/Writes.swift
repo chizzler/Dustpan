@@ -429,26 +429,54 @@ public final class Writer {
     /// A reminder offsetMinutes from the task's due time. Returns its id.
     @discardableResult
     public func addReminder(_ taskId: String, offsetMinutes: Int64) throws -> String {
-        guard abs(offsetMinutes) <= maxReminderOffset else {
-            throw CannotEdit("A reminder can be at most a year from the due time")
+        try checkOffset(offsetMinutes)
+        return try addReminder(taskId, kind: "relative", offset: .int(offsetMinutes)) {
+            relativeFireAt($0["due"], .int(offsetMinutes))
         }
+    }
+
+    /// A reminder at a moment of its own (unix ms). Returns its id.
+    @discardableResult
+    public func addReminder(_ taskId: String, at fireAt: Int64) throws -> String {
+        try addReminder(taskId, kind: "absolute", offset: nil) { _ in .int(fireAt) }
+    }
+
+    private func addReminder(_ taskId: String, kind: String, offset: JSON, fireAt: (Row) -> JSON) throws -> String {
         let reminderId = newId()
         try commit {
             let task = try liveTask(try store.rows("task"), taskId)
             return [Change("reminder", reminderId, [
-                "task_id": .string(taskId), "kind": "relative", "offset_minutes": .int(offsetMinutes),
-                "fire_at": relativeFireAt(task["due"], .int(offsetMinutes)), "delivered_at": nil,
-                "dismissed_at": nil, "created_at": .int(now()), "deleted_at": nil,
+                "task_id": .string(taskId), "kind": .string(kind), "offset_minutes": offset, "fire_at": fireAt(task),
+                "delivered_at": nil, "dismissed_at": nil, "created_at": .int(now()), "deleted_at": nil,
             ])]
         }
         return reminderId
+    }
+
+    private func checkOffset(_ minutes: Int64) throws {
+        guard abs(minutes) <= maxReminderOffset else {
+            throw CannotEdit("A reminder can be at most a year from the due time")
+        }
+    }
+
+    /// A relative reminder at another offset from its task's due time.
+    public func setOffset(_ reminderId: String, minutes: Int64) throws {
+        try checkOffset(minutes)
+        try commit {
+            guard let reminder = try store.rows("reminder")[reminderId], isLive(reminder),
+                  reminder["kind"] == "relative" else { throw CannotEdit("That reminder no longer exists") }
+            let task = try liveTask(try store.rows("task"), reminder["task_id"].string ?? "")
+            return [Change("reminder", reminderId, ["offset_minutes": .int(minutes),
+                                                     "fire_at": relativeFireAt(task["due"], .int(minutes)),
+                                                     "delivered_at": nil, "dismissed_at": nil])]
+        }
     }
 
     public func deleteReminder(_ reminderId: String) throws {
         try changeReminder(reminderId, ["deleted_at": .int(now())])
     }
 
-    /// Fire again at until.
+    /// Fire at until: a snooze, or a new time for a reminder at a moment of its own.
     public func snooze(_ reminderId: String, until: Int64) throws {
         try changeReminder(reminderId, ["fire_at": .int(until), "delivered_at": nil, "dismissed_at": nil])
     }

@@ -194,6 +194,20 @@ final class AppModel {
         try apply { try $0.addReminder(taskId, offsetMinutes: offsetMinutes) }
     }
 
+    /// A reminder at a time of its own.
+    func addReminder(to taskId: String, at time: Date) throws {
+        try apply { try $0.addReminder(taskId, at: time.ms) }
+    }
+
+    func setOffset(_ reminderId: String, minutes: Int64) throws {
+        try apply { try $0.setOffset(reminderId, minutes: minutes) }
+    }
+
+    /// A reminder at a time of its own moves to another.
+    func retime(_ reminderId: String, at time: Date) throws {
+        try apply { try $0.snooze(reminderId, until: time.ms) }
+    }
+
     func deleteReminder(_ reminderId: String) throws {
         try apply { try $0.deleteReminder(reminderId) }
     }

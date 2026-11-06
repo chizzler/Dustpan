@@ -127,6 +127,9 @@ public func describe(reminder r: Row) -> String {
 
 extension Date {
     public init(ms: Int64) { self.init(timeIntervalSince1970: Double(ms) / 1000) }
+
+    /// Unix milliseconds, as the server stores instants.
+    public var ms: Int64 { Int64((timeIntervalSince1970 * 1000).rounded(.down)) }
 }
 
 // MARK: - Firing
