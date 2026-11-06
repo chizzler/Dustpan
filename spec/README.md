@@ -35,8 +35,8 @@ When the pin moves, re-read the sync doc's schema table and diff the vectors.
 | Server update | Catch up with v0.22.0: time sectors (show, filter, quick add, write rules), the `notes` filter terms | [sectors.md](sectors.md) | done 2026-11-04, owner trial pending |
 | 12 | Calendar, in a companion window: Month, then Week and Day, placing, repeating and multi-day tasks | [calendar.md](calendar.md) | 12a, 12b and 12c done 2026-11-04, tried and approved (12c: the keys, menu and grid settings not yet tried); 12d to come |
 | — | Fold a task's subtasks away in project and Inbox lists | [folding.md](folding.md) | done 2026-11-04, tried and approved (0.12.3) |
-| — | Subtask progress: a pie in the parent's circle, and the offer to complete the parent | [progress.md](progress.md) | done 2026-11-05 (0.12.4), owner trial pending |
-| — | Clickable project label on grouped rows; completed subtasks settle below open siblings | [dev diary](../dev-diary.md) | built and checked 2026-11-06 (0.12.4) |
+| — | Subtask progress: a pie in the parent's circle, and the offer to complete the parent | [progress.md](progress.md) | built 2026-11-05 (0.12.4); pie tried and approved, prompt trial pending |
+| — | Clickable project label on grouped rows; completed subtasks settle below open siblings | [dev diary](../dev-diary.md) | built 2026-11-06 (0.12.4); project link tried and approved, settling trial pending |
 
 ## Behind the server
 

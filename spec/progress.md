@@ -2,7 +2,8 @@
 
 What the desktop client implements from OpenSpec `subtasks` ("Parent progress", "Completing a parent"),
 `docs/notes-and-subtasks.md` and the web app's `lib/subtasks.ts` and `TaskRow.tsx` (v0.22.0).
-Built 2026-11-05 (0.12.4). Owner trial pending.
+Built 2026-11-05 (0.12.4). The owner tried and approved the pie on 2026-11-06;
+the parent-completion banner and its keys still need a trial.
 
 ## Upstream
 
