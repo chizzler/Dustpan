@@ -84,7 +84,7 @@ struct TaskEditor: View {
             .onChange(of: hasDue) { if !hasDue { recurrence = "" } }
         if hasDue {
             Group {
-                LabeledContent("Date") { DayPicker(date: $due.date) }
+                MonthCalendar(date: $due.date, zone: due.zone)
                 Toggle("Time", isOn: $due.hasTime)
                 if due.hasTime {
                     DatePicker("At", selection: $due.date, displayedComponents: .hourAndMinute)
