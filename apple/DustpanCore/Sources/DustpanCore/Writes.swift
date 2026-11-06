@@ -494,4 +494,94 @@ public final class Writer {
             return [Change("reminder", reminderId, patch)]
         }
     }
+
+    // MARK: saved views
+
+    /// A list view, last in the sidebar. Returns its id.
+    @discardableResult
+    public func addView(_ edit: ViewEdit) throws -> String {
+        let fields = try checkView(edit)
+        guard fields["name"] != nil, fields["query"] != nil else { throw CannotEdit("A view needs a name and a query") }
+        let viewId = newId()
+        try commit {
+            let now = now()
+            let last = try store.rows("view").values.filter(isLive).compactMap { $0["position"].number }.max()
+            var view: [String: JSON] = [
+                "name": fields["name"]!, "query": fields["query"]!, "kind": "list",
+                "group_by": fields["group_by"] ?? "project", "sort_by": fields["sort_by"] ?? "due",
+                "sort_dir": fields["sort_dir"] ?? "asc", "pinned": true,
+                "position": position(max(Double(now), (last ?? 0) + 1)), "color": .string(defaultViewColor),
+                "panels": [], "created_at": .int(now), "deleted_at": nil,
+            ]
+            // Display options only when they differ from the defaults, like the web app.
+            if fields["show_completed"] == true { view["show_completed"] = true }
+            return [Change("view", viewId, view)]
+        }
+        return viewId
+    }
+
+    /// Write the changed fields of a view, in one batch.
+    public func editView(_ viewId: String, _ edit: ViewEdit) throws {
+        let fields = try checkView(edit)
+        try commit {
+            guard let view = try store.rows("view")[viewId], isLive(view) else {
+                throw CannotEdit("That view no longer exists")
+            }
+            let patch = fields.filter { name, value in
+                (view.values[name] ?? (name == "show_completed" ? false : .null)) != value
+            }
+            return patch.isEmpty ? [] : [Change("view", viewId, patch)]
+        }
+    }
+
+    /// Undo brings it back.
+    public func deleteView(_ viewId: String) throws -> Done {
+        try commit {
+            guard let view = try store.rows("view")[viewId], isLive(view) else {
+                throw CannotEdit("That view no longer exists")
+            }
+            return ([Change("view", viewId, ["deleted_at": .int(now())])],
+                    Done(undo: [Change("view", viewId, ["deleted_at": nil])]))
+        }
+    }
+
+    /// The view fields as written: a name, a query that parses, known options.
+    private func checkView(_ edit: ViewEdit) throws -> [String: JSON] {
+        var out: [String: JSON] = [:]
+        if let name = edit.name?.trimmingCharacters(in: .whitespacesAndNewlines) {
+            guard !name.isEmpty else { throw CannotEdit("A view needs a name") }
+            out["name"] = .string(name)
+        }
+        if let query = edit.query?.trimmingCharacters(in: .whitespacesAndNewlines) {
+            do {
+                guard try parseFilter(query) != nil else { throw CannotEdit("A view needs a query") }
+            } catch let error as FilterError {
+                throw CannotEdit(error.message)
+            }
+            out["query"] = .string(query)
+        }
+        if let groupBy = edit.groupBy { out["group_by"] = .string(groupBy.rawValue) }
+        if let sortBy = edit.sortBy { out["sort_by"] = .string(sortBy.rawValue) }
+        if let sortDir = edit.sortDir { out["sort_dir"] = .string(sortDir.rawValue) }
+        if let showCompleted = edit.showCompleted { out["show_completed"] = .bool(showCompleted) }
+        return out
+    }
+}
+
+/// The view fields `Writer.addView` and `editView` take. Nil leaves a field alone.
+public struct ViewEdit: Equatable, Sendable {
+    public var name: String?
+    public var query: String?
+    public var groupBy: ViewGroupBy?
+    public var sortBy: ViewSortBy?
+    public var sortDir: ViewSortDir?
+    public var showCompleted: Bool?
+
+    public init(name: String? = nil, query: String? = nil, groupBy: ViewGroupBy? = nil, sortBy: ViewSortBy? = nil,
+                sortDir: ViewSortDir? = nil, showCompleted: Bool? = nil) {
+        (self.name, self.query, self.groupBy, self.sortBy, self.sortDir, self.showCompleted) =
+            (name, query, groupBy, sortBy, sortDir, showCompleted)
+    }
+
+    public var isEmpty: Bool { self == ViewEdit() }
 }

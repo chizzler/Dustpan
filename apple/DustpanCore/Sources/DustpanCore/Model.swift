@@ -30,6 +30,33 @@ public struct Snapshot: Sendable {
     public var allTasks: [String: Row] = [:]
     /// Live reminders by task id, soonest first. Ones without a time come last.
     public var remindersByTask: [String: [Row]] = [:]
+    /// Live list views, in sidebar order.
+    public var views: [Row] = []
+    /// Live projects, archived ones too: what a filter's names can refer to.
+    public var liveProjects: [Row] = []
+    /// Visible projects in sidebar order, as "Parent › Child", for headings.
+    public var projectPaths: [(id: String, path: String)] = []
+    public var prefs: [String: JSON] = [:]
+
+    /// Live labels in sidebar order.
+    public var labelsInOrder: [Row] { labels.values.sorted(by: orderLess) }
+
+    /// "Project" or "Project › Parent task", for a task listed away from its project.
+    public func place(of task: Row) -> String {
+        let project = task["project_id"].string
+        var place = project.flatMap { id in projectPaths.first { $0.id == id }?.path } ?? "Inbox"
+        if let parent = task["parent_id"].string.flatMap({ allTasks[$0] }), isLive(parent) {
+            place += " › " + (parent["title"].string ?? "")
+        }
+        return place
+    }
+
+    /// For running filters on day.
+    public func filterContext(today: Day) -> FilterContext {
+        FilterContext(today: today, tasks: Array(allTasks.values), labels: Array(labels.values), projects: liveProjects,
+                      weekStart: prefs["week_start"]?.string.flatMap { weekStartPrefs[$0] } ?? 1,
+                      dayStart: dayStartMinutes(prefs["day_start"] ?? .null))
+    }
 
     public init() {}
 }
@@ -115,6 +142,17 @@ public func snapshot(_ store: Store) throws -> Snapshot {
     }
     snap.sectionsByProject = snap.sectionsByProject.mapValues { $0.sorted(by: orderLess) }
     snap.projects = buildTree(visibleProjects) { $0["parent_id"].string }
+    func walk(_ nodes: [Node], _ path: [String]) {
+        for node in nodes {
+            let here = path + [node.row["name"].string ?? ""]
+            snap.projectPaths.append((node.id, here.joined(separator: " › ")))
+            walk(node.children, here)
+        }
+    }
+    walk(snap.projects, [])
+    snap.liveProjects = projects.values.filter(isLive).sorted(by: orderLess)
+    snap.views = try store.rows("view").values.filter(isListView).sorted(by: viewOrderLess)
+    snap.prefs = try store.rows("user_prefs")["me"]?.values ?? [:]
     for reminder in try store.rows("reminder").values where isLive(reminder) {
         if let taskId = reminder["task_id"].string { snap.remindersByTask[taskId, default: []].append(reminder) }
     }

@@ -19,13 +19,21 @@ struct ContentView: View {
                 Sidebar()
             } detail: {
                 // A page of its own: selection and focus start fresh.
-                TaskList(page: model.page ?? .inbox).id(model.page)
+                Group {
+                    switch model.page ?? .today {
+                    case .inbox: TaskList(page: .inbox)
+                    case .project(let id): TaskList(page: .project(id))
+                    case let page: GroupedTaskList(page: page)
+                    }
+                }
+                .id(model.page)
             }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) { SyncStatus() }
             }
             .overlay(alignment: .bottom) { ToastView() }
             .sheet(item: $model.editing, content: TaskEditor.init)
+            .sheet(item: $model.editingView, content: ViewEditor.init)
             .onChange(of: undoManager, initial: true) { model.undoManager = undoManager }
             .frame(minWidth: 640, minHeight: 400)
         }

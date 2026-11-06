@@ -166,6 +166,23 @@ import Testing
         #expect(throws: CannotEdit.self) { try writer.addReminder("a", offsetMinutes: 600_000) }
     }
 
+    @Test func viewsAreCheckedWrittenEditedAndDeleted() throws {
+        #expect(throws: CannotEdit.self) { try writer.addView(ViewEdit(name: "V", query: "p1 &")) }
+        #expect(throws: CannotEdit.self) { try writer.addView(ViewEdit(name: " ", query: "p1")) }
+        let id = try writer.addView(ViewEdit(name: " Urgent ", query: "p1", showCompleted: false))
+        let view = try #require(try store.rows("view")[id])
+        #expect(view["name"] == "Urgent" && view["kind"] == "list" && view["group_by"] == "project")
+        #expect(view.values["show_completed"] == nil && view["position"] == .int(now))
+        try writer.editView(id, ViewEdit(name: "Urgent", query: "p1 | p2", showCompleted: false))
+        #expect(try outbox().filter { $0.entityId == id && $0.field == "query" }.count == 2)
+        #expect(try outbox().filter { $0.entityId == id && $0.field == "name" }.count == 1)
+        #expect(try outbox().filter { $0.field == "show_completed" }.isEmpty)
+        let done = try writer.deleteView(id)
+        #expect(try store.rows("view")[id]?["deleted_at"] == .int(now))
+        try writer.revert(done.undo)
+        #expect(try store.rows("view")[id]?["deleted_at"].isNull == true)
+    }
+
     @Test func remindersAtATimeAndNewOffsets() throws {
         let due: JSON = ["date": "2026-11-06", "time": "15:00"]
         try seed("task", "a", ["title": "A", "due": due])

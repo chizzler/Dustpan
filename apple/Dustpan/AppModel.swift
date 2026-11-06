@@ -3,8 +3,18 @@ import Foundation
 import Observation
 
 enum Page: Hashable {
+    case today
+    case upcoming
     case inbox
     case project(String)
+    case view(String)
+}
+
+/// A saved view in the editor: an existing one, or a new one (with a query to start from).
+struct ViewDraft: Identifiable {
+    let id = UUID()
+    var view: Row?
+    var query = ""
 }
 
 /// A short message at the foot of the window, with Undo when the action can be undone.
@@ -40,11 +50,13 @@ final class AppModel {
     var toast: Toast?
     /// The task open in the editor.
     var editing: Row?
+    /// The saved view open in its editor.
+    var editingView: ViewDraft?
     /// The window's, so Undo works from the toast, Edit ▸ Undo and the editor alike.
     @ObservationIgnored weak var undoManager: UndoManager?
     /// Why the app can't start: no config, or no database.
     private(set) var setupProblem: String?
-    var page: Page? = .inbox
+    var page: Page? = .today
 
     private let store: Store?
     private let api: Api?
@@ -243,8 +255,24 @@ final class AppModel {
     }
 
     /// Add a task at the end of a list. False when it can't be added.
-    func add(_ title: String, to place: Place) -> Bool {
-        perform { try $0.addTask(title, projectId: place.projectId, sectionId: place.sectionId) } != nil
+    func add(_ title: String, to place: Place, due: JSON = nil) -> Bool {
+        perform { try $0.addTask(title, projectId: place.projectId, sectionId: place.sectionId, due: due) } != nil
+    }
+
+    /// Create a view and show it, or edit one.
+    func saveView(_ view: Row?, _ edit: ViewEdit) throws {
+        if let view {
+            guard !edit.isEmpty else { return }
+            try apply { try $0.editView(view.id, edit) }
+        } else {
+            page = .view(try apply { try $0.addView(edit) })
+        }
+    }
+
+    /// Undo brings it back.
+    func deleteView(_ view: Row) {
+        if page == .view(view.id) { page = .today }
+        undoable("Delete View", { try $0.deleteView(view.id) }) { _ in "Deleted view “\(view["name"].string ?? "")”" }
     }
 
     func edit(_ taskId: String, _ edit: TaskEdit) throws {

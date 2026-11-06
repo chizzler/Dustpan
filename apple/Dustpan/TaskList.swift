@@ -25,17 +25,7 @@ struct TaskList: View {
                 }
             }
         }
-        .contextMenu(forSelectionType: String.self) { ids in
-            if let task = ids.first.flatMap({ model.snapshot.allTasks[$0] }), ids.count == 1 {
-                Button("Edit…") { model.editing = task }
-                Button(task["completed_at"].isNull ? "Complete" : "Reopen") { model.toggle(task) }
-                if task["recurrence"].isTruthy && task["completed_at"].isNull {
-                    Button("Skip to Next Occurrence") { model.skip(task) }
-                }
-            }
-        } primaryAction: { ids in
-            model.editing = ids.first.flatMap { model.snapshot.allTasks[$0] }
-        }
+        .taskMenus()
         .navigationTitle(title)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -76,10 +66,34 @@ struct TaskList: View {
     }
 }
 
-/// The last row of a list: type a title and press Return to add a task there.
-private struct AddTaskField: View {
+extension View {
+    /// The row menu and double-click of a list of tasks, keyed by task id.
+    func taskMenus() -> some View { modifier(TaskMenus()) }
+}
+
+private struct TaskMenus: ViewModifier {
+    @Environment(AppModel.self) private var model
+
+    func body(content: Content) -> some View {
+        content.contextMenu(forSelectionType: String.self) { ids in
+            if let task = ids.first.flatMap({ model.snapshot.allTasks[$0] }), ids.count == 1 {
+                Button("Edit…") { model.editing = task }
+                Button(task["completed_at"].isNull ? "Complete" : "Reopen") { model.toggle(task) }
+                if task["recurrence"].isTruthy && task["completed_at"].isNull {
+                    Button("Skip to Next Occurrence") { model.skip(task) }
+                }
+            }
+        } primaryAction: { ids in
+            model.editing = ids.first.flatMap { model.snapshot.allTasks[$0] }
+        }
+    }
+}
+
+/// The last row of a list: type a title and press Return to add a task there, due on due when it's set.
+struct AddTaskField: View {
     @Environment(AppModel.self) private var model
     let place: Place
+    var due: JSON = nil
     var focus: FocusState<Place?>.Binding
     @State private var title = ""
 
@@ -91,7 +105,7 @@ private struct AddTaskField: View {
                 .focused(focus, equals: place)
                 .onSubmit {
                     guard !title.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-                    if model.add(title, to: place) { title = "" }
+                    if model.add(title, to: place, due: due) { title = "" }
                     focus.wrappedValue = place
                 }
                 .onKeyPress(.escape) {
@@ -107,6 +121,8 @@ private struct AddTaskField: View {
 struct TaskRow: View {
     let task: Row
     let labels: [String: Row]
+    /// For a task listed away from its project: "Project" or "Project › Parent task".
+    var place: String?
     let toggle: () -> Void
 
     var body: some View {
@@ -136,7 +152,7 @@ struct TaskRow: View {
         let estimate = task["estimate_minutes"].int
         let chips = (task["labels"].array ?? []).compactMap { $0.string.flatMap { labels[$0] } }
         let rule = task["recurrence"].string.flatMap { $0.isEmpty ? nil : $0 }
-        if due != nil || estimate != nil || !chips.isEmpty || rule != nil {
+        if due != nil || estimate != nil || !chips.isEmpty || rule != nil || place != nil {
             HStack(spacing: 10) {
                 if let due {
                     Label(due.text, systemImage: "calendar")
@@ -158,6 +174,10 @@ struct TaskRow: View {
                         .padding(.vertical, 1)
                         .foregroundStyle(color)
                         .background(color.opacity(0.15), in: .capsule)
+                }
+                if let place {
+                    Spacer()
+                    Text(place).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             .labelStyle(.titleAndIcon)

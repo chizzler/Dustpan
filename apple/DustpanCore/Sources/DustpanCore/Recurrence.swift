@@ -52,9 +52,9 @@ public struct Day: Hashable, Comparable, Sendable, CustomStringConvertible {
     }
 
     public static func < (a: Day, b: Day) -> Bool { a.number < b.number }
-    static func + (day: Day, n: Int) -> Day { Day(number: day.number + n) }
-    static func - (day: Day, n: Int) -> Day { Day(number: day.number - n) }
-    static func - (a: Day, b: Day) -> Int { a.number - b.number }
+    public static func + (day: Day, n: Int) -> Day { Day(number: day.number + n) }
+    public static func - (day: Day, n: Int) -> Day { Day(number: day.number - n) }
+    public static func - (a: Day, b: Day) -> Int { a.number - b.number }
 }
 
 func monthLength(_ year: Int, _ month: Int) -> Int {

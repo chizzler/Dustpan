@@ -13,6 +13,11 @@ struct DustpanApp: App {
                 .task { await model.remind() }
         }
         .commands {
+            CommandGroup(after: .newItem) {
+                Button("New View…") { model.editingView = ViewDraft() }
+                    .keyboardShortcut("n", modifiers: [.command, .shift])
+                    .disabled(model.setupProblem != nil)
+            }
             CommandGroup(after: .toolbar) {
                 Button("Sync Now") { Task { await model.sync() } }
                     .keyboardShortcut("r")

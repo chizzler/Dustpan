@@ -39,6 +39,9 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `DustpanCore/Sources/DustpanCore/Writes.swift` | Local edits: one batch per action, applied and queued, with Undo |
 | `DustpanCore/Sources/DustpanCore/Recurrence.swift` | Repeat rules: parser, canonical form, next occurrence, on floating days |
 | `DustpanCore/Sources/DustpanCore/Recurring.swift` | What completing, skipping and splitting off a repeating task write |
+| `DustpanCore/Sources/DustpanCore/Filter.swift` | The filter language: parser, error messages, evaluation, blocked tasks |
+| `DustpanCore/Sources/DustpanCore/Views.swift` | Today, Upcoming, and saved views: sorting and grouping |
+| `DustpanCore/Sources/DustpanCore/Sectors.swift` | The part of time sectors the filter language needs |
 | `DustpanCore/Sources/DustpanCore/Reminders.swift` | Reminders that follow their dates, default reminders, and which are due to show |
 | `DustpanCore/Sources/DustpanCore/Ids.swift` | Deterministic ids |
 | `DustpanCore/Sources/DustpanCore/Events.swift` | The live update stream |
@@ -78,6 +81,7 @@ Before 1.0 the minor number follows the Mac client's own slices.
 
 | Version | Date | What |
 | --- | --- | --- |
+| 0.4.0 | 2026-11-06 | Slice 4a, filters and views: Today and Upcoming, and saved views in the sidebar with counts, created, edited and deleted with Undo. The whole filter language parses. |
 | 0.3.1 | 2026-11-06 | The editor's date controls: a date field with a calendar popover and a time row of its own. Reminders at a chosen time, and a reminder's offset or time changed in place. |
 | 0.3.0 | 2026-11-06 | Slice 3, recurrence and reminders: repeating tasks complete, skip and split off an occurrence; a repeat rule in the editor with a preview; reminders from presets, and notifications with Snooze and Dismiss. |
 | 0.2.0 | 2026-11-06 | Slice 2, basic writes: add, complete and reopen with Undo, an editor for title, priority, due, project and section. Sync 250 ms after an edit, and the live stream. |
