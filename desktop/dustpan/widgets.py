@@ -143,7 +143,7 @@ class BrandMark(Gtk.Fixed):
 class BrandDust(Gtk.DrawingArea):
     """A brief dust puff at the pointer while it is near the logo."""
 
-    DURATION = 0.55
+    DURATION = 0.72
     PUFFS = ((-2, -2, -4, -8, 3.2), (2, -3, 3, -10, 3.4),
              (4, 1, 6, -5, 2.8), (-4, 2, -7, -5, 2.6))
 
