@@ -115,7 +115,7 @@ class Window(Adw.ApplicationWindow):
         sidebar_view = Adw.ToolbarView(content=sidebar_scroll)
         icon_file = Path(__file__).resolve().parents[1] / "data/io.github.chizzler.Dustpan.svg"
         logo = Gtk.Image.new_from_gicon(Gio.FileIcon.new(Gio.File.new_for_path(str(icon_file))))
-        logo.set_pixel_size(19)
+        logo.set_pixel_size(17)
         brand = Gtk.Box(spacing=8, valign=Gtk.Align.CENTER, css_classes=["brand-pill"])
         brand.append(logo)
         brand.append(Gtk.Label(label="Dustpan", css_classes=["brand-title"]))
