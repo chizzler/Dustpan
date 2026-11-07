@@ -15,12 +15,28 @@ struct TaskDrag: Equatable {
     let grabX: Double
 }
 
+/// A sidebar project being dragged to reorder or nest it. below: the projects under it.
+struct ProjectDrag: Equatable {
+    let projectId: String
+    let below: Set<String>
+}
+
+/// A project row as a project drop sees it: its parent in the tree and its shown sub-projects.
+struct ProjectSpot {
+    let id: String
+    let parentId: String?
+    let children: [String]
+    var key: String { "project:\(id)" }
+}
+
 /// What the window shows for the drop under the pointer.
 enum DropMark: Equatable {
     /// A line or ring in the list keyed list.
     case list(String, Drop)
     /// A sidebar row or heading that takes the drop, by its key.
     case target(String)
+    /// A line above or below a sidebar row, or a ring inside it, for a project drag.
+    case item(String, Zone)
 }
 
 /// One project or Inbox list as the pointer sees it.
@@ -96,7 +112,56 @@ struct TargetDrop: DropDelegate {
     }
 }
 
+/// A project row in the sidebar: a task dropped on it moves there; a project dropped on it goes before, after
+/// or inside it, by the zone of the row the pointer is in.
+struct ProjectDrop: DropDelegate {
+    let model: AppModel
+    let spot: ProjectSpot
+    let height: Double
+
+    private var taskDrop: TargetDrop {
+        TargetDrop(model: model, key: spot.key, target: .project(spot.id), page: .project(spot.id))
+    }
+
+    private func found(_ info: DropInfo) -> (zone: Zone, place: ItemPlace)? {
+        guard let drag = model.projectDrag else { return nil }
+        let zone = dropZone(info.location.y, height: height)
+        return placeItem(spot.id, parent: spot.parentId, children: spot.children, zone: zone,
+                         moving: drag.projectId, below: drag.below).map { (zone, $0) }
+    }
+
+    func validateDrop(info: DropInfo) -> Bool { model.projectDrag != nil || taskDrop.validateDrop(info: info) }
+
+    func dropEntered(info: DropInfo) {
+        if model.projectDrag == nil { taskDrop.dropEntered(info: info) }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard model.projectDrag != nil else { return taskDrop.dropUpdated(info: info) }
+        guard let found = found(info) else {
+            model.unmark()
+            return DropProposal(operation: .forbidden)
+        }
+        model.mark(.item(spot.key, found.zone))
+        return DropProposal(operation: .move)
+    }
+
+    func dropExited(info: DropInfo) { model.unmark() }
+
+    func performDrop(info: DropInfo) -> Bool {
+        guard let drag = model.projectDrag else { return taskDrop.performDrop(info: info) }
+        guard let found = found(info) else { return false }
+        model.placeProject(drag.projectId, at: found.place)
+        return true
+    }
+}
+
 extension View {
+    /// A sidebar project row: dragged to reorder or nest it, and a target for tasks and other projects.
+    func projectRow(_ spot: ProjectSpot, name: String) -> some View {
+        modifier(ProjectRowModifier(spot: spot, name: name))
+    }
+
     /// Let an open task's row be dragged. Remembers where the pointer holds it.
     /// The whole row width drags, so a press-and-drag never selects the rows it crosses. indent: its nesting.
     func taskDrag(_ task: Row, subtasks: Int = 0, indent: Double = 0) -> some View {
@@ -130,11 +195,7 @@ private struct TaskDragSource: ViewModifier {
                 }
                 .onDrag {
                     model.startDrag(task.id, grabX: model.hoverX)
-                    // SwiftUI's onDrag reports no end: the drag is over when the mouse button is up.
-                    Task {
-                        while NSEvent.pressedMouseButtons & 1 != 0 { try? await Task.sleep(for: .milliseconds(100)) }
-                        model.endDrag()
-                    }
+                    endsOnMouseUp(model)
                     return NSItemProvider(object: task.id as NSString)
                 } preview: {
                     DragPill(title: task["title"].string ?? "", subtasks: subtasks)
@@ -143,6 +204,50 @@ private struct TaskDragSource: ViewModifier {
         } else {
             row
         }
+    }
+}
+
+/// SwiftUI's onDrag reports no end: the drag is over when the mouse button is up.
+@MainActor private func endsOnMouseUp(_ model: AppModel) {
+    Task {
+        while NSEvent.pressedMouseButtons & 1 != 0 { try? await Task.sleep(for: .milliseconds(100)) }
+        model.endDrag()
+    }
+}
+
+private struct ProjectRowModifier: ViewModifier {
+    @Environment(AppModel.self) private var model
+    let spot: ProjectSpot
+    let name: String
+    @State private var height: Double = 24
+
+    func body(content: Content) -> some View {
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
+            .onGeometryChange(for: Double.self) { $0.size.height } action: { height = $0 }
+            .onDrag {
+                model.startProjectDrag(spot.id)
+                endsOnMouseUp(model)
+                return NSItemProvider(object: spot.key as NSString)
+            } preview: {
+                DragPill(title: name, subtasks: 0)
+            }
+            .opacity(model.projectDrag?.projectId == spot.id ? 0.4 : 1)
+            .onDrop(of: [.text], delegate: ProjectDrop(model: model, spot: spot, height: height))
+            .background {
+                if model.dropMark == .target(spot.key) {
+                    RoundedRectangle(cornerRadius: 5).fill(.tint.opacity(0.25)).padding(-3)
+                } else if model.dropMark == .item(spot.key, .inside) {
+                    RoundedRectangle(cornerRadius: 5).strokeBorder(.tint, lineWidth: 2).padding(-3)
+                }
+            }
+            .overlay(alignment: .top) {
+                if model.dropMark == .item(spot.key, .before) { DropLine(depth: 0).offset(y: -2) }
+            }
+            .overlay(alignment: .bottom) {
+                if model.dropMark == .item(spot.key, .after) { DropLine(depth: 0).offset(y: 2) }
+            }
     }
 }
 

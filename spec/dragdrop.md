@@ -302,5 +302,15 @@ the Swift code already used for a project and section), and `Writer.drop` ports 
 level, and nested drag and drop in a SwiftUI `List` has a poor record. `NSOutlineView` is where macOS does tree
 drag and drop. Whether the task list moves to it is still open.
 
+**The sidebar** (Mac 0.8.0, 2026-11-07), as "In the sidebar" above:
+- **Projects** drag with their own drag, apart from the task drag. Each project row is one drop target for both:
+  a task moves into the project, as before; a project lands by the row's zones through `placeItem`, with a line
+  along the row's top or bottom edge or a ring to nest. Over itself or its own sub-projects it's refused.
+- **Views and labels** reorder with SwiftUI's `onMove`, which is flat and enough for them. Labels already did.
+- **Without a pointer:** Move Up and Move Down in each project's and view's menu, as labels have, and ⌥↑ ⌥↓ on the
+  selected project, view or label. A project's parent changes by drag only: the Mac has no project editor yet.
+- Writes: `Writer.placeProject`, `moveProject` and `moveView`; labels share their helpers. Tests: `SidebarOrderTests.swift`.
+- A project drop toasts as the desktop's does. Moves by menu, key or `onMove` have Edit ▸ Undo and no toast, as labels had.
+
 Escape and drops outside a target cancel, as before. Calendar targets don't exist on the Mac yet; 6b (keys and
-the row menu's moves) and the sidebar's project and view reordering (from 6c) come later.
+the row menu's moves) comes later.

@@ -70,6 +70,8 @@ final class AppModel {
     var page: Page? = .today
     /// The task being dragged, and the drop under the pointer.
     private(set) var drag: TaskDrag?
+    /// The sidebar project being dragged, apart from task drags.
+    private(set) var projectDrag: ProjectDrag?
     private(set) var dropMark: DropMark?
     /// The task just dropped: its row flashes and comes into view.
     private(set) var flash: String?
@@ -142,7 +144,7 @@ final class AppModel {
     /// Exchange with the server. A call while one runs makes it go round again.
     func sync() async {
         guard let syncer else { return }
-        guard drag == nil else {
+        guard drag == nil && projectDrag == nil else {
             syncAfterDrag = true
             return
         }
@@ -392,6 +394,31 @@ final class AppModel {
         }
     }
 
+    /// A project dropped on a sidebar row, as one batch with Undo.
+    func placeProject(_ projectId: String, at place: ItemPlace) {
+        let name = { (id: String?) in self.snapshot.liveProjects.first { $0.id == id }?["name"].string ?? "" }
+        let oldParent = snapshot.liveProjects.first { $0.id == projectId }?["parent_id"].string
+        undoable("Move Project", {
+            try $0.placeProject(projectId, under: place.parentId, before: place.before, after: place.after)
+        }) { _ in
+            if place.parentId == oldParent { return "Order changed" }
+            guard let parent = place.parentId else { return "Moved “\(name(projectId))” to the top level" }
+            return "Moved “\(name(projectId))” under “\(name(parent))”"
+        }
+    }
+
+    func moveProject(_ projectId: String, step: Int) {
+        undoable(step < 0 ? "Move Up" : "Move Down", { try $0.moveProject(projectId, step: step) }, message: nil)
+    }
+
+    func moveView(_ view: Row, step: Int) {
+        undoable(step < 0 ? "Move Up" : "Move Down", { try $0.moveView(view.id, step: step) }, message: nil)
+    }
+
+    func moveView(_ view: Row, to index: Int) {
+        undoable("Move View", { try $0.moveView(view.id, to: index) }, message: nil)
+    }
+
     func moveLabel(_ label: Row, step: Int) {
         undoable(step < 0 ? "Move Up" : "Move Down", { try $0.moveLabel(label.id, step: step) }, message: nil)
     }
@@ -477,9 +504,19 @@ final class AppModel {
         drag = TaskDrag(taskId: taskId, grabX: grabX)
     }
 
+    func startProjectDrag(_ projectId: String) {
+        func find(_ nodes: [Node]) -> Node? {
+            for node in nodes { if let hit = node.id == projectId ? node : find(node.children) { return hit } }
+            return nil
+        }
+        func ids(_ nodes: [Node]) -> [String] { nodes.flatMap { [$0.id] + ids($0.children) } }
+        projectDrag = ProjectDrag(projectId: projectId, below: Set(ids(find(snapshot.projects)?.children ?? [])))
+    }
+
     func endDrag() {
-        guard drag != nil else { return }
+        guard drag != nil || projectDrag != nil else { return }
         drag = nil
+        projectDrag = nil
         dropMark = nil
         spring?.cancel()
         if syncAfterDrag {

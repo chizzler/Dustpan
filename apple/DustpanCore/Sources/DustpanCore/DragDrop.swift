@@ -196,3 +196,33 @@ public func describeDrop(_ target: DropTarget, task: Row, names: [String: String
         return "Order changed"
     }
 }
+
+// MARK: - In the sidebar
+
+/// Where a dragged sidebar project lands: under parentId (nil is the top level), right before or after a sibling,
+/// or last when neither is named.
+public struct ItemPlace: Hashable, Sendable {
+    public var parentId: String?
+    public var before: String?
+    public var after: String?
+
+    public init(_ parentId: String?, before: String? = nil, after: String? = nil) {
+        (self.parentId, self.before, self.after) = (parentId, before, after)
+    }
+}
+
+/// The ItemPlace for a drop on a sidebar row, or nil.
+///
+/// children: the row's shown children, in order. zone: before or after it, or inside to nest.
+/// below: the ids under the dragged item. It can't land on itself or inside its own subtree.
+/// After a row whose children are shown means above its first child, where the line is drawn.
+public func placeItem(_ rowId: String, parent rowParent: String?, children: [String], zone: Zone, moving: String,
+                      below: Set<String> = []) -> ItemPlace? {
+    if rowId == moving || below.contains(rowId) { return nil }
+    switch zone {
+    case .inside: return ItemPlace(rowId)
+    case .after where !children.isEmpty: return ItemPlace(rowId, before: children.first { $0 != moving })
+    case .after: return ItemPlace(rowParent, after: rowId)
+    case .before: return ItemPlace(rowParent, before: rowId)
+    }
+}

@@ -771,20 +771,16 @@ extension Writer {
     public func moveLabel(_ labelId: String, to index: Int) throws -> Done {
         try undoable {
             _ = try liveLabel(labelId)
-            let siblings = try liveLabels().map { (id: $0.id, position: $0["position"].number ?? 0) }
-            return planOrder(siblings, moving: labelId, to: index, fallback: Double(now())).map {
-                Change("label", $0.id, ["position": position($0.position)])
-            }
+            return reorder("label", try liveLabels(), labelId, to: index)
         }
     }
 
     /// One place up (-1) or down (+1) in the sidebar. Nothing at an edge.
     public func moveLabel(_ labelId: String, step: Int) throws -> Done {
-        let order = try liveLabels().sorted(by: orderLess).map(\.id)
-        guard let index = order.firstIndex(of: labelId).map({ $0 + step }), order.indices.contains(index) else {
-            return Done()
+        try undoable {
+            _ = try liveLabel(labelId)
+            return self.step("label", try liveLabels().sorted(by: orderLess), labelId, by: step)
         }
-        return try moveLabel(labelId, to: index)
     }
 
     /// Tombstone a label and take its id off every live task, one op per task.
@@ -824,6 +820,104 @@ extension Writer {
             if wanted == current { return [] }
             return created + [Change("task", taskId, ["labels": .array(wanted.map(JSON.string))])]
         }
+    }
+}
+
+// MARK: - The sidebar's order: projects, labels, views (spec/dragdrop.md, "In the sidebar")
+
+extension Writer {
+    /// The position writes that put movedId at index of rows, counted without it.
+    func reorder(_ entity: String, _ rows: [Row], _ movedId: String, to index: Int) -> [Change] {
+        planOrder(rows.map { (id: $0.id, position: $0["position"].number ?? 0) }, moving: movedId, to: index,
+                  fallback: Double(now())).map { Change(entity, $0.id, ["position": position($0.position)]) }
+    }
+
+    /// One place up (-1) or down (+1) among rows, in sidebar order. Nothing at an edge.
+    func step(_ entity: String, _ rows: [Row], _ movedId: String, by step: Int) -> [Change] {
+        guard let index = rows.firstIndex(where: { $0.id == movedId }).map({ $0 + step }),
+              rows.indices.contains(index) else { return [] }
+        return reorder(entity, rows, movedId, to: index)
+    }
+
+    /// The live, unarchived projects under parentId, in sidebar order.
+    func projectSiblings(_ projects: [String: Row], _ parentId: String?) -> [Row] {
+        projects.values.filter { isLive($0) && !$0["archived"].isTruthy && $0["parent_id"].string == parentId }
+            .sorted(by: orderLess)
+    }
+
+    func liveProject(_ projects: [String: Row], _ projectId: String) throws -> Row {
+        guard let project = projects[projectId], isLive(project) else {
+            throw CannotEdit("That project no longer exists")
+        }
+        return project
+    }
+
+    /// Every live project below projectId. Safe against cycles.
+    func projectDescendants(_ projectId: String, _ projects: [String: Row]) -> Set<String> {
+        var children: [String: [String]] = [:]
+        for p in projects.values where isLive(p) {
+            if let parent = p["parent_id"].string { children[parent, default: []].append(p.id) }
+        }
+        var found: Set<String> = [], stack = [projectId]
+        while let id = stack.popLast() {
+            for child in children[id] ?? [] where child != projectId && found.insert(child).inserted {
+                stack.append(child)
+            }
+        }
+        return found
+    }
+
+    /// Put a project under parentId (nil: the top level), right before or after a sibling, or last.
+    /// One batch: the parent when it changes, and the positions. Never under itself or below it.
+    public func placeProject(_ projectId: String, under parentId: String?, before: String? = nil,
+                             after: String? = nil) throws -> Done {
+        try undoable {
+            let projects = try store.rows("project")
+            let project = try liveProject(projects, projectId)
+            let siblings = projectSiblings(projects, parentId)
+            let order = siblings.map(\.id).filter { $0 != projectId }
+            let index = before.flatMap { order.firstIndex(of: $0) }
+                ?? after.flatMap { order.firstIndex(of: $0) }.map { $0 + 1 } ?? order.count
+            var changes = reorder("project", siblings, projectId, to: index)
+            if parentId != project["parent_id"].string {
+                if let parentId {
+                    guard let parent = projects[parentId], isLive(parent), !parent["archived"].isTruthy else {
+                        throw CannotEdit("That parent project no longer exists")
+                    }
+                    if parentId == projectId || projectDescendants(projectId, projects).contains(parentId) {
+                        throw CannotEdit("A project can't go under itself")
+                    }
+                }
+                changes.insert(Change("project", projectId, ["parent_id": parentId.map(JSON.string) ?? nil]), at: 0)
+            }
+            return changes
+        }
+    }
+
+    /// One place up (-1) or down (+1) among its siblings.
+    public func moveProject(_ projectId: String, step: Int) throws -> Done {
+        try undoable {
+            let projects = try store.rows("project")
+            let project = try liveProject(projects, projectId)
+            return self.step("project", projectSiblings(projects, project["parent_id"].string), projectId, by: step)
+        }
+    }
+
+    /// The views the sidebar lists, in its order. Dashboards keep their positions.
+    func listViews(_ viewId: String) throws -> [Row] {
+        let views = try store.rows("view")
+        guard let view = views[viewId], isLive(view) else { throw CannotEdit("That view no longer exists") }
+        return views.values.filter(isListView).sorted(by: viewOrderLess)
+    }
+
+    /// Put a view at index of the sidebar's views, counted without it.
+    public func moveView(_ viewId: String, to index: Int) throws -> Done {
+        try undoable { reorder("view", try listViews(viewId), viewId, to: index) }
+    }
+
+    /// One place up (-1) or down (+1) in the sidebar. Nothing at an edge.
+    public func moveView(_ viewId: String, step: Int) throws -> Done {
+        try undoable { self.step("view", try listViews(viewId), viewId, by: step) }
     }
 }
 

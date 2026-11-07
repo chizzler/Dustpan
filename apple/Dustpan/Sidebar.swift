@@ -24,22 +24,32 @@ struct Sidebar: View {
                 .badge(countOpen(snap, nil, today: today))
                 .tag(Page.inbox)
             Section("Projects") {
-                ProjectRows(nodes: snap.projects, today: today, collapsed: $collapsed)
+                ProjectRows(nodes: snap.projects, parent: nil, today: today, collapsed: $collapsed)
             }
             LabelRows()
             Section {
                 let ctx = snap.filterContext(today: model.today)
-                ForEach(snap.views) { view in
+                ForEach(snap.views.enumerated(), id: \.element.id) { index, view in
                     Label(view["name"].string ?? "", systemImage: "line.3.horizontal.decrease.circle")
                         .badge((try? runQuery(view["query"].string ?? "", ctx, snap.tasks).count) ?? 0)
                         .tag(Page.view(view.id))
                         .contextMenu {
                             Button("Edit View…") { model.editingView = ViewDraft(view: view) }
+                            Button("Move Up") { model.moveView(view, step: -1) }
+                                .disabled(index == 0)
+                            Button("Move Down") { model.moveView(view, step: 1) }
+                                .disabled(index == snap.views.count - 1)
+                            Divider()
                             Button("Delete View…", role: .destructive) {
                                 deleting = view
                                 confirmsDelete = true
                             }
                         }
+                }
+                .onMove { from, to in
+                    guard let from = from.first, from != to, from + 1 != to else { return }
+                    // to counts the list with the moved view still in it.
+                    model.moveView(snap.views[from], to: to > from ? to - 1 : to)
                 }
             } header: {
                 HStack {
@@ -53,6 +63,17 @@ struct Sidebar: View {
             }
         }
         .navigationSplitViewColumnWidth(min: 180, ideal: 230)
+        .onKeyPress(keys: [.upArrow, .downArrow]) { press in
+            guard press.modifiers == .option else { return .ignored }
+            let step = press.key == .upArrow ? -1 : 1
+            switch model.page {
+            case .project(let id): model.moveProject(id, step: step)
+            case .view(let id): if let view = snap.views.first(where: { $0.id == id }) { model.moveView(view, step: step) }
+            case .label(let id): if let label = snap.labels[id] { model.moveLabel(label, step: step) }
+            default: return .ignored
+            }
+            return .handled
+        }
         .confirmationDialog("Delete view “\(deleting?["name"].string ?? "")”?", isPresented: $confirmsDelete,
                             presenting: deleting) { view in
             Button("Delete View", role: .destructive) { model.deleteView(view) }
@@ -65,34 +86,43 @@ struct Sidebar: View {
 private struct ProjectRows: View {
     @Environment(AppModel.self) private var model
     let nodes: [Node]
+    let parent: String?
     let today: String
     @Binding var collapsed: Set<String>
 
     var body: some View {
-        ForEach(nodes) { node in
+        ForEach(nodes.enumerated(), id: \.element.id) { index, node in
             if node.children.isEmpty {
-                row(node)
+                row(node, index: index)
             } else {
                 DisclosureGroup(isExpanded: expanded(node.id)) {
-                    ProjectRows(nodes: node.children, today: today, collapsed: $collapsed)
+                    ProjectRows(nodes: node.children, parent: node.id, today: today, collapsed: $collapsed)
                 } label: {
-                    row(node)
+                    row(node, index: index)
                 }
             }
         }
     }
 
-    private func row(_ node: Node) -> some View {
-        Label {
-            Text(node.row["name"].string ?? "")
+    private func row(_ node: Node, index: Int) -> some View {
+        let name = node.row["name"].string ?? ""
+        let shown = collapsed.contains(node.id) ? [] : node.children.map(\.id)
+        return Label {
+            Text(name)
         } icon: {
             Image(systemName: "circle.fill")
                 .foregroundStyle(Color(hex: node.row["color"].string) ?? .secondary)
                 .imageScale(.small)
         }
-        .taskDrop("project:\(node.id)", .project(node.id), opens: .project(node.id))
+        .projectRow(ProjectSpot(id: node.id, parentId: parent, children: shown), name: name)
         .badge(countOpen(model.snapshot, node.id, today: today))
         .tag(Page.project(node.id))
+        .contextMenu {
+            Button("Move Up") { model.moveProject(node.id, step: -1) }
+                .disabled(index == 0)
+            Button("Move Down") { model.moveProject(node.id, step: 1) }
+                .disabled(index == nodes.count - 1)
+        }
     }
 
     private func expanded(_ id: String) -> Binding<Bool> {
