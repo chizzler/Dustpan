@@ -5,6 +5,7 @@ import sys
 import threading
 import time
 from datetime import date, datetime
+from pathlib import Path
 
 import gi
 
@@ -36,8 +37,9 @@ from .sync import ClockSkew, Syncer, UnsupportedAccount  # noqa: E402
 from .views import (LOGBOOK_PAGE, WEEK_START, compare_tasks, group_tasks, in_anytime, in_today,  # noqa: E402
                     logbook, manual_order, open_count, run_query, run_view, sorted_tasks, today_groups,
                     upcoming_groups, view_options)
-from .widgets import (CSS, FOLD_PX, INDENT_PX, Dot, Pie, ThemeFollower, broom_button, escape, flash,  # noqa: E402
-                      label_chip, on_right_click, popup_menu, save_screenshot, scroll_into_view)
+from .widgets import (CSS, FOLD_PX, INDENT_PX, BrandDust, BrandMark, Dot, Pie, ThemeFollower,  # noqa: E402
+                      broom_button, escape, flash, label_chip, on_right_click, popup_menu, save_screenshot,
+                      scroll_into_view)
 from .writes import CannotEdit, Writer, descendants, live, project_descendants  # noqa: E402
 
 SYNC_INTERVAL_S = 30
@@ -112,20 +114,56 @@ class Window(Adw.ApplicationWindow):
         self.sidebar.add_controller(keys)
         sidebar_scroll = self.sidebar_scroll = Gtk.ScrolledWindow(child=self.sidebar, vexpand=True)
         sidebar_view = Adw.ToolbarView(content=sidebar_scroll)
-        sidebar_header = Adw.HeaderBar(title_widget=Adw.WindowTitle(title="Dustpan"))
+        icon_file = Path(__file__).resolve().parents[1] / "data/io.github.chizzler.Dustpan.svg"
+        logo = Gtk.Image.new_from_gicon(Gio.FileIcon.new(Gio.File.new_for_path(str(icon_file))))
+        logo.set_pixel_size(17)
+        mark = BrandMark(logo)
+        brand = Gtk.Box(spacing=8, valign=Gtk.Align.CENTER, css_classes=["brand-pill"])
+        brand.append(mark)
+        brand.append(Gtk.Label(label="Dustpan", css_classes=["brand-title"]))
+        brand_hover = Gtk.Overlay(child=brand, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+        dust = BrandDust()
+        brand_hover.add_overlay(dust)
+        near_mark = False
+
+        def over_brand(_controller, x, y):
+            nonlocal near_mark
+            ok, bounds = mark.compute_bounds(brand_hover)
+            near = (ok and bounds.get_x() - 3 <= x <= bounds.get_x() + bounds.get_width() + 3
+                    and bounds.get_y() - 3 <= y <= bounds.get_y() + bounds.get_height() + 3)
+            if near:
+                dust.puff_at(x, y, entered=not near_mark)
+                if not near_mark:
+                    mark.wiggle()
+            elif near_mark:
+                dust.pointer_left()
+            near_mark = near
+
+        def left_brand(_controller):
+            nonlocal near_mark
+            near_mark = False
+            dust.pointer_left()
+
+        pointer = Gtk.EventControllerMotion()
+        pointer.connect("enter", over_brand)
+        pointer.connect("motion", over_brand)
+        pointer.connect("leave", left_brand)
+        brand_hover.add_controller(pointer)
+        brand_hover.connect("unmap", left_brand)
+        sidebar_header = Adw.HeaderBar(title_widget=brand_hover, margin_top=4)
         pages = Gtk.Button(icon_name="view-more-symbolic", tooltip_text="Show or hide pages", css_classes=["flat"])
         pages.connect("clicked", lambda b: popup_menu(b, self.pages_menu()))
         sidebar_header.pack_start(pages)
         sidebar_view.add_top_bar(sidebar_header)
 
-        self.title = Adw.WindowTitle(title="Today")
+        self.title = Adw.WindowTitle(title="Today", css_classes=["page-window-title"])
         refresh = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Sync now")
         refresh.connect("clicked", lambda _b: self.sync())
         self.add_button = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add task (Ctrl+N)")
         self.add_button.connect("clicked", lambda _b: self.start_adding(None))
         self.edit_button = Gtk.Button(icon_name="document-edit-symbolic")
         self.edit_button.connect("clicked", lambda _b: self.edit_page())
-        header = Adw.HeaderBar(title_widget=self.title)
+        header = Adw.HeaderBar(title_widget=self.title, margin_top=4)
         header.pack_start(self.add_button)
         header.pack_start(self.edit_button)
         header.pack_end(refresh)
@@ -410,8 +448,12 @@ class Window(Adw.ApplicationWindow):
             self.rows_by_key[focused_key].grab_focus()
 
     def add_sidebar_heading(self, text, button=None):
-        box = Gtk.Box(margin_top=12, margin_start=6)
-        heading = Gtk.Label(label=text, xalign=0, hexpand=True, css_classes=["heading", "dim-label"])
+        box = Gtk.Box(spacing=8, margin_top=14, margin_start=6, margin_end=6,
+                      css_classes=["sidebar-heading"])
+        box.append(Gtk.Box(width_request=6, height_request=6, valign=Gtk.Align.CENTER,
+                           css_classes=["sidebar-heading-mark"]))
+        heading = Gtk.Label(label=text.upper(), xalign=0, hexpand=True,
+                            css_classes=["sidebar-heading-label"])
         box.append(heading)
         if button:
             box.append(button)
