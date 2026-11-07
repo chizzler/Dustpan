@@ -53,6 +53,7 @@ button.fold-chevron image { -gtk-icon-size: 12px; }
 .brand-title { font-family: "Author", sans-serif; font-size: 22px; font-weight: 700;
                color: var(--window-bg-color); }
 .brand-dust { color: var(--window-bg-color); }
+.page-window-title .subtitle { font-size: 0.75em; }
 .sidebar-heading { padding-bottom: 5px; border-bottom: 2px solid alpha(currentColor, 0.22); }
 .sidebar-heading-mark { background: var(--accent-bg-color); border-radius: 1px; }
 .sidebar-heading-label { font-size: 0.78em; font-weight: 700; color: alpha(currentColor, 0.72); }
