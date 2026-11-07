@@ -107,7 +107,7 @@ def animations_enabled():
 class BrandMark(Gtk.Fixed):
     """The logo, with a short wiggle inside a fixed-size hover target."""
 
-    STEPS = ((-2, 0), (2, -1), (-1, 0), (1, 1), (0, 0))
+    STEPS = ((-1, 0), (0, 0), (1, 0), (0, 0))
 
     def __init__(self, logo):
         super().__init__(width_request=25, height_request=25, valign=Gtk.Align.CENTER)
@@ -121,7 +121,7 @@ class BrandMark(Gtk.Fixed):
         if self.timer or not animations_enabled():
             return
         self.frame = 0
-        self.timer = GLib.timeout_add(45, self.step)
+        self.timer = GLib.timeout_add(60, self.step)
         self.step()
 
     def step(self):
@@ -143,9 +143,9 @@ class BrandMark(Gtk.Fixed):
 class BrandDust(Gtk.DrawingArea):
     """A brief dust puff at the pointer while it is near the logo."""
 
-    DURATION = 0.42
-    MOTES = ((-3, -2, -10, -12, 2), (2, -4, 3, -17, 2), (5, 0, 13, -9, 1.5),
-             (-5, 2, -13, -5, 1.5), (0, 3, -2, -12, 1))
+    DURATION = 0.55
+    PUFFS = ((-2, -2, -4, -8, 3.2), (2, -3, 3, -10, 3.4),
+             (4, 1, 6, -5, 2.8), (-4, 2, -7, -5, 2.6))
 
     def __init__(self):
         super().__init__(can_target=False, hexpand=True, vexpand=True, css_classes=["brand-dust"])
@@ -195,13 +195,14 @@ class BrandDust(Gtk.DrawingArea):
         for start, x, y in self.bursts:
             t = min((now - start) / self.DURATION, 1)
             fade = (1 - t) ** 2
-            cr.set_source_rgba(color.red, color.green, color.blue, color.alpha * 0.15 * fade)
-            cr.arc(x + 3 + 4 * t, y - 3 - 4 * t, 2 + 3 * t, 0, 2 * math.pi)
-            cr.fill()
-            cr.set_source_rgba(color.red, color.green, color.blue, color.alpha * 0.72 * fade)
-            for sx, sy, dx, dy, size in self.MOTES:
-                cr.rectangle(x + sx + dx * t, y + sy + dy * t, size, size)
-                cr.fill()
+            for sx, sy, dx, dy, size in self.PUFFS:
+                px, py = x + sx + dx * t, y + sy + dy * t
+                radius = size + 2.5 * t
+                for scale, opacity in ((1.65, 0.035), (1.2, 0.065), (0.75, 0.09)):
+                    cr.set_source_rgba(color.red, color.green, color.blue,
+                                       color.alpha * opacity * fade)
+                    cr.arc(px, py, radius * scale, 0, 2 * math.pi)
+                    cr.fill()
 
 
 class Dot(Gtk.Widget):
