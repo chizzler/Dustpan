@@ -23,6 +23,17 @@ class ApiError(Exception):
         self.code = code
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse redirects. urllib would forward the bearer token to any host, even over http."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        fp.close()
+        raise ApiError(code, "redirect", f"server redirected to {newurl}; update OPENTODO_URL")
+
+
+_opener = urllib.request.build_opener(_NoRedirect)
+
+
 class Api:
     def __init__(self, base_url, token):
         self.base_url = base_url.rstrip("/")
@@ -54,7 +65,7 @@ class Api:
 
     def _open(self, req, timeout):
         try:
-            return urllib.request.urlopen(req, timeout=timeout)
+            return _opener.open(req, timeout=timeout)
         except urllib.error.HTTPError as err:
             try:
                 detail = json.load(err).get("error", {})
