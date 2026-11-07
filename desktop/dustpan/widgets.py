@@ -52,6 +52,7 @@ button.fold-chevron image { -gtk-icon-size: 12px; }
               background: var(--window-fg-color); color: var(--window-bg-color); }
 .brand-title { font-family: "Author", sans-serif; font-size: 22px; font-weight: 700;
                color: var(--window-bg-color); }
+.brand-dust { color: var(--window-bg-color); }
 .sidebar-heading { padding-bottom: 5px; border-bottom: 2px solid alpha(currentColor, 0.22); }
 .sidebar-heading-mark { background: var(--accent-bg-color); border-radius: 1px; }
 .sidebar-heading-label { font-size: 0.78em; font-weight: 700; color: alpha(currentColor, 0.72); }
@@ -96,6 +97,111 @@ button.task-place:hover label { text-decoration: underline; }
 .label-chip.more { padding: 1px 8px; }
 .label-picker list row { padding: 2px 6px; }
 """
+
+
+def animations_enabled():
+    settings = Gtk.Settings.get_default()
+    return settings is None or settings.get_property("gtk-enable-animations")
+
+
+class BrandMark(Gtk.Fixed):
+    """The logo, with a short wiggle inside a fixed-size hover target."""
+
+    STEPS = ((-2, 0), (2, -1), (-1, 0), (1, 1), (0, 0))
+
+    def __init__(self, logo):
+        super().__init__(width_request=25, height_request=25, valign=Gtk.Align.CENTER)
+        self.logo = logo
+        self.put(logo, 4, 4)
+        self.frame = 0
+        self.timer = 0
+        self.connect("unmap", self.on_unmap)
+
+    def wiggle(self):
+        if self.timer or not animations_enabled():
+            return
+        self.frame = 0
+        self.timer = GLib.timeout_add(45, self.step)
+        self.step()
+
+    def step(self):
+        dx, dy = self.STEPS[self.frame]
+        self.move(self.logo, 4 + dx, 4 + dy)
+        self.frame += 1
+        if self.frame < len(self.STEPS):
+            return GLib.SOURCE_CONTINUE
+        self.timer = 0
+        return GLib.SOURCE_REMOVE
+
+    def on_unmap(self, _widget):
+        if self.timer:
+            GLib.source_remove(self.timer)
+            self.timer = 0
+        self.move(self.logo, 4, 4)
+
+
+class BrandDust(Gtk.DrawingArea):
+    """A brief dust puff at the pointer while it is near the logo."""
+
+    DURATION = 0.42
+    MOTES = ((-3, -2, -10, -12, 2), (2, -4, 3, -17, 2), (5, 0, 13, -9, 1.5),
+             (-5, 2, -13, -5, 1.5), (0, 3, -2, -12, 1))
+
+    def __init__(self):
+        super().__init__(can_target=False, hexpand=True, vexpand=True, css_classes=["brand-dust"])
+        self.set_draw_func(self.draw)
+        self.bursts = []  # (start time, pointer x, pointer y)
+        self.timer = 0
+        self.last = None  # last pointer position that emitted dust
+        self.last_time = 0
+        self.connect("unmap", self.on_unmap)
+
+    def puff_at(self, x, y, entered=False):
+        if not animations_enabled():
+            return
+        now = GLib.get_monotonic_time() / 1_000_000
+        if not entered and self.last is not None:
+            dx, dy = x - self.last[0], y - self.last[1]
+            if dx * dx + dy * dy < 12 * 12 or now - self.last_time < 0.075:
+                return
+        self.last, self.last_time = (x, y), now
+        self.bursts.append((now, x, y))
+        self.queue_draw()
+        if not self.timer:
+            self.timer = GLib.timeout_add(16, self.tick)
+
+    def pointer_left(self):
+        self.last = None
+
+    def tick(self):
+        now = GLib.get_monotonic_time() / 1_000_000
+        self.bursts = [burst for burst in self.bursts if now - burst[0] < self.DURATION]
+        self.queue_draw()
+        if self.bursts:
+            return GLib.SOURCE_CONTINUE
+        self.timer = 0
+        return GLib.SOURCE_REMOVE
+
+    def on_unmap(self, _widget):
+        if self.timer:
+            GLib.source_remove(self.timer)
+            self.timer = 0
+        self.bursts.clear()
+        self.last = None
+
+    def draw(self, _area, cr, _width, _height):
+        now = GLib.get_monotonic_time() / 1_000_000
+        color = self.get_color()
+        for start, x, y in self.bursts:
+            t = min((now - start) / self.DURATION, 1)
+            fade = (1 - t) ** 2
+            cr.set_source_rgba(color.red, color.green, color.blue, color.alpha * 0.15 * fade)
+            cr.arc(x + 3 + 4 * t, y - 3 - 4 * t, 2 + 3 * t, 0, 2 * math.pi)
+            cr.fill()
+            cr.set_source_rgba(color.red, color.green, color.blue, color.alpha * 0.72 * fade)
+            for sx, sy, dx, dy, size in self.MOTES:
+                cr.rectangle(x + sx + dx * t, y + sy + dy * t, size, size)
+                cr.fill()
 
 
 class Dot(Gtk.Widget):

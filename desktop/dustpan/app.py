@@ -37,8 +37,9 @@ from .sync import ClockSkew, Syncer, UnsupportedAccount  # noqa: E402
 from .views import (LOGBOOK_PAGE, WEEK_START, compare_tasks, group_tasks, in_anytime, in_today,  # noqa: E402
                     logbook, manual_order, open_count, run_query, run_view, sorted_tasks, today_groups,
                     upcoming_groups, view_options)
-from .widgets import (CSS, FOLD_PX, INDENT_PX, Dot, Pie, ThemeFollower, broom_button, escape, flash,  # noqa: E402
-                      label_chip, on_right_click, popup_menu, save_screenshot, scroll_into_view)
+from .widgets import (CSS, FOLD_PX, INDENT_PX, BrandDust, BrandMark, Dot, Pie, ThemeFollower,  # noqa: E402
+                      broom_button, escape, flash, label_chip, on_right_click, popup_menu, save_screenshot,
+                      scroll_into_view)
 from .writes import CannotEdit, Writer, descendants, live, project_descendants  # noqa: E402
 
 SYNC_INTERVAL_S = 30
@@ -116,10 +117,40 @@ class Window(Adw.ApplicationWindow):
         icon_file = Path(__file__).resolve().parents[1] / "data/io.github.chizzler.Dustpan.svg"
         logo = Gtk.Image.new_from_gicon(Gio.FileIcon.new(Gio.File.new_for_path(str(icon_file))))
         logo.set_pixel_size(17)
+        mark = BrandMark(logo)
         brand = Gtk.Box(spacing=8, valign=Gtk.Align.CENTER, css_classes=["brand-pill"])
-        brand.append(logo)
+        brand.append(mark)
         brand.append(Gtk.Label(label="Dustpan", css_classes=["brand-title"]))
-        sidebar_header = Adw.HeaderBar(title_widget=brand)
+        brand_hover = Gtk.Overlay(child=brand, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+        dust = BrandDust()
+        brand_hover.add_overlay(dust)
+        near_mark = False
+
+        def over_brand(_controller, x, y):
+            nonlocal near_mark
+            ok, bounds = mark.compute_bounds(brand_hover)
+            near = (ok and bounds.get_x() - 3 <= x <= bounds.get_x() + bounds.get_width() + 3
+                    and bounds.get_y() - 3 <= y <= bounds.get_y() + bounds.get_height() + 3)
+            if near:
+                dust.puff_at(x, y, entered=not near_mark)
+                if not near_mark:
+                    mark.wiggle()
+            elif near_mark:
+                dust.pointer_left()
+            near_mark = near
+
+        def left_brand(_controller):
+            nonlocal near_mark
+            near_mark = False
+            dust.pointer_left()
+
+        pointer = Gtk.EventControllerMotion()
+        pointer.connect("enter", over_brand)
+        pointer.connect("motion", over_brand)
+        pointer.connect("leave", left_brand)
+        brand_hover.add_controller(pointer)
+        brand_hover.connect("unmap", left_brand)
+        sidebar_header = Adw.HeaderBar(title_widget=brand_hover)
         pages = Gtk.Button(icon_name="view-more-symbolic", tooltip_text="Show or hide pages", css_classes=["flat"])
         pages.connect("clicked", lambda b: popup_menu(b, self.pages_menu()))
         sidebar_header.pack_start(pages)
