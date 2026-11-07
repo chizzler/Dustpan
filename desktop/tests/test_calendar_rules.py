@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime
 
 from dustpan import calendar_rules as calendar
 from dustpan.dragdrop import Stretch, ToDay, ToSlot
@@ -58,6 +59,20 @@ class TasksTest(unittest.TestCase):
         self.assertEqual(ids(shown), ["in"])
         with_done = calendar.calendar_tasks(tasks, {"old"}, "2026-10-26", "2026-12-06", show_completed=True)
         self.assertEqual(ids(with_done), ["in", "done"])
+
+    def test_completed_tasks_show_on_their_due_or_the_day_they_were_done(self):
+        noon = int(datetime(2026, 11, 5, 12).timestamp() * 1000)
+        tasks = [task("open", "2026-11-03"), task("done-due", "2026-11-03", completed_at=noon),
+                 task("done-undated", completed_at=noon), task("skipped", "2026-11-03", completed_at=noon, skipped=True)]
+        shown = calendar.calendar_tasks(tasks, set(), "2026-10-26", "2026-12-06", show_completed=True)
+        self.assertEqual(ids(shown), ["open", "done-due", "done-undated"])
+        days = calendar.by_day(shown)
+        self.assertEqual({day: ids(ts) for day, ts in days.items()},
+                         {"2026-11-03": ["open", "done-due"], "2026-11-05": ["done-undated"]})
+
+    def test_completed_tasks_come_after_open_ones(self):
+        tasks = [task("done", "2026-11-03", "08:00", completed_at=1), task("open", "2026-11-03")]
+        self.assertEqual(ids(calendar.by_day(tasks)["2026-11-03"]), ["open", "done"])
 
     def test_deadline_markers_skip_tasks_due_that_day(self):
         tasks = [task("a", deadline="2026-11-10", title="b"), task("b", "2026-11-10", deadline="2026-11-10"),
@@ -122,6 +137,27 @@ class LayoutTest(unittest.TestCase):
         self.assertEqual(overflow, [dict(lane=3, lanes=4, start=h(10), end=h(11), ids=["d", "e", "f"])])
         _, overflow, placed = self.lay([(k, h(10), h(11)) for k in "abcd"])
         self.assertEqual((overflow, [b["lane"] for b in placed]), ([], [0, 1, 2, 3]))
+
+    def test_spare_blocks_go_behind_the_marker_first(self):
+        blocks = [("done1", 540, 600), ("done2", 545, 600), ("done3", 550, 600), ("open1", 555, 600), ("open2", 560, 600)]
+        placed, overflow = calendar.layout_day(blocks, min_length=25, spare={"done1", "done2", "done3"})
+        m = {b["id"]: b for b in placed}
+        self.assertEqual([b["id"] for b in placed], ["done1", "done2", "done3", "open1", "open2"])  # time order
+        self.assertEqual([(m[k]["lane"], m[k]["hidden"]) for k in ("open1", "open2", "done1")],
+                         [(0, False), (1, False), (2, False)])
+        self.assertEqual(overflow, [dict(lane=3, lanes=4, start=545, end=600, ids=["done2", "done3"])])
+        # Without spare, the layout is the web app's: the latest starts are hidden.
+        _, overflow = calendar.layout_day(blocks, min_length=25)
+        self.assertEqual(overflow[0]["ids"], ["open1", "open2"])
+
+    def test_spare_blocks_fill_gaps_left_by_the_others(self):
+        # Five open blocks overlap at 9:00; a runs on to 10:30, so f and done join the cluster.
+        blocks = [("a", h(9), h(10.5)), *((k, h(9), h(10)) for k in "bcde"),
+                  ("done", h(10), h(11)), ("f", h(10.25), h(11))]
+        placed, overflow = calendar.layout_day(blocks, spare={"done"})
+        m = {b["id"]: b for b in placed}
+        self.assertEqual(overflow[0]["ids"], ["d", "e"])  # the others alone overflow, as without spare
+        self.assertEqual([(m[k]["lane"], m[k]["hidden"]) for k in ("f", "done")], [(1, False), (2, False)])
 
     def test_repairs_empty_blocks_and_ignores_input_order(self):
         _, _, placed = self.lay([("z", 600, 600), ("w", 600, 590)])
