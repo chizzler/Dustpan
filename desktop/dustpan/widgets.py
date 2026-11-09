@@ -48,10 +48,20 @@ button.subtask-broom:hover { border-color: alpha(currentColor, 0.22); background
 button.fold-chevron { min-width: 16px; min-height: 18px; padding: 0; border-radius: 4px; opacity: 0.55; }
 button.fold-chevron:hover { opacity: 1; }
 button.fold-chevron image { -gtk-icon-size: 12px; }
+.brand-pill { padding: 3px 12px; border-radius: 999px;
+              background: var(--window-fg-color); color: var(--window-bg-color); }
+.brand-title { font-family: "Author", sans-serif; font-size: 22px; font-weight: 700;
+               color: var(--window-bg-color); }
+.brand-dust { color: var(--window-bg-color); }
+.page-window-title .subtitle { font-size: 0.75em; }
+.sidebar-heading { padding-bottom: 5px; border-bottom: 2px solid alpha(currentColor, 0.22); }
+.sidebar-heading-mark { background: var(--accent-bg-color); border-radius: 1px; }
+.sidebar-heading-label { font-size: 0.78em; font-weight: 700; color: alpha(currentColor, 0.72); }
 .task-text { min-height: 20px; }
 .add-task { margin-top: 4px; }
 .task-row { padding: 8px 4px; border-bottom: 1px solid alpha(currentColor, 0.08); }
-.task-row:focus { background: alpha(var(--accent-bg-color), 0.15); border-radius: 6px; }
+.task-row:focus { background: alpha(var(--accent-bg-color), 0.08); border-radius: 3px;
+                   box-shadow: inset 3px 0 0 var(--accent-bg-color); }
 .task-row:focus-visible { outline: 2px solid alpha(var(--accent-color), 0.7); outline-offset: -2px; }
 .dragging { opacity: 0.4; }
 .drag-pill { padding: 6px 12px; border-radius: 8px; background: var(--popover-bg-color); color: var(--popover-fg-color);
@@ -73,7 +83,7 @@ button.task-place:hover label { text-decoration: underline; }
 .danger-button:active { background: color-mix(in srgb, var(--destructive-bg-color) 80%, black); }
 .due-overdue { color: var(--dustpan-overdue); }
 .due-today { color: var(--dustpan-today); }
-.section-heading { margin-top: 24px; padding-bottom: 6px; border-bottom: 1px solid alpha(currentColor, 0.15); }
+.section-heading { margin-top: 24px; padding-bottom: 6px; border-bottom: 2px solid alpha(currentColor, 0.24); }
 .section-heading button { min-height: 24px; min-width: 24px; padding: 0; }
 .colour-choice { min-width: 28px; min-height: 28px; padding: 0; border-radius: 999px; }
 .colour-choice:checked { box-shadow: inset 0 0 0 2px var(--accent-color); }
@@ -82,11 +92,118 @@ button.task-place:hover label { text-decoration: underline; }
 .note-quote { border-left: 3px solid alpha(currentColor, 0.25); padding-left: 10px; }
 .note-code { background: alpha(currentColor, 0.06); border-radius: 6px; padding: 8px 10px; }
 .task-note { font-size: 0.9em; }
-.label-chip { padding: 1px 8px 1px 6px; border-radius: 999px; background: alpha(currentColor, 0.08); }
+.label-chip { padding: 1px 8px 1px 6px; border-radius: 3px; background: alpha(currentColor, 0.05);
+              box-shadow: inset 0 0 0 1px alpha(currentColor, 0.24); }
 .label-chip button { min-width: 18px; min-height: 18px; padding: 0; margin: -2px -4px -2px 0; }
 .label-chip.more { padding: 1px 8px; }
 .label-picker list row { padding: 2px 6px; }
 """
+
+
+def animations_enabled():
+    settings = Gtk.Settings.get_default()
+    return settings is None or settings.get_property("gtk-enable-animations")
+
+
+class BrandMark(Gtk.Fixed):
+    """The logo, with a short wiggle inside a fixed-size hover target."""
+
+    STEPS = ((-1, 0), (0, 0), (1, 0), (0, 0))
+
+    def __init__(self, logo):
+        super().__init__(width_request=25, height_request=25, valign=Gtk.Align.CENTER)
+        self.logo = logo
+        self.put(logo, 4, 4)
+        self.frame = 0
+        self.timer = 0
+        self.connect("unmap", self.on_unmap)
+
+    def wiggle(self):
+        if self.timer or not animations_enabled():
+            return
+        self.frame = 0
+        self.timer = GLib.timeout_add(60, self.step)
+        self.step()
+
+    def step(self):
+        dx, dy = self.STEPS[self.frame]
+        self.move(self.logo, 4 + dx, 4 + dy)
+        self.frame += 1
+        if self.frame < len(self.STEPS):
+            return GLib.SOURCE_CONTINUE
+        self.timer = 0
+        return GLib.SOURCE_REMOVE
+
+    def on_unmap(self, _widget):
+        if self.timer:
+            GLib.source_remove(self.timer)
+            self.timer = 0
+        self.move(self.logo, 4, 4)
+
+
+class BrandDust(Gtk.DrawingArea):
+    """A brief dust puff at the pointer while it is near the logo."""
+
+    DURATION = 0.72
+    PUFFS = ((-2, -2, -4, -8, 3.2), (2, -3, 3, -10, 3.4),
+             (4, 1, 6, -5, 2.8), (-4, 2, -7, -5, 2.6))
+
+    def __init__(self):
+        super().__init__(can_target=False, hexpand=True, vexpand=True, css_classes=["brand-dust"])
+        self.set_draw_func(self.draw)
+        self.bursts = []  # (start time, pointer x, pointer y)
+        self.timer = 0
+        self.last = None  # last pointer position that emitted dust
+        self.last_time = 0
+        self.connect("unmap", self.on_unmap)
+
+    def puff_at(self, x, y, entered=False):
+        if not animations_enabled():
+            return
+        now = GLib.get_monotonic_time() / 1_000_000
+        if not entered and self.last is not None:
+            dx, dy = x - self.last[0], y - self.last[1]
+            if dx * dx + dy * dy < 12 * 12 or now - self.last_time < 0.075:
+                return
+        self.last, self.last_time = (x, y), now
+        self.bursts.append((now, x, y))
+        self.queue_draw()
+        if not self.timer:
+            self.timer = GLib.timeout_add(16, self.tick)
+
+    def pointer_left(self):
+        self.last = None
+
+    def tick(self):
+        now = GLib.get_monotonic_time() / 1_000_000
+        self.bursts = [burst for burst in self.bursts if now - burst[0] < self.DURATION]
+        self.queue_draw()
+        if self.bursts:
+            return GLib.SOURCE_CONTINUE
+        self.timer = 0
+        return GLib.SOURCE_REMOVE
+
+    def on_unmap(self, _widget):
+        if self.timer:
+            GLib.source_remove(self.timer)
+            self.timer = 0
+        self.bursts.clear()
+        self.last = None
+
+    def draw(self, _area, cr, _width, _height):
+        now = GLib.get_monotonic_time() / 1_000_000
+        color = self.get_color()
+        for start, x, y in self.bursts:
+            t = min((now - start) / self.DURATION, 1)
+            fade = (1 - t) ** 2
+            for sx, sy, dx, dy, size in self.PUFFS:
+                px, py = x + sx + dx * t, y + sy + dy * t
+                radius = size + 2.5 * t
+                for scale, opacity in ((1.65, 0.035), (1.2, 0.065), (0.75, 0.09)):
+                    cr.set_source_rgba(color.red, color.green, color.blue,
+                                       color.alpha * opacity * fade)
+                    cr.arc(px, py, radius * scale, 0, 2 * math.pi)
+                    cr.fill()
 
 
 class Dot(Gtk.Widget):
@@ -179,7 +296,7 @@ def broom_button():
 
 
 def label_chip(name, color, on_remove=None):
-    """A label as a small pill: its colour as a dot, then its name. on_remove adds an × that calls it."""
+    """A label as a small tag: its colour as a dot, then its name. on_remove adds an × that calls it."""
     chip = Gtk.Box(spacing=5, valign=Gtk.Align.CENTER, css_classes=["label-chip"])
     chip.append(Dot(color, 8))
     chip.append(Gtk.Label(label=name, ellipsize=Pango.EllipsizeMode.END, max_width_chars=24))

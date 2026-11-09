@@ -44,6 +44,19 @@ Ported to `calendar_rules.py`, from `month.ts` and `calendar.ts`.
 - **Keys.** `[` and `]` go back and forward a month, `t` comes back to today.
 - A click selects a task, a double-click opens its editor (as in the main window's lists, from 12c).
 
+## Completed tasks (2026-11-08)
+
+- **A toggle.** The tick button in the header, or `h`, shows completed tasks too. Off by default.
+  Remembered on this device (`meta.calendar_show_completed`). Works in Day, Week and Month.
+- **Where.** On their due day and time. A completed task with no due shows on the day it was completed
+  (local), in the Unscheduled lane. Subtasks count like any task. A habit's skipped days don't show.
+- **How.** Faded and struck through. A line has a tick in place of its project dot; a block keeps its colour, faintly.
+  Completed tasks come after the open ones in a day, so they are first to go into "+N more".
+  On the grid too: when blocks need more than four lanes, open ones get lanes first, and completed ones
+  take the gaps left (`layout_day`'s `spare`).
+- **What they do.** They never count towards the day's load. They don't drag or stretch, and the arrow keys
+  don't move them, as completed rows in the main window. `c` or the menu reopens one.
+
 ## Week and Day (12b)
 
 Ported to `calendar_rules.py`, from `calendar.ts` (`blockFor`) and `layout.ts` (`layoutDay`, with its tests).

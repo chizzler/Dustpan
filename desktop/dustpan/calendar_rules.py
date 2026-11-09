@@ -5,7 +5,7 @@ Not named calendar.py: run from this folder, that would hide the standard librar
 See spec/calendar.md.
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from .dates import local_due
 from .dragdrop import Stretch, ToDay, ToSlot
@@ -50,28 +50,50 @@ def viewed_due(task):
     return _iso(day), at.strftime("%H:%M") if at else None
 
 
-def calendar_tasks(tasks, archived, first, last, show_completed=False):
-    """Live tasks due in [first, last] on this device, outside archived projects.
+def completed_day(task):
+    """The local day a task was completed, or None. completed_at is Unix ms."""
+    at = task.get("completed_at")
+    if isinstance(at, bool) or not isinstance(at, (int, float)):
+        return None
+    return _iso(datetime.fromtimestamp(at / 1000).date())
 
-    archived: ids of archived projects.
+
+def shown_day(task):
+    """(day, "HH:MM" or None) where the calendar shows a task: on its due.
+
+    A completed task without a due shows on the day it was completed, with no time.
+    """
+    due = viewed_due(task)
+    if due is None and (day := completed_day(task)):
+        return day, None
+    return due
+
+
+def calendar_tasks(tasks, archived, first, last, show_completed=False):
+    """Live tasks shown in [first, last] on this device, outside archived projects.
+
+    archived: ids of archived projects. show_completed adds completed tasks; a habit's skipped days are left out.
     """
     out = []
     for task in tasks:
-        due = viewed_due(task)
+        done = task.get("completed_at") is not None
+        due = shown_day(task)
         if (due and first <= due[0] <= last and task.get("deleted_at") is None
-                and (show_completed or task.get("completed_at") is None)
+                and (show_completed or not done) and not (done and task.get("skipped"))
                 and task.get("project_id") not in archived):
             out.append(task)
     return out
 
 
 def by_day(tasks):
-    """{day: tasks} in a day's order: timed first by time, then priority (1 first), then position."""
+    """{day: tasks} in a day's order: open before completed, then timed first by time,
+    then priority (1 first), then position."""
     days = {}
     for task in tasks:
-        day, at = viewed_due(task)
-        days.setdefault(day, []).append((at is None, at or "", task.get("priority") or 4, task.get("position") or 0, task))
-    return {day: [row[-1] for row in sorted(rows, key=lambda r: r[:4])] for day, rows in days.items()}
+        day, at = shown_day(task)
+        days.setdefault(day, []).append((task.get("completed_at") is not None, at is None, at or "",
+                                         task.get("priority") or 4, task.get("position") or 0, task))
+    return {day: [row[-1] for row in sorted(rows, key=lambda r: r[:5])] for day, rows in days.items()}
 
 
 def deadline_markers(tasks, archived, first, last):
@@ -251,15 +273,17 @@ def block_for(task):
     return start, min(DAY_MINUTES, start + (minutes if estimated else DEFAULT_BLOCK_MINUTES)), estimated
 
 
-def layout_day(blocks, max_lanes=MAX_LANES, min_length=0):
+def layout_day(blocks, max_lanes=MAX_LANES, min_length=0, spare=()):
     """Side by side layout of overlapping blocks. A port of layout.ts's layoutDay.
 
     blocks: (id, start, end). Returns (placed, overflow): placed are dicts with id, start, end, lane, lanes,
     overlap and hidden, in time order; overflow are dicts with lane, lanes, start, end and the hidden ids.
     Blocks that overlap, as drawn at least min_length tall, form a cluster split into equal lanes.
     A cluster needing more than max_lanes shows max_lanes − 1 lanes and a "+N" marker in the last.
+    spare: ids hidden first when a cluster overflows (completed tasks), so they never push others out.
     """
     cap = max(2, int(max_lanes))
+    spare = set(spare)
     ordered = sorted(((i, s, e if e > s else s + 1) for i, s, e in blocks), key=lambda b: (b[1], -b[2], b[0]))
     placed, overflow = [], []
     cluster, lane_ends, cluster_end = [], [], float("-inf")
@@ -276,14 +300,25 @@ def layout_day(blocks, max_lanes=MAX_LANES, min_length=0):
             placed.extend(dict(id=b[0], start=b[1], end=b[2], lane=lane, lanes=needed, overlap=overlaps(b), hidden=False)
                           for b, lane in cluster)
             return
+        # Too many lanes: fill the first cap − 1, the other blocks before the spare ones, each in the first
+        # lane it fits; what doesn't fit goes behind the "+N" in the last. Without spare blocks this is the
+        # web app's layout.
         marker = cap - 1
-        hidden = []
-        for b, lane in cluster:
-            hide = lane >= marker
-            placed.append(dict(id=b[0], start=b[1], end=b[2], lane=marker if hide else lane, lanes=cap,
+        lanes = [[] for _ in range(marker)]  # each lane's (start, drawn end)
+        lane_of = {}
+        for b, _ in sorted(cluster, key=lambda c: c[0][0] in spare):  # stable: time order within each group
+            drawn = (b[1], max(b[2], b[1] + min_length))
+            free = next((i for i, taken in enumerate(lanes)
+                         if all(e <= drawn[0] or drawn[1] <= s for s, e in taken)), None)
+            if free is not None:
+                lanes[free].append(drawn)
+                lane_of[b[0]] = free
+        # Never empty: more than cap lanes means more than cap blocks overlap at one minute.
+        hidden = [b for b, _ in cluster if b[0] not in lane_of]
+        for b, _ in cluster:
+            hide = b[0] not in lane_of
+            placed.append(dict(id=b[0], start=b[1], end=b[2], lane=marker if hide else lane_of[b[0]], lanes=cap,
                                overlap=overlaps(b), hidden=hide))
-            if hide:
-                hidden.append(b)
         overflow.append(dict(lane=marker, lanes=cap, start=min(b[1] for b in hidden), end=max(b[2] for b in hidden),
                              ids=[b[0] for b in hidden]))
 

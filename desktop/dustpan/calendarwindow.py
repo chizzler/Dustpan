@@ -52,7 +52,14 @@ CSS = """
 .cal-hour { font-size: 0.75em; opacity: 0.55; font-feature-settings: "tnum"; }
 .cal-block { padding: 2px 4px 2px 7px; font-size: 0.85em; }
 .cal-block .cal-time { font-size: 0.9em; }
+.cal-task.done, .cal-block.done { opacity: 0.55; }
+.cal-task.done .cal-title, .cal-block.done .cal-title { text-decoration-line: line-through; }
+.cal-tick { -gtk-icon-size: 10px; opacity: 0.8; }
 """
+
+
+def is_done(task):
+    return task.get("completed_at") is not None
 
 
 class TimeColumn(Gtk.Widget):
@@ -64,21 +71,21 @@ class TimeColumn(Gtk.Widget):
     def __init__(self, decorate=True, width=0):
         super().__init__(hexpand=not width)
         self.width = width  # a fixed width (the hour gutter), or 0 to share the row
-        self.items = []  # (child, top minute, length in minutes, lane, lanes, rgba or None, dashed)
+        self.items = []  # (child, top minute, length in minutes, lane, lanes, rgba or None, dashed, done)
         self.decorate = decorate
         self.past_until = None  # minutes of the day shown as past; DAY_MINUTES for a past day
         self.now = None  # minutes, on today's column
         self.ghost = None  # (start, length) of a drop in progress
         self.shade = (0, DAY_MINUTES)  # the grid hours; outside them is shaded
 
-    def add(self, child, top, length, lane=0, lanes=1, color=None, dashed=False):
+    def add(self, child, top, length, lane=0, lanes=1, color=None, dashed=False, done=False):
         child.set_parent(self)
         rgba = None
         if color is not None:
             rgba = Gdk.RGBA()
             if not (isinstance(color, str) and rgba.parse(color)):
                 rgba.parse("#94a3b8")
-        self.items.append((child, top, length, lane, lanes, rgba, dashed))
+        self.items.append((child, top, length, lane, lanes, rgba, dashed, done))
 
     def stretch(self, child, length):
         """Draw child length minutes long, while its bottom edge is dragged."""
@@ -132,7 +139,7 @@ class TimeColumn(Gtk.Widget):
             for hour in range(1, 24):
                 fill(0, hour * 60 * PX_PER_MINUTE, width, 1, fg, 0.08)
             fill(0, 0, 1, height, fg, 0.1)
-        for child, top, length, lane, lanes, rgba, dashed in self.items:
+        for child, top, length, lane, lanes, rgba, dashed, done in self.items:
             if rgba is None:
                 continue
             x, y, w, h = self.rect(width, top, length, lane, lanes)
@@ -144,17 +151,18 @@ class TimeColumn(Gtk.Widget):
             cr.arc(x + radius, y + h - radius, radius, math.pi / 2, math.pi)
             cr.arc(x + radius, y + radius, radius, math.pi, 3 * math.pi / 2)
             cr.close_path()
-            cr.set_source_rgba(rgba.red, rgba.green, rgba.blue, 0.12 if dashed else 0.24)
+            fade = 0.45 if done else 1  # completed: faint, under its struck-through title
+            cr.set_source_rgba(rgba.red, rgba.green, rgba.blue, (0.12 if dashed else 0.24) * fade)
             cr.fill_preserve()
             if dashed:  # no estimate: drawn 30 minutes long, with a dashed edge
-                cr.set_source_rgba(rgba.red, rgba.green, rgba.blue, 0.8)
+                cr.set_source_rgba(rgba.red, rgba.green, rgba.blue, 0.8 * fade)
                 cr.set_line_width(1)
                 cr.set_dash([4, 3])
                 cr.stroke()
             else:
                 cr.new_path()
                 cr.rectangle(x, y + 1, 3, h - 2)
-                cr.set_source_rgba(rgba.red, rgba.green, rgba.blue, 1)
+                cr.set_source_rgba(rgba.red, rgba.green, rgba.blue, fade)
                 cr.fill()
         if self.ghost:
             accent = Adw.StyleManager.get_default().get_accent_color_rgba()
@@ -176,6 +184,7 @@ class CalendarWindow(Adw.ApplicationWindow):
         self.anchor = main.today  # the shown day, week or month holds this day
         view = main.store.get_meta("calendar_view", "month")
         self.view = view if view in VIEWS else "month"
+        self.show_completed = main.store.get_meta("calendar_show_completed", False) is True
         self.scroll = None  # the time grid's position, kept across rebuilds
         self.columns = {}  # day -> TimeColumn on the shown grid
         self.task_widgets = {}  # task id -> its block or line, in the order j and k step through
@@ -210,6 +219,10 @@ class CalendarWindow(Adw.ApplicationWindow):
         settings = Gtk.Button(icon_name="preferences-system-symbolic", tooltip_text="Grid hours and day length")
         settings.connect("clicked", lambda _b: self.grid_settings())
         header.pack_end(settings)
+        self.completed_toggle = Gtk.ToggleButton(icon_name="object-select-symbolic", active=self.show_completed,
+                                                 tooltip_text="Show completed tasks (h)")
+        self.completed_toggle.connect("toggled", lambda b: self.set_show_completed(b.get_active()))
+        header.pack_end(self.completed_toggle)
         header.pack_end(self.switcher)
         self.body = Adw.Bin(hexpand=True, vexpand=True)
         view = Adw.ToolbarView(content=self.body)
@@ -232,6 +245,9 @@ class CalendarWindow(Adw.ApplicationWindow):
         if keyval in views:
             self.switcher.set_active_name(views[keyval])
             return True
+        if keyval == Gdk.KEY_h:
+            self.completed_toggle.set_active(not self.completed_toggle.get_active())
+            return True
         step = {Gdk.KEY_bracketleft: -1, Gdk.KEY_bracketright: 1, Gdk.KEY_t: 0}.get(keyval)
         if step is None:
             return False
@@ -242,6 +258,13 @@ class CalendarWindow(Adw.ApplicationWindow):
         if view in VIEWS and view != self.view:
             self.view = view
             self.main.store.set_meta("calendar_view", view)
+            self.refresh()
+
+    def set_show_completed(self, on):
+        """Show completed tasks too, faded and struck through. Remembered on this device."""
+        if on != self.show_completed:
+            self.show_completed = on
+            self.main.store.set_meta("calendar_show_completed", on)
             self.refresh()
 
     def go(self, step):
@@ -313,7 +336,7 @@ class CalendarWindow(Adw.ApplicationWindow):
 
     def tasks_in(self, first, last):
         tasks = list(self.main.snap.all_tasks.values())
-        days = rules.by_day(rules.calendar_tasks(tasks, self.archived, first, last))
+        days = rules.by_day(rules.calendar_tasks(tasks, self.archived, first, last, self.show_completed))
         return days, rules.deadline_markers(tasks, self.archived, first, last)
 
     def load_label(self, tasks):
@@ -475,7 +498,8 @@ class CalendarWindow(Adw.ApplicationWindow):
             column.now = column.past_until = self.now_minutes()
         blocks = {t.id: t for t in timed}
         placed, overflow = rules.layout_day(
-            [(t.id, *rules.block_for(t)[:2]) for t in timed], min_length=MIN_BLOCK_MINUTES)
+            [(t.id, *rules.block_for(t)[:2]) for t in timed], min_length=MIN_BLOCK_MINUTES,
+            spare=[t.id for t in timed if is_done(t)])
         twelve = uses_12h(self.main.time_format)
         for b in placed:
             if b["hidden"]:
@@ -484,9 +508,11 @@ class CalendarWindow(Adw.ApplicationWindow):
             estimated = rules.block_for(task)[2]
             project = self.projects.get(task.get("project_id"))
             block = self.block(task, b["start"], b["end"], estimated, twelve)
+            done = is_done(task)
             column.add(block, b["start"], max(MIN_BLOCK_MINUTES, b["end"] - b["start"]), b["lane"], b["lanes"],
-                       color=(project.get("color") if project else None) or "", dashed=not estimated)
-            self.stretchable(block, column, task)
+                       color=(project.get("color") if project else None) or "", dashed=not estimated, done=done)
+            if not done:
+                self.stretchable(block, column, task)
         for o in overflow:
             column.add(self.more_button([blocks[i] for i in o["ids"]]), o["start"], MIN_BLOCK_MINUTES,
                        o["lane"], o["lanes"])
@@ -495,13 +521,15 @@ class CalendarWindow(Adw.ApplicationWindow):
 
     def block(self, task, start, end, estimated, twelve):
         title = task.get("title") or ""
-        box = TaskRow(orientation=Gtk.Orientation.VERTICAL, css_classes=["cal-block"], overflow=Gtk.Overflow.HIDDEN)
+        done = is_done(task)
+        box = TaskRow(orientation=Gtk.Orientation.VERTICAL, css_classes=["cal-block", *(["done"] if done else [])],
+                      overflow=Gtk.Overflow.HIDDEN)
         when = format_time(time(start // 60, start % 60), twelve)
         if estimated:
             when += "–" + format_time(time(end // 60 % 24, end % 60), twelve)
         tall = (end - start) >= 45
         label = Gtk.Label(label=title, xalign=0, ellipsize=Pango.EllipsizeMode.END, wrap=tall,
-                          wrap_mode=Pango.WrapMode.WORD_CHAR, lines=3 if tall else 1)
+                          wrap_mode=Pango.WrapMode.WORD_CHAR, lines=3 if tall else 1, css_classes=["cal-title"])
         if tall:
             box.append(label)
             box.append(Gtk.Label(label=when, xalign=0, css_classes=["cal-time"]))
@@ -510,9 +538,10 @@ class CalendarWindow(Adw.ApplicationWindow):
             line.append(Gtk.Label(label=when.split("–")[0], css_classes=["cal-time"]))
             line.append(label)
             box.append(line)
-        box.set_tooltip_text(f"{title}\n{when}")
+        box.set_tooltip_text(f"{title}\n{when}" + ("\nCompleted" if done else ""))
         self.selectable(box, task)
-        self.main.drag.source(box, task.id, title)
+        if not done:
+            self.main.drag.source(box, task.id, title)
         return box
 
     def stretchable(self, block, column, task):
@@ -562,24 +591,29 @@ class CalendarWindow(Adw.ApplicationWindow):
 
     def task_line(self, task, listed=True):
         """listed: a line on the calendar itself, which j and k step through; not one in a "+N more" popover."""
-        line = TaskRow(spacing=5, css_classes=["cal-task"])
+        done = is_done(task)
+        line = TaskRow(spacing=5, css_classes=["cal-task", *(["done"] if done else [])])
         project = self.projects.get(task.get("project_id"))
-        line.append(Dot(project.get("color") if project else None, 7))
-        if (start := rules.parse_time(rules.viewed_due(task)[1])) is not None:
+        if done:
+            line.append(Gtk.Image(icon_name="object-select-symbolic", css_classes=["cal-tick"]))
+        else:
+            line.append(Dot(project.get("color") if project else None, 7))
+        if (start := rules.parse_time(rules.shown_day(task)[1])) is not None:
             at = format_time(time(start // 60, start % 60), uses_12h(self.main.time_format))
             line.append(Gtk.Label(label=at, css_classes=["cal-time"]))
         title = task.get("title") or ""
         line.append(Gtk.Label(label=title, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END,
-                              tooltip_text=title))
+                              tooltip_text=title + ("\nCompleted" if done else ""), css_classes=["cal-title"]))
         self.selectable(line, task, listed)
-        self.main.drag.source(line, task.id, title)
+        if not done:  # as in the main window's lists: a completed task doesn't drag
+            self.main.drag.source(line, task.id, title)
         return line
 
     def selectable(self, widget, task, listed=True):
         """As a row in the main window: a click selects, a double-click opens, a right-click or . opens its menu."""
         if listed:
             self.task_widgets[task.id] = widget
-        self.actions.attach(widget, task.id, task.get("completed_at") is not None)
+        self.actions.attach(widget, task.id, is_done(task))
 
     # ---- what RowActions asks of the window ----
 
