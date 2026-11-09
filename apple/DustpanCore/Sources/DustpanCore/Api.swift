@@ -20,6 +20,25 @@ public enum ApiError: Error, CustomStringConvertible {
     }
 }
 
+/// Refuses redirects, as the desktop does. URLSession drops the token on a redirect to another origin, then fails
+/// with a puzzling answer from wherever it landed. The API never redirects, so the 3xx itself comes back and
+/// `refuseRedirect` turns it into an error that says what to fix.
+final class NoRedirect: NSObject, URLSessionTaskDelegate, Sendable {
+    static let shared = NoRedirect()
+
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+}
+
+func refuseRedirect(_ response: URLResponse) throws {
+    guard let http = response as? HTTPURLResponse, (300..<400).contains(http.statusCode) else { return }
+    let target = http.value(forHTTPHeaderField: "Location") ?? "another address"
+    throw ApiError.server(status: http.statusCode, code: "redirect",
+                          message: "server redirected to \(target); update OPENTODO_URL")
+}
+
 /// HTTP client for the OpenTodo API. Foundation only.
 public struct Api: SyncServer, Sendable {
     static let timeout: TimeInterval = 30
@@ -47,10 +66,11 @@ public struct Api: SyncServer, Sendable {
         }
         let data: Data, response: URLResponse
         do {
-            (data, response) = try await session.data(for: request)
+            (data, response) = try await session.data(for: request, delegate: NoRedirect.shared)
         } catch let error as URLError {
             throw ApiError.offline(error.localizedDescription)
         }
+        try refuseRedirect(response)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
             let detail = (try? JSON(parsing: data))?["error"] ?? .null

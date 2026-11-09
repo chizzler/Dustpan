@@ -92,6 +92,11 @@ Before 1.0 the minor number follows the Mac client's own slices.
 
 | Version | Date | What |
 | --- | --- | --- |
+| 0.8.5 | 2026-11-09 | Dragging: the nest ring starts at the task's own indent, the same distance from its check circle at every level. |
+| 0.8.4 | 2026-11-09 | Dragging: the nest ring shows without a drop line, including the stray one at the end of the list, and the drop line is no longer half hidden by the row below. |
+| 0.8.3 | 2026-11-09 | Dragging in task lists: one indicator at a time. The list's own drop highlight no longer shows at a row's top and bottom edges, where drops also landed a slot off. The drop line sits between rows instead of across the text above, and the nest ring isn't clipped. |
+| 0.8.2 | 2026-11-09 | Selection after a drag: rows no longer swallow every other click, a press-and-drag no longer selects a range, and double-click opens the editor reliably, in task lists and the sidebar. Rows drag with `draggable`; see "On the Mac" in the drag and drop spec. |
+| 0.8.1 | 2026-11-09 | Redirects are refused with an error that names the target, as on the desktop. URLSession already dropped the token on a cross-origin redirect, but then failed with a puzzling answer. |
 | 0.8.0 | 2026-11-07 | The sidebar's order, from desktop slice 6c: drag a project before, after or into another (the middle of its row), and drag views to reorder them. Move Up and Move Down in project and view menus, and ⌥↑ ⌥↓ on the selected project, view or label. One Undo each. |
 | 0.7.0 | 2026-11-07 | Slice 4b, quick add: every Add field and the editor's subtask line read the line like the desktop, in six languages, with a preview of what it sets. Also: a press-and-drag on a row no longer selects rows, Esc clears a selection, and the `NSOutlineView` list spike. |
 | 0.6.0 | 2026-11-06 | Slice 6a, drag and drop: drag a task within a list to reorder, nest (middle of a row) or outdent (drag left); onto a section heading or the end of a section; onto the Inbox, a project, Today or a label in the sidebar; onto Today's and Upcoming's day headings. One Undo per drop, a toast, and the moved task flashes. Holding a drag over a project opens it. |

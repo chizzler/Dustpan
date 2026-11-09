@@ -285,10 +285,21 @@ the Swift code already used for a project and section), and `Writer.drop` ports 
   Leaving a target keeps the mark for 150 ms, so it doesn't flicker in the gaps between rows.
 - **The whole row width drags**, so a press-and-drag beside the text never selects the rows it crosses.
   Esc clears a selection.
-- **The grab point** comes from the pointer's last hover position over the row, since `onDrag` doesn't give one.
-- **The drag ends** when the mouse button is up: `onDrag` reports no end, so its source watches the button.
-  macOS 26's `onDragSessionUpdated` and `onDropSessionUpdated` would report both, with `draggable(containerItemID:)`;
-  not used yet.
+- **The grab point** comes from the pointer's last hover position over the row, since the drag doesn't give one.
+- **The drag starts** when SwiftUI asks `draggable` for its payload, and **ends** when the mouse button is up.
+  `onDragSessionUpdated` doesn't fire for a plain `draggable` row.
+- **Rows drag with `draggable`, never `onDrag`, and nothing List-aware goes outside it.** Found 2026-11-09 on
+  macOS 27: after one drag, the list swallowed every other click, so selection lagged or stuck and a press-and-drag
+  selected a range. `onDrag` does that on its own; so does `onGeometryChange` or `.badge` applied outside the drag
+  modifier, even with `draggable`. Inside it, both are fine. Overlays, `onDrop`, popovers and menus outside are fine.
+  A minimal app reproduces each case.
+- **Each row's drop area is the whole row.** The List's 4-point vertical row insets become padding inside the row
+  (`fullRowDropArea`). In an inset, the List showed its own "drop on this row" fill, and the row's target took the
+  pointer as below itself: a third indicator, and drops that landed one slot off. A drop line stays inside one row's
+  padding (the next row draws over anything that crosses the boundary), and the nest ring just inside the row,
+  from the task's own indent, so it sits the same distance from the check circle at every level.
+- **The ring shows alone.** Nesting has a place among the children too, but the ring already says where the task
+  goes, so no line goes with it.
 - **Autoscroll** is whatever the system list does during a drag. Not written by hand.
 
 **The `NSOutlineView` spike** (View ▸ Outline Task List, project and Inbox pages only), added 2026-11-07:

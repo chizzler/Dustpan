@@ -95,20 +95,25 @@ private struct PlacedTaskRow: View {
         let task = item.node.row
         let id = task.id
         let drop = mark
+        let indent = Double(item.slot.depth) * indentWidth
         TaskRow(task: task, labels: model.snapshot.labels) {
             withAnimation { model.toggle(task) }
         }
-        .taskDrag(task, subtasks: openBelow(item.node), indent: Double(item.slot.depth) * indentWidth)
+        // Inside the drag: outside it, onGeometryChange breaks the List's clicks after a drag (macOS 27).
         .onGeometryChange(for: Double.self) { $0.size.height } action: { height = $0 }
+        .taskDrag(task, subtasks: openBelow(item.node), indent: indent)
         .overlay(alignment: .bottomLeading) {
-            if let drop, drop.prev == id { DropLine(depth: drop.depth) }
+            if let drop, drop.ring == nil, drop.prev == id { DropLine(depth: drop.depth) }
         }
         .overlay(alignment: .topLeading) {
-            if let drop, drop.prev == nil, drop.next == id { DropLine(depth: drop.depth) }
+            if let drop, drop.ring == nil, drop.prev == nil, drop.next == id { DropLine(depth: drop.depth) }
         }
         .overlay {
             if drop?.ring == id {
-                RoundedRectangle(cornerRadius: 5).strokeBorder(.tint, lineWidth: 2).padding(-2).allowsHitTesting(false)
+                // From the task's own indent, with the same gap beside its check circle as above it.
+                RoundedRectangle(cornerRadius: 5).strokeBorder(.tint, lineWidth: 2)
+                    .padding(EdgeInsets(top: 1, leading: indent - 5, bottom: 1, trailing: 1))
+                    .allowsHitTesting(false)
             }
         }
         .flashes(id)
@@ -159,10 +164,9 @@ private struct ListEndDrop: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(.rect)
+            .fullRowDropArea()
             .overlay(alignment: .topLeading) {
-                if case .end = hit, case .list(list.key, let drop) = model.dropMark, drop.prev == nil, drop.next == nil {
+                if case .end = hit, case .list(list.key, let drop) = model.dropMark, drop.ring == nil, drop.prev == nil, drop.next == nil {
                     DropLine(depth: 0)
                 }
             }

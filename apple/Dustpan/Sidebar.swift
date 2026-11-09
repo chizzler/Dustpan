@@ -114,8 +114,9 @@ private struct ProjectRows: View {
                 .foregroundStyle(Color(hex: node.row["color"].string) ?? .secondary)
                 .imageScale(.small)
         }
-        .projectRow(ProjectSpot(id: node.id, parentId: parent, children: shown), name: name)
+        // Inside the drag: outside it, the badge breaks the List's clicks after a drag (macOS 27).
         .badge(countOpen(model.snapshot, node.id, today: today))
+        .projectRow(ProjectSpot(id: node.id, parentId: parent, children: shown), name: name)
         .tag(Page.project(node.id))
         .contextMenu {
             Button("Move Up") { model.moveProject(node.id, step: -1) }

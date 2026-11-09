@@ -157,6 +157,16 @@ struct ProjectDrop: DropDelegate {
 }
 
 extension View {
+    /// The whole row, edge to edge, takes the pointer: the list's own vertical row insets become padding inside it.
+    /// In an inset, the List shows its own "drop on this row" highlight and the row's drop target sees the pointer
+    /// outside itself.
+    func fullRowDropArea() -> some View {
+        padding(.vertical, 4)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
+            .listRowInsets(.vertical, 0)
+    }
+
     /// A sidebar project row: dragged to reorder or nest it, and a target for tasks and other projects.
     func projectRow(_ spot: ProjectSpot, name: String) -> some View {
         modifier(ProjectRowModifier(spot: spot, name: name))
@@ -186,18 +196,14 @@ private struct TaskDragSource: ViewModifier {
     func body(content: Content) -> some View {
         let row = content
             .padding(.leading, indent)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(.rect)
+            .fullRowDropArea()
         if task["completed_at"].isNull {
             row
                 .onContinuousHover { phase in
                     if case .active(let point) = phase { model.hoverX = point.x - indent }
                 }
-                .onDrag {
-                    model.startDrag(task.id, grabX: model.hoverX)
-                    endsOnMouseUp(model)
-                    return NSItemProvider(object: task.id as NSString)
-                } preview: {
+                // draggable, not onDrag: in a List, onDrag leaves the rows swallowing clicks after a drag (macOS 27).
+                .draggable(begin()) {
                     DragPill(title: task["title"].string ?? "", subtasks: subtasks)
                 }
                 .opacity(model.drag?.taskId == task.id ? 0.4 : 1)
@@ -205,9 +211,18 @@ private struct TaskDragSource: ViewModifier {
             row
         }
     }
+
+    /// The drag's payload. SwiftUI asks for it as the drag begins, more than once.
+    private func begin() -> String {
+        if model.drag?.taskId != task.id {
+            model.startDrag(task.id, grabX: model.hoverX)
+            endsOnMouseUp(model)
+        }
+        return task.id
+    }
 }
 
-/// SwiftUI's onDrag reports no end: the drag is over when the mouse button is up.
+/// A drag is over when the mouse button is up.
 @MainActor private func endsOnMouseUp(_ model: AppModel) {
     Task {
         while NSEvent.pressedMouseButtons & 1 != 0 { try? await Task.sleep(for: .milliseconds(100)) }
@@ -226,11 +241,7 @@ private struct ProjectRowModifier: ViewModifier {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(.rect)
             .onGeometryChange(for: Double.self) { $0.size.height } action: { height = $0 }
-            .onDrag {
-                model.startProjectDrag(spot.id)
-                endsOnMouseUp(model)
-                return NSItemProvider(object: spot.key as NSString)
-            } preview: {
+            .draggable(begin()) {
                 DragPill(title: name, subtasks: 0)
             }
             .opacity(model.projectDrag?.projectId == spot.id ? 0.4 : 1)
@@ -248,6 +259,15 @@ private struct ProjectRowModifier: ViewModifier {
             .overlay(alignment: .bottom) {
                 if model.dropMark == .item(spot.key, .after) { DropLine(depth: 0).offset(y: 2) }
             }
+    }
+
+    /// The drag's payload, as for tasks.
+    private func begin() -> String {
+        if model.projectDrag?.projectId != spot.id {
+            model.startProjectDrag(spot.id)
+            endsOnMouseUp(model)
+        }
+        return spot.key
     }
 }
 
@@ -304,15 +324,17 @@ struct DragPill: View {
 }
 
 /// The drop line: 2 points in the accent colour with a dot at its start, indented to the level the task lands on.
+/// 6 points tall, so at a task row's edge it stays inside the row's padding: the next row would draw over
+/// anything that crossed the boundary. Not shown with the nest ring, which already says where the task goes.
 struct DropLine: View {
     let depth: Int
 
     var body: some View {
         HStack(spacing: 0) {
-            Circle().strokeBorder(.tint, lineWidth: 2).frame(width: 8, height: 8)
+            Circle().strokeBorder(.tint, lineWidth: 2).frame(width: 6, height: 6)
             Rectangle().fill(.tint).frame(height: 2)
         }
-        .padding(.leading, Double(depth) * indentWidth - 4)
+        .padding(.leading, Double(depth) * indentWidth - 3)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
