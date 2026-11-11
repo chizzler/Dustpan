@@ -105,7 +105,8 @@ See "In the sidebar" in dragdrop.md.
 
 ## On the Mac (0.12.0)
 
-Anytime, Completed and the Filter page, from the desktop's slice 10. Today, Upcoming and saved views came in 0.4.0.
+Anytime, Completed and the Filter page, from the desktop's slice 10. Built 2026-11-11, tried and approved.
+Today, Upcoming and saved views came in 0.4.0.
 
 - `Views.swift` gains `anytimeGroups`, `logbook` and `filterResults`; `QueryTools.swift` ports `querytools.py`.
   The tests are ports of `test_querytools.py`.

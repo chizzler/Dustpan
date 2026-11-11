@@ -32,6 +32,8 @@ What the desktop client implements from `docs/notes-and-subtasks.md`, `docs/keyb
 
 ## On the Mac (0.12.1)
 
+Built 2026-11-12, tried and approved.
+
 - **The same rules,** with these differences. `Folding.swift` ports `folded_after` and `unfolded_down_to`, with their
   tests, and `openSlots` leaves a folded task's subtasks out.
 - **The leading slot** is only on project and Inbox lists, the pages with trees. The Add field lines up with it.
