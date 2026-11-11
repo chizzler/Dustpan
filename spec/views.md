@@ -102,3 +102,23 @@ A `view` is a query with display options. The client reads and writes these fiel
 See "In the sidebar" in dragdrop.md.
 
 **Not yet:** dashboards and boards, `layout`, `hidden_props`, `on_drop`, `icon`, pinning, and a start view.
+
+## On the Mac (0.12.0)
+
+Anytime, Completed and the Filter page, from the desktop's slice 10. Today, Upcoming and saved views came in 0.4.0.
+
+- `Views.swift` gains `anytimeGroups`, `logbook` and `filterResults`; `QueryTools.swift` ports `querytools.py`.
+  The tests are ports of `test_querytools.py`.
+- **Sidebar:** Anytime, Completed and Filter under the Inbox. "Hide from Sidebar" in a row's menu, or View ▸ Hide …,
+  writes the same `hidden_pages` meta as the desktop, with Undo. View ▸ Show … brings a page back: the Mac's
+  place for the desktop's ⋯ menu. The desktop's Trash key in that list is kept but not shown yet.
+- **Filter** is View ▸ Filter… (⇧⌘F). ⌘F is Edit ▸ Find and ⌥⌘F Find and Replace, from `TextEditingCommands`.
+  Opening the page puts the focus in the query; the sidebar leaves it there. The query lives in the app model,
+  so it's kept while other pages are shown, as on the desktop, but not across launches.
+- **Suggestions** use SwiftUI's `textInputSuggestions`: the system's list under the field, ↓ ↑ and Return to take one.
+  Offered only with the insertion point at the end (the field's `TextSelection`).
+- **+ Condition** is a menu of the same groups; **Not** is a toggle button beside it, as on the desktop.
+  After a condition, the insertion point goes to the end.
+- Results are worked out as you type, without the desktop's 150 ms pause: SwiftUI redraws only the list.
+- **Show More** on Completed adds 100 at a time, while the page is open.
+- The view editor's query field is the same `QueryField`.

@@ -1,12 +1,14 @@
 import DustpanCore
 import SwiftUI
 
-/// Today, Upcoming or a saved view: tasks under headings, each named with its place.
+/// Today, Upcoming, Anytime, Completed, Filter, a label or a saved view: tasks under headings, each named with its place.
 struct GroupedTaskList: View {
     @Environment(AppModel.self) private var model
     let page: Page
     @State private var selection: Set<String> = []
     @FocusState private var adding: Place?
+    /// How much of the Completed page is shown.
+    @State private var completedLimit = logbookPage
 
     private struct Content {
         var title: String
@@ -19,6 +21,11 @@ struct GroupedTaskList: View {
         /// The labels the Add field gives new tasks.
         var addLabels: [String] = []
         var empty: String
+        /// The Filter page's line under the query: what it finds, or why it can't run.
+        var status: String?
+        var failed = false
+        /// Completed's Show More, when there's more.
+        var more: String?
     }
 
     var body: some View {
@@ -42,7 +49,7 @@ struct GroupedTaskList: View {
                         .foregroundStyle(.orange)
                         .selectionDisabled()
                 }
-                if content.groups.isEmpty && content.error == nil {
+                if content.groups.isEmpty && content.error == nil && !content.empty.isEmpty {
                     Text(content.empty).foregroundStyle(.secondary).selectionDisabled()
                 }
                 ForEach(content.groups) { group in
@@ -56,6 +63,11 @@ struct GroupedTaskList: View {
                         }
                     }
                 }
+                if let more = content.more {
+                    Button(more, action: showMore)
+                        .frame(maxWidth: .infinity)
+                        .selectionDisabled()
+                }
                 if let due = content.addDue {
                     AddTaskField(place: Place(projectId: nil), due: due, labels: content.addLabels, focus: $adding)
                         .selectionDisabled()
@@ -66,6 +78,9 @@ struct GroupedTaskList: View {
                 selection = [id]
                 withAnimation { proxy.scrollTo(id) }
             }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let status = content.status { FilterBar(status: status, failed: content.failed) }
         }
         .taskMenus(selection: $selection)
         .navigationTitle(content.title)
@@ -116,10 +131,34 @@ struct GroupedTaskList: View {
                                                projects: snap.projectPaths),
                            addDue: .null, addLabels: [id],
                            empty: "No open tasks have this label. Add one below, or press L on any task.")
+        case .anytime:
+            return Content(title: "Anytime",
+                           groups: anytimeGroups(snap.tasks, today: today, labels: snap.labelsInOrder,
+                                                 projects: snap.projectPaths),
+                           addDue: .null, empty: "Nothing undated. Tasks with no date, deadline or start show here.")
+        case .completed:
+            let found = logbook(snap.tasks, limit: completedLimit, today: today,
+                                dayStart: snap.filterContext(today: today).dayStart)
+            let older = found.total - found.groups.reduce(0) { $0 + $1.tasks.count }
+            return Content(title: "Completed", groups: found.groups, empty: "Nothing completed yet.",
+                           more: older > 0 ? "Show \(min(logbookPage, older)) More (\(older) older)" : nil)
+        case .filter:
+            let query = model.filterQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !query.isEmpty else {
+                return Content(title: "Filter", empty: "",
+                               status: "Type a query, or add conditions. @ suggests labels, # projects.")
+            }
+            let result = filterResults(query, snap.filterContext(today: today), snap.tasks, labels: snap.labelsInOrder,
+                                       projects: snap.projectPaths)
+            if let error = result.error { return Content(title: "Filter", empty: "", status: error, failed: true) }
+            return Content(title: "Filter", groups: result.groups, warnings: result.warnings, empty: "No tasks match.",
+                           status: "\(result.count) open task\(result.count == 1 ? "" : "s") match")
         case .inbox, .project, .archived:
             return Content(title: "", empty: "")
         }
     }
+
+    private func showMore() { completedLimit += logbookPage }
 
     private var labelPage: String? {
         if case .label(let id) = page { id } else { nil }

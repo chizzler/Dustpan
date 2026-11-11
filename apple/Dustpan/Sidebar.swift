@@ -28,6 +28,13 @@ struct Sidebar: View {
                 .badge(countOpen(snap, nil, today: today))
                 .tag(Page.inbox)
                 .listRowInsets(.vertical, 0)
+            ForEach(model.sidebarPages, id: \.self) { page in
+                Label(page.name, systemImage: page.symbol)
+                    .tag(page)
+                    .contextMenu {
+                        Button("Hide from Sidebar") { model.setHidden(page, true) }
+                    }
+            }
             Section {
                 ProjectRows(nodes: snap.projects, today: today, collapsed: $collapsed)
             } header: {
@@ -82,7 +89,8 @@ struct Sidebar: View {
         .navigationSplitViewColumnWidth(min: 180, ideal: 230)
         // A project row's drag takes the click, so the list doesn't take the focus by itself.
         .focused($focused)
-        .onChange(of: model.page) { focused = true }
+        // The Filter page keeps the focus for its query.
+        .onChange(of: model.page) { focused = model.page != .filter }
         .focusedValue(\.listMoves, moves)
         // Here for every project delete: the sidebar's menus, the project editor and an archived project's page.
         .confirmationDialog("Delete project “\(model.deletingProject?["name"].string ?? "")”?",

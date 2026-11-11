@@ -7,13 +7,18 @@ extension AppModel {
     /// An app may capture its own windows without the Screen Recording permission.
     func screenshotsIfAsked() async {
         guard let folder = ProcessInfo.processInfo.environment["DUSTPAN_SCREENSHOT"], !folder.isEmpty else { return }
-        let pages: [(String, Page)] = [("inbox", .inbox)]
+        let pages: [(String, Page)] = [("today", .today), ("upcoming", .upcoming), ("inbox", .inbox)]
+            + Page.optional.map { ($0.key ?? "", $0) }
             + projectsById.values.map { ($0.row["name"].string ?? $0.id, Page.project($0.id)) }.sorted { $0.0 < $1.0 }
             + snapshot.labelsInOrder.map { ("label-" + ($0["name"].string ?? $0.id), Page.label($0.id)) }
         for (index, (name, page)) in pages.enumerated() {
             self.page = page
             try? await Task.sleep(for: .milliseconds(600))
-            guard let window = try? await SCShareableContent.currentProcess.windows.first(where: \.isOnScreen) else {
+            // currentProcess lists the desktop's windows too (macOS 27): take this app's own.
+            let ours = ProcessInfo.processInfo.processIdentifier
+            guard let window = try? await SCShareableContent.currentProcess.windows.first(where: {
+                $0.isOnScreen && $0.owningApplication?.processID == ours && $0.windowLayer == 0
+            }) else {
                 continue
             }
             let config = SCStreamConfiguration()

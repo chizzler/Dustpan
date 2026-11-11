@@ -11,6 +11,42 @@ enum Page: Hashable {
     case archived(String)
     case label(String)
     case view(String)
+    case anytime
+    case completed
+    case filter
+}
+
+extension Page {
+    /// Built-in pages that can be hidden from the sidebar on this device, never deleted.
+    static let optional: [Page] = [.anytime, .completed, .filter]
+
+    /// The key in store meta `hidden_pages`, the desktop client's.
+    var key: String? {
+        switch self {
+        case .anytime: "anytime"
+        case .completed: "completed"
+        case .filter: "filter"
+        default: nil
+        }
+    }
+
+    var name: String {
+        switch self {
+        case .anytime: "Anytime"
+        case .completed: "Completed"
+        case .filter: "Filter"
+        default: ""
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .anytime: "square.stack"
+        case .completed: "checkmark.circle"
+        case .filter: "magnifyingglass"
+        default: "questionmark"
+        }
+    }
 }
 
 /// A label in the editor: an existing one, or a new one.
@@ -91,6 +127,12 @@ final class AppModel {
     /// Why the app can't start: no config, or no database.
     private(set) var setupProblem: String?
     var page: Page? = .today
+    /// The optional pages hidden from the sidebar here, by key.
+    private(set) var hiddenPages: Set<String> = []
+    /// The Filter page's query, kept while other pages are shown.
+    var filterQuery = ""
+    /// Bumped to put the focus in the Filter page's query.
+    private(set) var filterFocus = 0
     /// The task being dragged, and the drop under the pointer.
     private(set) var drag: TaskDrag?
     /// The sidebar project being dragged, apart from task drags.
@@ -209,6 +251,7 @@ final class AppModel {
         do {
             snapshot = try DustpanCore.snapshot(store)
             waiting = try store.outboxCount()
+            hiddenPages = Set(try store.meta(hiddenPagesKey).array?.compactMap(\.string) ?? [])
             settlePage()
         } catch {
             status = .failed("\(error)")
@@ -451,6 +494,46 @@ final class AppModel {
     func deleteView(_ view: Row) {
         if page == .view(view.id) { page = .today }
         undoable("Delete View", { try $0.deleteView(view.id) }) { _ in "Deleted view “\(view["name"].string ?? "")”" }
+    }
+
+    // MARK: built-in pages
+
+    /// The Filter page, with its query focused.
+    func openFilter() {
+        page = .filter
+        filterFocus += 1
+    }
+
+    /// Label and project names for the query helper, in sidebar order.
+    var queryNames: (labels: [String], projects: [String]) {
+        (snapshot.labelsInOrder.map { $0["name"].string ?? "" }, flatProjects.map { $0.node.row["name"].string ?? "" })
+    }
+
+    /// The optional pages the sidebar lists: those not hidden, and a hidden one while it's open.
+    var sidebarPages: [Page] {
+        Page.optional.filter { !hiddenPages.contains($0.key ?? "") || $0 == page }
+    }
+
+    /// Hide an optional page from the sidebar on this device, with Undo; or show it again.
+    func setHidden(_ page: Page, _ hidden: Bool) {
+        guard let store, let key = page.key else { return }
+        var keys = (try? store.meta(hiddenPagesKey).array?.compactMap(\.string)) ?? []
+        keys.removeAll { $0 == key }
+        if hidden { keys.append(key) }
+        do {
+            try store.setMeta(hiddenPagesKey, .array(keys.map(JSON.string)))
+        } catch {
+            show(Toast(message: "\(error)"))
+            return
+        }
+        hiddenPages = Set(keys)
+        if hidden && self.page == page { self.page = .today }
+        undoManager?.registerUndo(withTarget: self) { $0.setHidden(page, !hidden) }
+        undoManager?.setActionName(hidden ? "Hide \(page.name)" : "Show \(page.name)")
+        if hidden {
+            show(Toast(message: "\(page.name) is hidden. Bring it back from View ▸ Show \(page.name).",
+                       undoable: undoManager != nil))
+        }
     }
 
     func edit(_ taskId: String, _ edit: TaskEdit) throws {

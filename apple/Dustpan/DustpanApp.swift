@@ -35,6 +35,17 @@ struct DustpanApp: App {
                 Divider()
                 MoveCommands()
             }
+            CommandGroup(after: .sidebar) {
+                Button("Filter…", action: model.openFilter)
+                    .keyboardShortcut("f", modifiers: [.command, .shift])
+                    .disabled(model.setupProblem != nil)
+                ForEach(Page.optional, id: \.self) { page in
+                    let hidden = model.hiddenPages.contains(page.key ?? "")
+                    Button(hidden ? "Show \(page.name)" : "Hide \(page.name)") { model.setHidden(page, !hidden) }
+                        .disabled(model.setupProblem != nil)
+                }
+                Divider()
+            }
             CommandGroup(after: .toolbar) {
                 Toggle("Outline Task List (Spike)", isOn: $outlineSpike)
                 Button("Sync Now") { Task { await model.sync() } }

@@ -314,3 +314,69 @@ public func labelCounts(_ tasks: [Row], today: Day) -> [String: Int] {
     }
     return counts
 }
+
+// MARK: - Anytime and Completed (web/src/lib/views.ts inAnytime, lib/logbook.ts)
+
+/// Store meta: the optional built-in pages hidden from the sidebar on this device, by key.
+public let hiddenPagesKey = "hidden_pages"
+
+/// Completions the Completed page shows at first, and adds with each Show More.
+public let logbookPage = 100
+
+/// Open and active, with no date of any kind, no start and no sector: for whenever there's time.
+func inAnytime(_ task: Row, today: String) -> Bool {
+    task["completed_at"].isNull && isActive(task, today: today) && !task["due"].isTruthy
+        && !task["deadline"].isTruthy && task["start"].isNull && !task["sector"].isTruthy
+}
+
+/// Anytime: undated tasks by project, in the sidebar's order.
+public func anytimeGroups(_ tasks: [Row], today: Day, labels: [Row], projects: [(id: String, path: String)],
+                          zone: TimeZone = .current) -> [ViewGroup] {
+    let listed = sorted(tasks.filter { inAnytime($0, today: today.description) }, compareTasks(.due, .asc, zone: zone))
+    return groupTasks(listed, by: .project, today: today, labels: labels, projects: projects, zone: zone)
+}
+
+/// "Today", "Yesterday", then the weekday and date, with the year outside this year.
+public func logbookHeading(_ day: Day, today: Day, locale: Locale = .current) -> String {
+    if day == today { return "Today" }
+    if day == today - 1 { return "Yesterday" }
+    let f = DateFormatter()
+    f.locale = locale
+    f.timeZone = .gmt
+    f.dateFormat = day.parts.year == today.parts.year ? "EEEE d MMMM" : "EEEE d MMMM y"
+    return f.string(from: Date(timeIntervalSince1970: Double(day.number) * 86_400))
+}
+
+/// The first limit completed tasks, newest first, under the day they were completed; and how many there are in all.
+/// The day follows the user's day start, so a 01:30 completion with a 04:00 start belongs to the day before.
+public func logbook(_ tasks: [Row], limit: Int, today: Day, dayStart: Int = 0, zone: TimeZone = .current)
+    -> (groups: [ViewGroup], total: Int) {
+    let done = tasks.filter { $0["completed_at"].number != nil && $0["deleted_at"].isNull }.sorted {
+        let (a, b) = ($0["completed_at"].number ?? 0, $1["completed_at"].number ?? 0)
+        return a != b ? a > b : bytesLess($0.id, $1.id)
+    }
+    var groups: [ViewGroup] = []
+    for task in done.prefix(max(0, limit)) {
+        let day = logicalToday(dayStart: dayStart, now: Date(ms: Int64(task["completed_at"].number ?? 0)), zone: zone)
+        if groups.last?.key == day.description {
+            groups[groups.count - 1].tasks.append(task)
+        } else {
+            groups.append(ViewGroup(key: day.description, heading: logbookHeading(day, today: today), tasks: [task]))
+        }
+    }
+    return (groups, done.count)
+}
+
+/// The Filter page: a query's matches by project, by due date. A query that doesn't parse gives its error.
+public func filterResults(_ query: String, _ ctx: FilterContext, _ candidates: [Row], labels: [Row],
+                          projects: [(id: String, path: String)]) -> ViewResult {
+    let found: (matches: [Row], count: Int, warnings: [String])
+    do {
+        found = try runQuery(query, ctx, candidates)
+    } catch {
+        return ViewResult(error: error.message)
+    }
+    return ViewResult(groups: groupTasks(sorted(found.matches, compareTasks(.due, .asc, zone: ctx.zone)), by: .project,
+                                         today: ctx.today, labels: labels, projects: projects, zone: ctx.zone),
+                      count: found.count, warnings: found.warnings)
+}
