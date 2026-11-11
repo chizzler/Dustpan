@@ -17,6 +17,12 @@ public let labelColours: [(hex: String, name: String)] = [
     ("#6366f1", "Indigo"), ("#8b5cf6", "Violet"), ("#ec4899", "Pink"), ("#64748b", "Slate"),
 ]
 
+/// The web app's eight project colours. A new project takes the first one no live project uses.
+public let projectColours: [(hex: String, name: String)] = [
+    ("#ef4444", "Red"), ("#f97316", "Orange"), ("#eab308", "Yellow"), ("#22c55e", "Green"),
+    ("#14b8a6", "Teal"), ("#3b82f6", "Blue"), ("#8b5cf6", "Violet"), ("#ec4899", "Pink"),
+]
+
 /// For matching: no case, no accents.
 func foldName(_ text: String) -> String {
     text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)

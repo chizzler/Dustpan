@@ -30,6 +30,19 @@ private func spot(_ parent: String? = nil, before: String? = nil, after: String?
         #expect([-30, 0, 11, 13, 30, 40].map { dropLevel($0, indent: 24) } == [-1, 0, 0, 1, 1, 2])
     }
 
+    /// The gaps either side of a task, at its own level, leave it where it is. Another level or gap moves it.
+    @Test func leavesInPlaceOnlyAtItsOwnGapAndLevel() {
+        for d in [drop(hit("b", .before), moving: "b"), drop(hit("a2", .after), moving: "b"), drop(hit("c", .before), moving: "b")] {
+            #expect(leavesInPlace(d, rows, moving: "b"))
+        }
+        #expect(!leavesInPlace(drop(hit("c", .after), moving: "b"), rows, moving: "b"))
+        #expect(!leavesInPlace(drop(hit("a2", .after), depth: 1, moving: "b"), rows, moving: "b"))  // into a, after a2
+        #expect(!leavesInPlace(drop(hit("a", .inside), moving: "b"), rows, moving: "b"))
+        // A subtask dragged out to the top level, from its own gap, moves.
+        #expect(leavesInPlace(drop(hit("a2", .before), depth: 1, moving: "a2"), rows, moving: "a2"))
+        #expect(!leavesInPlace(drop(hit("b", .before), depth: 0, moving: "a2"), rows, moving: "a2"))
+    }
+
     @Test func beforeAndAfterAtTheRowsLevel() {
         #expect(drop(hit("b", .before)).target == spot(before: "b"))
         #expect(drop(hit("a2", .before), depth: 1).target == spot("a", before: "a2"))

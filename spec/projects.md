@@ -31,6 +31,9 @@ and `sections.ts` (v0.18.0). Every action is one batch, as in [writes.md](writes
 - **Undo** puts back every field the action wrote, as a new batch. Undo of a delete clears the tombstone and puts the
   sub-projects back under it.
 
+On the Mac (0.8.6), only Create so far: the + on the sidebar's Projects heading, File ▸ New Project… (⌥⌘N), and
+New Sub-project… in a project's menu. `Writer.addProject` ports `add_project`; tests in `ProjectsTests.swift`.
+
 Archived projects are hidden from the sidebar, Move to, quick add's `#project`, and every task list.
 The sidebar lists them under "Archived", flat, with their path. Their page offers Unarchive.
 

@@ -89,7 +89,7 @@ private struct PlacedTaskRow: View {
     @Environment(AppModel.self) private var model
     let item: ListItem
     let list: DropList?
-    @State private var height: Double = 28
+    @State private var frame = CGRect.zero
 
     var body: some View {
         let task = item.node.row
@@ -100,7 +100,7 @@ private struct PlacedTaskRow: View {
             withAnimation { model.toggle(task) }
         }
         // Inside the drag: outside it, onGeometryChange breaks the List's clicks after a drag (macOS 27).
-        .onGeometryChange(for: Double.self) { $0.size.height } action: { height = $0 }
+        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
         .taskDrag(task, subtasks: openBelow(item.node), indent: indent)
         .overlay(alignment: .bottomLeading) {
             if let drop, drop.ring == nil, drop.prev == id { DropLine(depth: drop.depth) }
@@ -117,7 +117,7 @@ private struct PlacedTaskRow: View {
             }
         }
         .flashes(id)
-        .modifier(RowDrop(list: list, index: list?.slots.firstIndex(of: item.slot), height: height))
+        .modifier(RowDrop(list: list, index: list?.slots.firstIndex(of: item.slot), frame: frame))
         .labelPicker(for: task)
     }
 
@@ -136,12 +136,12 @@ private struct RowDrop: ViewModifier {
     @Environment(AppModel.self) private var model
     let list: DropList?
     let index: Int?
-    let height: Double
+    let frame: CGRect
 
     func body(content: Content) -> some View {
         if let list, let index {
-            content.onDrop(of: [.text], delegate: ListDrop(model: model, list: list) { y in
-                .row(index, dropZone(y, height: height))
+            content.onDrop(of: [.text], delegate: ListDrop(model: model, list: list, frame: frame) { y in
+                .row(index, dropZone(y, height: frame.height))
             })
         } else {
             content
@@ -161,16 +161,18 @@ private struct ListEndDrop: ViewModifier {
     @Environment(AppModel.self) private var model
     let list: DropList
     let hit: ListHit
+    @State private var frame = CGRect.zero
 
     func body(content: Content) -> some View {
         content
             .fullRowDropArea()
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
             .overlay(alignment: .topLeading) {
                 if case .end = hit, case .list(list.key, let drop) = model.dropMark, drop.ring == nil, drop.prev == nil, drop.next == nil {
                     DropLine(depth: 0)
                 }
             }
-            .onDrop(of: [.text], delegate: ListDrop(model: model, list: list) { _ in hit })
+            .onDrop(of: [.text], delegate: ListDrop(model: model, list: list, frame: frame) { _ in hit })
     }
 }
 

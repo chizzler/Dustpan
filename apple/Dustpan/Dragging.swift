@@ -19,15 +19,38 @@ struct TaskDrag: Equatable {
 struct ProjectDrag: Equatable {
     let projectId: String
     let below: Set<String>
+    /// Where it is now: its parent and the siblings either side.
+    var parentId: String?
+    var prev: String?
+    var next: String?
+
+    /// False when a drop would leave it where it is.
+    func moves(to place: ItemPlace) -> Bool {
+        guard place.parentId == parentId else { return true }
+        if let before = place.before { return before != next }
+        if let after = place.after { return after != prev }
+        return next != nil
+    }
 }
 
-/// A project row as a project drop sees it: its parent in the tree and its shown sub-projects.
+/// A project row as a project drop sees it: its parent in the tree and its shown sub-projects, and for its marks,
+/// its depth and the row below it.
 struct ProjectSpot {
     let id: String
     let parentId: String?
     let children: [String]
+    var depth = 0
+    var first = false
+    var next: (id: String, depth: Int)?
     var key: String { "project:\(id)" }
 }
+
+/// A sidebar project's indent per level, and the room its disclosure arrow takes.
+let projectIndent = 12.0
+let projectArrowWidth = 14.0
+
+/// Where a project row's label starts, at a depth.
+func projectLabelX(_ depth: Int) -> Double { Double(depth) * projectIndent + projectArrowWidth + 2 }
 
 /// What the window shows for the drop under the pointer.
 enum DropMark: Equatable {
@@ -61,16 +84,25 @@ struct DropList {
 struct ListDrop: DropDelegate {
     let model: AppModel
     let list: DropList
+    /// The row's frame in the window.
+    let frame: CGRect
     let hit: (_ y: Double) -> ListHit
 
+    /// Nil in the List's margin left of the row, and where the task already is.
     private func found(_ info: DropInfo) -> Drop? {
-        model.drag.map { list.resolve(hit(info.location.y), x: info.location.x, drag: $0) }
+        let local = pointer(in: frame) ?? info.location
+        guard local.x >= 0, let drag = model.drag else { return nil }
+        let drop = list.resolve(hit(local.y), x: local.x, drag: drag)
+        return leavesInPlace(drop, list.slots, moving: drag.taskId) ? nil : drop
     }
 
     func validateDrop(info: DropInfo) -> Bool { model.drag != nil }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        guard let drop = found(info) else { return DropProposal(operation: .forbidden) }
+        guard let drop = found(info) else {
+            model.unmark()
+            return DropProposal(operation: .forbidden)
+        }
         model.mark(.list(list.key, drop))
         return DropProposal(operation: .move)
     }
@@ -78,6 +110,7 @@ struct ListDrop: DropDelegate {
     func dropExited(info: DropInfo) { model.unmark() }
 
     func performDrop(info: DropInfo) -> Bool {
+        defer { model.endDrag() }
         guard let drag = model.drag, let drop = found(info) else { return false }
         model.drop(drag.taskId, on: drop.target)
         return true
@@ -94,11 +127,13 @@ struct TargetDrop: DropDelegate {
     func validateDrop(info: DropInfo) -> Bool { model.drag != nil }
 
     func dropEntered(info: DropInfo) {
+        guard model.drag != nil else { return }
         model.mark(.target(key))
         if let page { model.springLoad(page, from: key) }
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard model.drag != nil else { return DropProposal(operation: .forbidden) }
         model.mark(.target(key))
         return DropProposal(operation: .move)
     }
@@ -106,6 +141,7 @@ struct TargetDrop: DropDelegate {
     func dropExited(info: DropInfo) { model.unmark() }
 
     func performDrop(info: DropInfo) -> Bool {
+        defer { model.endDrag() }
         guard let drag = model.drag else { return false }
         model.drop(drag.taskId, on: target)
         return true
@@ -117,7 +153,8 @@ struct TargetDrop: DropDelegate {
 struct ProjectDrop: DropDelegate {
     let model: AppModel
     let spot: ProjectSpot
-    let height: Double
+    /// The row's frame in the window.
+    let frame: CGRect
 
     private var taskDrop: TargetDrop {
         TargetDrop(model: model, key: spot.key, target: .project(spot.id), page: .project(spot.id))
@@ -125,9 +162,13 @@ struct ProjectDrop: DropDelegate {
 
     private func found(_ info: DropInfo) -> (zone: Zone, place: ItemPlace)? {
         guard let drag = model.projectDrag else { return nil }
-        let zone = dropZone(info.location.y, height: height)
+        let local = pointer(in: frame) ?? info.location
+        // In the List's margin left of the row, the List would draw its own highlight: not a target.
+        guard local.x >= 0 else { return nil }
+        let zone = dropZone(local.y, height: frame.height)
+        // A place where it already is shows nothing: dropping there would change nothing.
         return placeItem(spot.id, parent: spot.parentId, children: spot.children, zone: zone,
-                         moving: drag.projectId, below: drag.below).map { (zone, $0) }
+                         moving: drag.projectId, below: drag.below).flatMap { drag.moves(to: $0) ? (zone, $0) : nil }
     }
 
     func validateDrop(info: DropInfo) -> Bool { model.projectDrag != nil || taskDrop.validateDrop(info: info) }
@@ -150,10 +191,21 @@ struct ProjectDrop: DropDelegate {
 
     func performDrop(info: DropInfo) -> Bool {
         guard let drag = model.projectDrag else { return taskDrop.performDrop(info: info) }
+        defer { model.endDrag() }
         guard let found = found(info) else { return false }
         model.placeProject(drag.projectId, at: found.place)
         return true
     }
+}
+
+/// The pointer in a view's own coordinates, from the view's frame in the window. DropInfo's location can't be used
+/// for this: in the List's margins beside a row, SwiftUI gives it in the List's coordinates.
+@MainActor func pointer(in frame: CGRect) -> CGPoint? {
+    guard frame != .zero, let window = NSApp.keyWindow ?? NSApp.mainWindow, let content = window.contentView else {
+        return nil
+    }
+    let p = content.convert(window.convertPoint(fromScreen: NSEvent.mouseLocation), from: nil)
+    return CGPoint(x: p.x - frame.minX, y: (content.isFlipped ? p.y : content.bounds.height - p.y) - frame.minY)
 }
 
 extension View {
@@ -165,6 +217,13 @@ extension View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(.rect)
             .listRowInsets(.vertical, 0)
+    }
+
+    /// A sidebar row's whole height takes the pointer. The row itself needs `.listRowInsets(.vertical, 0)`:
+    /// the sidebar reads row insets only on the row's outermost view, and it keeps its own row height, which
+    /// this fills. In an inset, the drop gets a meaningless location and the List shows its own highlight.
+    func sidebarDropArea() -> some View {
+        frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).contentShape(.rect)
     }
 
     /// A sidebar project row: dragged to reorder or nest it, and a target for tasks and other projects.
@@ -216,17 +275,21 @@ private struct TaskDragSource: ViewModifier {
     private func begin() -> String {
         if model.drag?.taskId != task.id {
             model.startDrag(task.id, grabX: model.hoverX)
-            endsOnMouseUp(model)
+            endsAfterMouseUp(model)
         }
         return task.id
     }
 }
 
-/// A drag is over when the mouse button is up.
-@MainActor private func endsOnMouseUp(_ model: AppModel) {
+/// A drop ends its drag. A drag let go anywhere else ends a moment after the mouse button is up: not at once,
+/// as the drop can arrive after mouse-up, and a drop that finds no drag is refused and slides back.
+/// (onDragSessionUpdated would say when, but doesn't fire for a List row's draggable, macOS 27.)
+@MainActor private func endsAfterMouseUp(_ model: AppModel) {
     Task {
         while NSEvent.pressedMouseButtons & 1 != 0 { try? await Task.sleep(for: .milliseconds(100)) }
-        model.endDrag()
+        try? await Task.sleep(for: .milliseconds(500))
+        // Pressed again: another drag may have begun.
+        if NSEvent.pressedMouseButtons & 1 == 0 { model.endDrag() }
     }
 }
 
@@ -234,38 +297,47 @@ private struct ProjectRowModifier: ViewModifier {
     @Environment(AppModel.self) private var model
     let spot: ProjectSpot
     let name: String
-    @State private var height: Double = 24
+    @State private var frame = CGRect.zero
 
     func body(content: Content) -> some View {
         content
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(.rect)
-            .onGeometryChange(for: Double.self) { $0.size.height } action: { height = $0 }
+            .sidebarDropArea()
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
             .draggable(begin()) {
                 DragPill(title: name, subtasks: 0)
             }
             .opacity(model.projectDrag?.projectId == spot.id ? 0.4 : 1)
-            .onDrop(of: [.text], delegate: ProjectDrop(model: model, spot: spot, height: height))
+            .onDrop(of: [.text], delegate: ProjectDrop(model: model, spot: spot, frame: frame))
             .background {
+                let mark = EdgeInsets(top: 1, leading: projectLabelX(spot.depth) - 4, bottom: 1, trailing: 1)
                 if model.dropMark == .target(spot.key) {
-                    RoundedRectangle(cornerRadius: 5).fill(.tint.opacity(0.25)).padding(-3)
+                    RoundedRectangle(cornerRadius: 5).fill(.tint.opacity(0.25)).padding(mark)
                 } else if model.dropMark == .item(spot.key, .inside) {
-                    RoundedRectangle(cornerRadius: 5).strokeBorder(.tint, lineWidth: 2).padding(-3)
+                    RoundedRectangle(cornerRadius: 5).strokeBorder(.tint, lineWidth: 2).padding(mark)
                 }
             }
-            .overlay(alignment: .top) {
-                if model.dropMark == .item(spot.key, .before) { DropLine(depth: 0).offset(y: -2) }
+            // One line per gap, at the level the project lands on: "before" the row below draws here, as "after".
+            .overlay(alignment: .topLeading) {
+                if spot.first, model.dropMark == .item(spot.key, .before) { line(spot.depth) }
             }
-            .overlay(alignment: .bottom) {
-                if model.dropMark == .item(spot.key, .after) { DropLine(depth: 0).offset(y: 2) }
+            .overlay(alignment: .bottomLeading) {
+                if model.dropMark == .item(spot.key, .after) {
+                    line(spot.children.isEmpty ? spot.depth : spot.depth + 1)
+                } else if let next = spot.next, model.dropMark == .item("project:\(next.id)", .before) {
+                    line(next.depth)
+                }
             }
+    }
+
+    private func line(_ depth: Int) -> some View {
+        DropLine(depth: 0).padding(.leading, projectLabelX(depth))
     }
 
     /// The drag's payload, as for tasks.
     private func begin() -> String {
         if model.projectDrag?.projectId != spot.id {
             model.startProjectDrag(spot.id)
-            endsOnMouseUp(model)
+            endsAfterMouseUp(model)
         }
         return spot.key
     }
@@ -299,7 +371,7 @@ private struct TargetDropModifier: ViewModifier {
             .onDrop(of: [.text], delegate: TargetDrop(model: model, key: key, target: target, page: page))
             .background {
                 if model.dropMark == .target(key) {
-                    RoundedRectangle(cornerRadius: 5).fill(.tint.opacity(0.25)).padding(-3)
+                    RoundedRectangle(cornerRadius: 5).fill(.tint.opacity(0.25)).padding(DropLine.rowMark)
                 }
             }
     }
@@ -328,6 +400,8 @@ struct DragPill: View {
 /// anything that crossed the boundary. Not shown with the nest ring, which already says where the task goes.
 struct DropLine: View {
     let depth: Int
+    /// Where a sidebar row's ring or fill sits: inside the row, so it isn't clipped, and just left of its icon.
+    static let rowMark = EdgeInsets(top: 1, leading: -4, bottom: 1, trailing: 1)
 
     var body: some View {
         HStack(spacing: 0) {

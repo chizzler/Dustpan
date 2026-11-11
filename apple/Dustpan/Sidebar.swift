@@ -14,17 +14,30 @@ struct Sidebar: View {
         let snap = model.snapshot
         List(selection: $model.page) {
             Label("Today", systemImage: "star")
+                .sidebarDropArea()
                 .taskDrop("today", .day(model.today))
                 .badge(todayCount(snap.tasks, today: model.today))
                 .tag(Page.today)
+                .listRowInsets(.vertical, 0)
             Label("Upcoming", systemImage: "calendar")
                 .tag(Page.upcoming)
             Label("Inbox", systemImage: "tray")
+                .sidebarDropArea()
                 .taskDrop("inbox", .project(nil), opens: .inbox)
                 .badge(countOpen(snap, nil, today: today))
                 .tag(Page.inbox)
-            Section("Projects") {
-                ProjectRows(nodes: snap.projects, parent: nil, today: today, collapsed: $collapsed)
+                .listRowInsets(.vertical, 0)
+            Section {
+                ProjectRows(nodes: snap.projects, today: today, collapsed: $collapsed)
+            } header: {
+                HStack {
+                    Text("Projects")
+                    Spacer()
+                    Button("New Project", systemImage: "plus") { model.newProject = ProjectDraft() }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                        .help("New project (⌥⌘N)")
+                }
             }
             LabelRows()
             Section {
@@ -83,55 +96,95 @@ struct Sidebar: View {
     }
 }
 
+/// A project row in the sidebar: the tree flattened in display order, as the task list does it.
+private struct ProjectLine: Identifiable {
+    let node: Node
+    let depth: Int
+    let parentId: String?
+    let index: Int
+    let siblings: Int
+    var id: String { node.id }
+}
+
+/// The project tree as plain List rows, indented and with their own disclosure arrows. An outline row's arrow
+/// and indent sit outside the row's view, where a drop gets a meaningless location and the List its own highlight.
 private struct ProjectRows: View {
     @Environment(AppModel.self) private var model
     let nodes: [Node]
-    let parent: String?
     let today: String
     @Binding var collapsed: Set<String>
 
     var body: some View {
-        ForEach(nodes.enumerated(), id: \.element.id) { index, node in
-            if node.children.isEmpty {
-                row(node, index: index)
-            } else {
-                DisclosureGroup(isExpanded: expanded(node.id)) {
-                    ProjectRows(nodes: node.children, parent: node.id, today: today, collapsed: $collapsed)
-                } label: {
-                    row(node, index: index)
-                }
-            }
+        let lines = flatten(nodes, depth: 0, parent: nil)
+        // By project id, not position: a row that moves keeps its identity, and its selection, in the List.
+        ForEach(lines.enumerated(), id: \.element.id) { i, line in
+            ProjectRow(line: line, first: i == 0, next: i + 1 < lines.count ? lines[i + 1] : nil, today: today,
+                       collapsed: $collapsed)
         }
     }
 
-    private func row(_ node: Node, index: Int) -> some View {
-        let name = node.row["name"].string ?? ""
-        let shown = collapsed.contains(node.id) ? [] : node.children.map(\.id)
-        return Label {
-            Text(name)
-        } icon: {
-            Image(systemName: "circle.fill")
-                .foregroundStyle(Color(hex: node.row["color"].string) ?? .secondary)
-                .imageScale(.small)
+    private func flatten(_ nodes: [Node], depth: Int, parent: String?) -> [ProjectLine] {
+        nodes.enumerated().flatMap { index, node in
+            [ProjectLine(node: node, depth: depth, parentId: parent, index: index, siblings: nodes.count)]
+                + (collapsed.contains(node.id) ? [] : flatten(node.children, depth: depth + 1, parent: node.id))
         }
+    }
+}
+
+private struct ProjectRow: View {
+    @Environment(AppModel.self) private var model
+    let line: ProjectLine
+    let first: Bool
+    let next: ProjectLine?
+    let today: String
+    @Binding var collapsed: Set<String>
+
+    var body: some View {
+        let node = line.node
+        let name = node.row["name"].string ?? ""
+        let open = !collapsed.contains(node.id)
+        let shown = open ? node.children.map(\.id) : []
+        HStack(spacing: 2) {
+            // A ZStack, not a Group: an empty Group is no view, so a leaf would lose the arrow's room.
+            ZStack {
+                if !node.children.isEmpty {
+                    Button(open ? "Collapse" : "Expand", systemImage: "chevron.right", action: toggle)
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .imageScale(.small)
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                }
+            }
+            .frame(width: projectArrowWidth)
+            Label {
+                Text(name)
+            } icon: {
+                Image(systemName: "circle.fill")
+                    .foregroundStyle(Color(hex: node.row["color"].string) ?? .secondary)
+                    .imageScale(.small)
+            }
+        }
+        .padding(.leading, Double(line.depth) * projectIndent)
         // Inside the drag: outside it, the badge breaks the List's clicks after a drag (macOS 27).
         .badge(countOpen(model.snapshot, node.id, today: today))
-        .projectRow(ProjectSpot(id: node.id, parentId: parent, children: shown), name: name)
+        .projectRow(ProjectSpot(id: node.id, parentId: line.parentId, children: shown, depth: line.depth, first: first,
+                                next: next.map { ($0.node.id, $0.depth) }), name: name)
         .tag(Page.project(node.id))
         .contextMenu {
             Button("Move Up") { model.moveProject(node.id, step: -1) }
-                .disabled(index == 0)
+                .disabled(line.index == 0)
             Button("Move Down") { model.moveProject(node.id, step: 1) }
-                .disabled(index == nodes.count - 1)
+                .disabled(line.index == line.siblings - 1)
+            Divider()
+            Button("New Sub-project…") { model.newProject = ProjectDraft(parentId: node.id) }
         }
+        .listRowInsets(.vertical, 0)
     }
 
-    private func expanded(_ id: String) -> Binding<Bool> {
-        Binding {
-            !collapsed.contains(id)
-        } set: { open in
-            if open { collapsed.remove(id) } else { collapsed.insert(id) }
-        }
+    private func toggle() {
+        let id = line.node.id
+        withAnimation { if collapsed.contains(id) { collapsed.remove(id) } else { collapsed.insert(id) } }
     }
 }
 
@@ -192,9 +245,11 @@ private struct LabelRows: View {
                 .foregroundStyle(Color(hex: label["color"].string) ?? .secondary)
                 .imageScale(.small)
         }
+        .sidebarDropArea()
         .taskDrop("label:\(label.id)", .label(label.id))
         .badge(count)
         .tag(Page.label(label.id))
+        .listRowInsets(.vertical, 0)
     }
 
     @ViewBuilder

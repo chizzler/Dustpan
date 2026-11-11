@@ -24,6 +24,12 @@ struct ViewDraft: Identifiable {
     var query = ""
 }
 
+/// A project being created, at the top level or under parentId.
+struct ProjectDraft: Identifiable {
+    let id = UUID()
+    var parentId: String?
+}
+
 /// A short message at the foot of the window, with Undo when the action can be undone.
 struct Toast: Identifiable, Equatable {
     let id = UUID()
@@ -59,6 +65,8 @@ final class AppModel {
     var editing: Row?
     /// The saved view open in its editor.
     var editingView: ViewDraft?
+    /// The project being created.
+    var newProject: ProjectDraft?
     /// The label open in its editor.
     var editingLabel: LabelDraft?
     /// The task whose row shows the label picker.
@@ -329,6 +337,11 @@ final class AppModel {
         }) { _ in tasks.count == 1 ? "Deleted “\(first["title"].string ?? "")”" : "Deleted \(tasks.count) tasks" }
     }
 
+    /// Create a project and show it.
+    func addProject(_ name: String, under parentId: String?) throws {
+        page = .project(try apply { try $0.addProject(name, under: parentId) })
+    }
+
     /// Create a view and show it, or edit one.
     func saveView(_ view: Row?, _ edit: ViewEdit) throws {
         if let view {
@@ -505,20 +518,31 @@ final class AppModel {
     }
 
     func startProjectDrag(_ projectId: String) {
-        func find(_ nodes: [Node]) -> Node? {
-            for node in nodes { if let hit = node.id == projectId ? node : find(node.children) { return hit } }
+        /// The project, its parent and its siblings.
+        func find(_ nodes: [Node], under parent: String?) -> (Node, String?, [Node])? {
+            for node in nodes {
+                if node.id == projectId { return (node, parent, nodes) }
+                if let hit = find(node.children, under: node.id) { return hit }
+            }
             return nil
         }
         func ids(_ nodes: [Node]) -> [String] { nodes.flatMap { [$0.id] + ids($0.children) } }
-        projectDrag = ProjectDrag(projectId: projectId, below: Set(ids(find(snapshot.projects)?.children ?? [])))
+        guard let (node, parent, siblings) = find(snapshot.projects, under: nil),
+              let index = siblings.firstIndex(where: { $0.id == projectId }) else {
+            projectDrag = ProjectDrag(projectId: projectId, below: [])
+            return
+        }
+        projectDrag = ProjectDrag(projectId: projectId, below: Set(ids(node.children)), parentId: parent,
+                                  prev: index > 0 ? siblings[index - 1].id : nil,
+                                  next: index + 1 < siblings.count ? siblings[index + 1].id : nil)
     }
 
     func endDrag() {
+        dropMark = nil
+        spring?.cancel()
         guard drag != nil || projectDrag != nil else { return }
         drag = nil
         projectDrag = nil
-        dropMark = nil
-        spring?.cancel()
         if syncAfterDrag {
             syncAfterDrag = false
             Task { await sync() }

@@ -298,6 +298,25 @@ the Swift code already used for a project and section), and `Writer.drop` ports 
   pointer as below itself: a third indicator, and drops that landed one slot off. A drop line stays inside one row's
   padding (the next row draws over anything that crosses the boundary), and the nest ring just inside the row,
   from the task's own indent, so it sits the same distance from the check circle at every level.
+- **Sidebar rows too** (Mac 0.8.6): the sidebar keeps its own row height, so a row fills it (`sidebarDropArea`), and
+  `.listRowInsets(.vertical, 0)` goes on the row's outermost view, the only place the sidebar reads it. In the inset,
+  the drop's location was meaningless (y = 136 in a 25-point row), which read as "after" at the top of every row.
+- **The pointer's place in a row comes from the mouse and the row's frame**, not `DropInfo.location`: in the List's
+  margin left of a row (16 points in the sidebar), SwiftUI gives the location in the List's coordinates. That margin
+  takes no drop at all; accepting one there drew the List's highlight. (Mac 0.8.7.)
+- **A spot that leaves the item where it is shows nothing** and takes no drop (`leavesInPlace` for tasks,
+  `ProjectDrag.moves(to:)` for projects): the gaps either side of it at its own level. Another level still moves it.
+- **The sidebar's projects are plain rows**, indented and with their own disclosure arrows, like the task list: an
+  outline row's arrow and indent sit outside the row's view. Each gap gets one line: "before" the row below is drawn
+  at the bottom of the row above, like "after" it, indented to the level the project lands on. ← and → no longer
+  fold projects. Rows are keyed by project id, so a moved project keeps its List row and its selection. (Mac 0.8.8.)
+- **A drop ends its drag**, and a drag let go elsewhere ends 500 ms after mouse-up. Ending at mouse-up raced the
+  drop: a drop that found no drag was refused and its preview slid back. About 350 ms after a drop, while the preview
+  fades, one more `dropUpdated` arrives, so a target marks nothing unless a drag of its kind is on, and ending a drag
+  always clears the mark. `onDragSessionUpdated` doesn't fire for a List row's `draggable` (macOS 27). (Mac 0.8.8.)
+- **The drop animation is the system's.** An accepted drop glides the preview onto the pointer and fades it; we
+  keep it rather than fake a preview or own the gesture, for the iPhone app's sake. `onMove` rows (labels, views)
+  settle into place instead, because the List owns those drops.
 - **The ring shows alone.** Nesting has a place among the children too, but the ring already says where the task
   goes, so no line goes with it.
 - **Autoscroll** is whatever the system list does during a drag. Not written by hand.

@@ -867,6 +867,34 @@ extension Writer {
         return found
     }
 
+    /// A project, last at the top level or under parentId, in the first colour no live project uses. Returns its id.
+    @discardableResult
+    public func addProject(_ name: String, under parentId: String? = nil, color: String? = nil) throws -> String {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw CannotEdit("A project needs a name") }
+        let projectId = newId()
+        try commit {
+            let projects = try store.rows("project")
+            if let parentId {
+                guard let parent = projects[parentId], isLive(parent), !parent["archived"].isTruthy else {
+                    throw CannotEdit("That parent project no longer exists")
+                }
+            }
+            let live = projects.values.filter(isLive)
+            let used = Set(live.compactMap { $0["color"].string })
+            let now = now()
+            // Last among its siblings: the web app's rule, + 1 rather than a gap.
+            let last = live.filter { $0["parent_id"].string == parentId }.compactMap { $0["position"].number }.max()
+            return [Change("project", projectId, [
+                "name": .string(name),
+                "color": .string(color ?? projectColours.first { !used.contains($0.hex) }?.hex ?? projectColours[0].hex),
+                "position": position(max(Double(now), (last ?? 0) + 1)), "archived": false,
+                "parent_id": parentId.map(JSON.string) ?? nil, "created_at": .int(now), "deleted_at": nil,
+            ])]
+        }
+        return projectId
+    }
+
     /// Put a project under parentId (nil: the top level), right before or after a sibling, or last.
     /// One batch: the parent when it changes, and the positions. Never under itself or below it.
     public func placeProject(_ projectId: String, under parentId: String?, before: String? = nil,

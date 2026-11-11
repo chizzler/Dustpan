@@ -146,6 +146,14 @@ public func resolveDrop(_ rows: [Slot], projectId: String?, sectionId: String?, 
     return dropAtGap(kept, projectId: projectId, sectionId: sectionId, gap: gap, depth: depth)
 }
 
+/// True when drop would leave moving where it is: the gap it left, at its own level. Such a spot shows nothing.
+public func leavesInPlace(_ drop: Drop, _ rows: [Slot], moving: String) -> Bool {
+    let (kept, at) = withoutSubtree(rows, moving)
+    guard drop.ring == nil, let at, let slot = rows.first(where: { $0.id == moving }) else { return false }
+    return drop.depth == slot.depth && drop.prev == (at > 0 ? kept[at - 1].id : nil)
+        && drop.next == (at < kept.count ? kept[at].id : nil)
+}
+
 /// The open rows of a task tree in display order, as Slots. Completed rows hold only completed children.
 public func openSlots(_ nodes: [Node], depth: Int = 0, parent: String? = nil) -> [Slot] {
     nodes.filter { $0.row["completed_at"].isNull }.flatMap { node in

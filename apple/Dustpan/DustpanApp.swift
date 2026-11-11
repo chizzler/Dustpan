@@ -18,6 +18,9 @@ struct DustpanApp: App {
                 Button("New View…") { model.editingView = ViewDraft() }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
                     .disabled(model.setupProblem != nil)
+                Button("New Project…") { model.newProject = ProjectDraft() }
+                    .keyboardShortcut("n", modifiers: [.command, .option])
+                    .disabled(model.setupProblem != nil)
             }
             CommandGroup(after: .toolbar) {
                 Toggle("Outline Task List (Spike)", isOn: $outlineSpike)
