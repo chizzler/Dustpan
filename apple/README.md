@@ -59,7 +59,9 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `Dustpan/` | The Mac app: window, sidebar, task list, editor, notifications |
 | `Dustpan/Dragging.swift` | Drag sources, drop delegates, the drop line, the drag pill, the flash |
 | `Dustpan/NoteView.swift` | A note's blocks, formatted. `NotesEditor.swift`: the editor's Write and Preview |
-| `Dustpan/ProjectEditor.swift` | A project's name, colour and parent, with Archive and Delete. `SectionEditor` names sections; `ArchivedPage` offers Unarchive |
+| `Dustpan/ProjectEditor.swift` | A project's name, colour and parent, with Archive and Delete |
+| `Dustpan/SectionEditor.swift` | Names a new section, or renames one |
+| `Dustpan/ArchivedPage.swift` | An archived project's page: Unarchive or Delete |
 | `Dustpan/MoveCommands.swift` | Edit ▸ Move Up to Outdent, for whichever list has the focus (`ListMoves` in `Moves.swift`) |
 | `Dustpan/OutlineTaskList.swift` | Spike: project and Inbox lists on AppKit's `NSOutlineView` (View ▸ Outline Task List) |
 
