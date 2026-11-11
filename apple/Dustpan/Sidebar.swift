@@ -7,6 +7,7 @@ struct Sidebar: View {
     @State private var collapsed: Set<String> = []
     @State private var deleting: Row?
     @State private var confirmsDelete = false
+    @FocusState private var focused: Bool
 
     var body: some View {
         @Bindable var model = model
@@ -78,6 +79,9 @@ struct Sidebar: View {
             }
         }
         .navigationSplitViewColumnWidth(min: 180, ideal: 230)
+        // A project row's drag takes the click, so the list doesn't take the focus by itself.
+        .focused($focused)
+        .onChange(of: model.page) { focused = true }
         .focusedValue(\.listMoves, moves)
         .confirmationDialog("Delete view “\(deleting?["name"].string ?? "")”?", isPresented: $confirmsDelete,
                             presenting: deleting) { view in

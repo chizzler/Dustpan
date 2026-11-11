@@ -191,6 +191,7 @@ private struct TaskMenus: ViewModifier {
     @Environment(AppModel.self) private var model
     @Binding var selection: Set<String>
     let lists: [DropList]
+    @FocusState private var focused: Bool
 
     func body(content: Content) -> some View {
         content.contextMenu(forSelectionType: String.self) { ids in
@@ -228,6 +229,9 @@ private struct TaskMenus: ViewModifier {
         } primaryAction: { ids in
             model.editing = ids.first.flatMap { model.snapshot.allTasks[$0] }
         }
+        // A row's drag takes the click, so the list doesn't take the focus by itself.
+        .focused($focused)
+        .onChange(of: selection) { if !selection.isEmpty { focused = true } }
         .focusedValue(\.listMoves, moves)
         .onKeyPress(characters: ["l", "L"], phases: .down) { _ in
             guard let id = selected else { return .ignored }
