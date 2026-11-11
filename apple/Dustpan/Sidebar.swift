@@ -49,8 +49,10 @@ struct Sidebar: View {
                         .contextMenu {
                             Button("Edit View…") { model.editingView = ViewDraft(view: view) }
                             Button("Move Up") { model.moveView(view, step: -1) }
+                                .keyboardShortcut(Nudge.up.shortcut)
                                 .disabled(index == 0)
                             Button("Move Down") { model.moveView(view, step: 1) }
+                                .keyboardShortcut(Nudge.down.shortcut)
                                 .disabled(index == snap.views.count - 1)
                             Divider()
                             Button("Delete View…", role: .destructive) {
@@ -76,17 +78,7 @@ struct Sidebar: View {
             }
         }
         .navigationSplitViewColumnWidth(min: 180, ideal: 230)
-        .onKeyPress(keys: [.upArrow, .downArrow]) { press in
-            guard press.modifiers == .option else { return .ignored }
-            let step = press.key == .upArrow ? -1 : 1
-            switch model.page {
-            case .project(let id): model.moveProject(id, step: step)
-            case .view(let id): if let view = snap.views.first(where: { $0.id == id }) { model.moveView(view, step: step) }
-            case .label(let id): if let label = snap.labels[id] { model.moveLabel(label, step: step) }
-            default: return .ignored
-            }
-            return .handled
-        }
+        .focusedValue(\.listMoves, moves)
         .confirmationDialog("Delete view “\(deleting?["name"].string ?? "")”?", isPresented: $confirmsDelete,
                             presenting: deleting) { view in
             Button("Delete View", role: .destructive) { model.deleteView(view) }
@@ -94,6 +86,37 @@ struct Sidebar: View {
             Text("The view goes from every device. Your tasks stay.")
         }
     }
+}
+
+extension Sidebar {
+    /// Move Up and Move Down for the selected project, view or label, among its siblings.
+    private var moves: ListMoves? {
+        let snap = model.snapshot
+        let (index, count, step): (Int?, Int, (Int) -> Void)
+        switch model.page {
+        case .project(let id):
+            let siblings = siblingProjects(id, snap.projects)
+            (index, count, step) = (siblings.firstIndex { $0.id == id }, siblings.count, { model.moveProject(id, step: $0) })
+        case .view(let id):
+            guard let view = snap.views.first(where: { $0.id == id }) else { return nil }
+            (index, count, step) = (snap.views.firstIndex { $0.id == id }, snap.views.count, { model.moveView(view, step: $0) })
+        case .label(let id):
+            guard let label = snap.labels[id] else { return nil }
+            let labels = snap.labelsInOrder
+            (index, count, step) = (labels.firstIndex { $0.id == id }, labels.count, { model.moveLabel(label, step: $0) })
+        default: return nil
+        }
+        guard let index else { return nil }
+        return ListMoves(can: { $0 == .up ? index > 0 : $0 == .down && index < count - 1 }) { move in
+            if move == .up || move == .down { step(move == .up ? -1 : 1) }
+        }
+    }
+}
+
+/// The projects beside projectId, itself included.
+private func siblingProjects(_ projectId: String, _ nodes: [Node]) -> [Node] {
+    if nodes.contains(where: { $0.id == projectId }) { return nodes }
+    return nodes.lazy.map { siblingProjects(projectId, $0.children) }.first { !$0.isEmpty } ?? []
 }
 
 /// A project row in the sidebar: the tree flattened in display order, as the task list does it.
@@ -173,8 +196,10 @@ private struct ProjectRow: View {
         .tag(Page.project(node.id))
         .contextMenu {
             Button("Move Up") { model.moveProject(node.id, step: -1) }
+                .keyboardShortcut(Nudge.up.shortcut)
                 .disabled(line.index == 0)
             Button("Move Down") { model.moveProject(node.id, step: 1) }
+                .keyboardShortcut(Nudge.down.shortcut)
                 .disabled(line.index == line.siblings - 1)
             Divider()
             Button("New Sub-project…") { model.newProject = ProjectDraft(parentId: node.id) }
@@ -256,8 +281,10 @@ private struct LabelRows: View {
     private func menu(_ label: Row, index: Int, labels: [Row]) -> some View {
         Button("Edit Label…") { model.editingLabel = LabelDraft(label: label) }
         Button("Move Up") { model.moveLabel(label, step: -1) }
+            .keyboardShortcut(Nudge.up.shortcut)
             .disabled(index == 0)
         Button("Move Down") { model.moveLabel(label, step: 1) }
+            .keyboardShortcut(Nudge.down.shortcut)
             .disabled(index == labels.count - 1)
         Menu("Merge Into") {
             ForEach(labels.filter { $0.id != label.id }) { target in

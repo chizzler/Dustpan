@@ -577,7 +577,8 @@ final class AppModel {
     }
 
     /// Apply a drop as one batch with Undo, then flash the task where it landed.
-    func drop(_ taskId: String, on target: DropTarget) {
+    /// A move by key or menu (named) has Edit ▸ Undo and no toast, as the sidebar's moves do.
+    func drop(_ taskId: String, on target: DropTarget, named name: String? = nil) {
         spring?.cancel()
         guard let task = snapshot.allTasks[taskId] else { return }
         let names = dropNames(target, task)
@@ -585,9 +586,8 @@ final class AppModel {
             show(Toast(message: "Already has @\(names[id] ?? "")"))
             return
         }
-        let done = undoable("Move", { try $0.drop(taskId, on: target) }) { _ in
-            describeDrop(target, task: task, names: names) { formatDay($0) }
-        }
+        let message: (Done) -> String = { _ in describeDrop(target, task: task, names: names) { formatDay($0) } }
+        let done = undoable(name ?? "Move", { try $0.drop(taskId, on: target) }, message: name == nil ? message : nil)
         guard done != nil else { return }
         flash = taskId
         Task {

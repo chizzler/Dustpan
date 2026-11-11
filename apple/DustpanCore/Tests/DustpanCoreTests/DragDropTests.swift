@@ -159,6 +159,46 @@ private func spot(_ parent: String? = nil, before: String? = nil, after: String?
     }
 }
 
+/// Keyboard moves: the port of test_dragdrop.py's NudgeTest.
+@Suite struct NudgeTests {
+    private func move(_ id: String, _ how: Nudge) -> Placement? {
+        nudge(rows, projectId: "p1", sectionId: "s1", taskId: id, how)
+    }
+
+    private func spot(_ parent: String? = nil, before: String? = nil, after: String? = nil) -> Placement {
+        Placement("p1", "s1", parent: parent, before: before, after: after)
+    }
+
+    @Test func upAndDownAmongSiblings() {
+        #expect(move("b", .up) == spot(before: "a"))
+        #expect(move("b", .down) == spot(after: "c"))
+        #expect(move("a2", .up) == spot("a", before: "a1"))
+    }
+
+    @Test func topAndBottom() {
+        #expect(move("c", .top) == spot(before: "a"))
+        #expect(move("a", .bottom) == spot(after: "c"))
+    }
+
+    /// The first task and ⌥↑: nothing changes.
+    @Test func nothingAtTheEdges() {
+        let cases: [(String, Nudge)] = [("a", .up), ("a", .top), ("c", .down), ("c", .bottom), ("a2", .down),
+                                        ("a1x", .up), ("a", .indent), ("a1", .indent), ("b", .outdent), ("gone", .up)]
+        for (id, how) in cases { #expect(move(id, how) == nil, "\(id) \(how)") }
+    }
+
+    /// The last subtask of the task above at its level, which may have subtasks already.
+    @Test func indentUnderTheSiblingAbove() {
+        #expect(move("b", .indent) == spot("a"))
+        #expect(move("a2", .indent) == spot("a1"))
+    }
+
+    @Test func outdentRightAfterTheOldParent() {
+        #expect(move("a1x", .outdent) == spot("a", after: "a1"))
+        #expect(move("a1", .outdent) == spot(after: "a"))
+    }
+}
+
 /// Writer.drop: the ports of test_writes.py's drop tests and test_labels.py's label drops.
 @Suite struct DropWriteTests {
     let store: Store

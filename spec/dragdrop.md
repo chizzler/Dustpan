@@ -2,7 +2,7 @@
 
 Slice 6. Drag a task to change where it lives: its place in a list, its parent, its section, its project, its date or its labels.
 Status: designed 2026-11-01. 6a built 2026-11-01, tried and approved. 6b built 2026-11-01, tried and approved. 6c partly built: the sidebar, 2026-11-02.
-The Mac client's slice 6a (2026-11-06) follows the same rules; see "On the Mac" at the end.
+The Mac client's slices 6a (2026-11-06) and 6b (2026-11-11) follow the same rules; see "On the Mac" at the end.
 
 ## What slice 5 had
 
@@ -338,9 +338,24 @@ drag and drop. Whether the task list moves to it is still open.
   along the row's top or bottom edge or a ring to nest. Over itself or its own sub-projects it's refused.
 - **Views and labels** reorder with SwiftUI's `onMove`, which is flat and enough for them. Labels already did.
 - **Without a pointer:** Move Up and Move Down in each project's and view's menu, as labels have, and ⌥↑ ⌥↓ on the
-  selected project, view or label. A project's parent changes by drag only: the Mac has no project editor yet.
+  selected project, view or label (through Edit ▸ Move Up and Move Down since Mac 0.9.0; see 6b below). A project's parent changes by drag only: the Mac has no project editor yet.
 - Writes: `Writer.placeProject`, `moveProject` and `moveView`; labels share their helpers. Tests: `SidebarOrderTests.swift`.
 - A project drop toasts as the desktop's does. Moves by menu, key or `onMove` have Edit ▸ Undo and no toast, as labels had.
 
-Escape and drops outside a target cancel, as before. Calendar targets don't exist on the Mac yet; 6b (keys and
-the row menu's moves) comes later.
+Escape and drops outside a target cancel, as before. Calendar targets don't exist on the Mac yet.
+
+**6b, without a pointer** (Mac 0.9.0, 2026-11-11). `nudge` in `DragDrop.swift` is the desktop's, with its tests;
+every key and menu move ends in `Writer.drop`, as a drag does.
+- **Keys, Mac style:** ⌥↑ ⌥↓ move a task among its siblings, ⇧⌥↑ ⇧⌥↓ to the top or bottom, ⌘] indents (the last
+  subtask of the task above) and ⌘[ outdents (right after its old parent). The desktop's Tab and Shift+Tab would trap
+  the Mac's focus in the list, so they're the Mac's usual indent keys instead. C completes or reopens, L picks labels,
+  Return or a double-click opens the editor, Delete deletes, Esc clears the selection. ↑ ↓ are the List's own.
+- **They're Edit menu commands** (Edit ▸ Move Up to Outdent), fed by the focused list through a focused value
+  (`ListMoves`). A List's table takes ⌥↑ and ⌥↓ itself (it jumps to the first or last row) before `onKeyPress` sees
+  them; menu key equivalents come first. The sidebar's ⌥↑ ⌥↓ go the same way: before 0.9.0 they only moved the
+  selection. Moves that can't go anywhere are greyed out, and the key then does nothing.
+- **The row menu:** Edit…, Complete, Labels…; the six moves with their keys shown, greyed where they can't go;
+  Due Today, Due Tomorrow and Move To (the Inbox, or any project, with a submenu of sections); Delete.
+  The moves show on project and Inbox pages only, as on the desktop; Due and Move To on every page. Open tasks only.
+- **Feedback:** the task stays selected and comes into view, with the flash. Key and menu moves have Edit ▸ Undo
+  and no toast, as the sidebar's do; Due and Move To toast as a drop does.

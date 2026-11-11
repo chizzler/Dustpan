@@ -78,6 +78,10 @@ struct DropList {
         resolveDrop(slots, projectId: projectId, sectionId: sectionId, hit: hit,
                     depth: dropLevel(x - drag.grabX, indent: indentWidth), moving: drag.taskId)
     }
+
+    func nudge(_ taskId: String, _ move: Nudge) -> Placement? {
+        DustpanCore.nudge(slots, projectId: projectId, sectionId: sectionId, taskId: taskId, move)
+    }
 }
 
 /// A row, a heading or the Add field of a list: hit decides what the pointer is over from its local y.

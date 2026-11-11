@@ -154,6 +154,34 @@ public func leavesInPlace(_ drop: Drop, _ rows: [Slot], moving: String) -> Bool 
         && drop.next == (at < kept.count ? kept[at].id : nil)
 }
 
+/// A move by key or menu, without a pointer.
+public enum Nudge: CaseIterable, Sendable { case up, down, top, bottom, indent, outdent }
+
+/// The Placement a keyboard move gives a task in one list, or nil when it can't go that way.
+///
+/// Up, down, top and bottom stay among its siblings, as the web app's Alt+arrows do. Indent makes it the last
+/// subtask of the sibling above. Outdent puts it right after its old parent, where dragging it left would.
+public func nudge(_ rows: [Slot], projectId: String?, sectionId: String?, taskId: String, _ move: Nudge) -> Placement? {
+    guard let slot = rows.first(where: { $0.id == taskId }) else { return nil }
+    let siblings = rows.filter { $0.parentId == slot.parentId && $0.depth == slot.depth }
+    guard let i = siblings.firstIndex(of: slot) else { return nil }
+    let last = siblings.count - 1
+    func place(_ parent: String? = slot.parentId, before: String? = nil, after: String? = nil) -> Placement {
+        Placement(projectId, sectionId, parent: parent, before: before, after: after)
+    }
+    switch move {
+    case .up where i > 0: return place(before: siblings[i - 1].id)
+    case .down where i < last: return place(after: siblings[i + 1].id)
+    case .top where i > 0: return place(before: siblings[0].id)
+    case .bottom where i < last: return place(after: siblings[last].id)
+    case .indent where i > 0: return place(siblings[i - 1].id)
+    case .outdent:
+        guard let parent = rows.first(where: { $0.id == slot.parentId }) else { return nil }
+        return place(parent.parentId, after: parent.id)
+    default: return nil
+    }
+}
+
 /// The open rows of a task tree in display order, as Slots. Completed rows hold only completed children.
 public func openSlots(_ nodes: [Node], depth: Int = 0, parent: String? = nil) -> [Slot] {
     nodes.filter { $0.row["completed_at"].isNull }.flatMap { node in

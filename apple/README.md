@@ -57,6 +57,7 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `DustpanCore/Sources/dustpan-cli/` | `sync` and `tree`, for checking against the desktop client |
 | `Dustpan/` | The Mac app: window, sidebar, task list, editor, notifications |
 | `Dustpan/Dragging.swift` | Drag sources, drop delegates, the drop line, the drag pill, the flash |
+| `Dustpan/MoveCommands.swift` | Edit ▸ Move Up to Outdent, for whichever list has the focus (`ListMoves` in `Moves.swift`) |
 | `Dustpan/OutlineTaskList.swift` | Spike: project and Inbox lists on AppKit's `NSOutlineView` (View ▸ Outline Task List) |
 
 The tests read OpenTodo's vectors from the clone beside this repo (`../opentodo`, or `OPENTODO_SRC`), and skip them without it.
@@ -92,6 +93,7 @@ Before 1.0 the minor number follows the Mac client's own slices.
 
 | Version | Date | What |
 | --- | --- | --- |
+| 0.9.0 | 2026-11-11 | Slice 6b, moves without a pointer: ⌥↑ ⌥↓, ⇧⌥↑ ⇧⌥↓, ⌘] and ⌘[ on the selected task, from Edit ▸ Move Up to Outdent and the row menu, which also gains Due Today, Due Tomorrow and Move To. C completes. The sidebar's ⌥↑ ⌥↓ now move the selected project, view or label instead of the selection. |
 | 0.8.8 | 2026-11-11 | Sidebar drags: no sticky blue highlight after a drop, and no refused drop sliding back (a drop no longer races the drag's end). Leaf projects line up with their siblings, and a moved project keeps its selection. |
 | 0.8.7 | 2026-11-09 | Dragging: one line per gap in the sidebar, at the level the project lands on; no List highlight over the disclosure arrows or the left margin; and no indicator where a drop would leave the item where it is. Refused spots clear the line. The sidebar draws its project tree itself; ← and → no longer fold it. |
 | 0.8.6 | 2026-11-09 | New Project: the + on the sidebar's Projects heading, File ▸ New Project… (⌥⌘N), and New Sub-project… in a project's menu. Sidebar drags get the task list's fixes: no flicker to "after" at the top of a row, and no List highlight in the row's inset. |

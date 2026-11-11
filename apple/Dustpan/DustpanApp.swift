@@ -22,6 +22,10 @@ struct DustpanApp: App {
                     .keyboardShortcut("n", modifiers: [.command, .option])
                     .disabled(model.setupProblem != nil)
             }
+            CommandGroup(after: .pasteboard) {
+                Divider()
+                MoveCommands()
+            }
             CommandGroup(after: .toolbar) {
                 Toggle("Outline Task List (Spike)", isOn: $outlineSpike)
                 Button("Sync Now") { Task { await model.sync() } }

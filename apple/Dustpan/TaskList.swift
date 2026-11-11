@@ -11,13 +11,15 @@ struct TaskList: View {
     var body: some View {
         let (title, projectId) = model.listHeading(page)
         let sections = projectSections(model.snapshot, projectId)
+        let lists = sections.map { section in
+            section.isList ? DropList(projectId: projectId, sectionId: section.id, slots: openSlots(section.tasks)) : nil
+        }
         ScrollViewReader { proxy in
             List(selection: $selection) {
-                ForEach(sections.enumerated(), id: \.offset) { _, section in
+                ForEach(sections.enumerated(), id: \.offset) { index, section in
                     let place = Place(projectId: projectId, sectionId: section.id)
                     let items = flatten(section.tasks, depth: 0, parent: nil)
-                    let list = section.isList ? DropList(projectId: projectId, sectionId: section.id,
-                                                         slots: openSlots(section.tasks)) : nil
+                    let list = lists[index]
                     if section.name.isEmpty {
                         rows(items, list)
                         addRow(place, section, list)
@@ -37,7 +39,7 @@ struct TaskList: View {
                 withAnimation { proxy.scrollTo(id) }
             }
         }
-        .taskMenus(selection: $selection)
+        .taskMenus(selection: $selection, lists: lists.compactMap { $0 })
         .navigationTitle(title)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
@@ -178,24 +180,44 @@ private struct ListEndDrop: ViewModifier {
 
 extension View {
     /// The row menu, double-click and keys of a list of tasks, keyed by task id.
-    /// L opens the label picker on the selected task; Delete deletes the selection; Esc clears it.
-    func taskMenus(selection: Binding<Set<String>>) -> some View { modifier(TaskMenus(selection: selection)) }
+    /// L opens the label picker on the selected task, C completes or reopens it; Delete deletes the selection;
+    /// Esc clears it. lists: a project page's lists, whose tasks can also be moved by key and menu.
+    func taskMenus(selection: Binding<Set<String>>, lists: [DropList] = []) -> some View {
+        modifier(TaskMenus(selection: selection, lists: lists))
+    }
 }
 
 private struct TaskMenus: ViewModifier {
     @Environment(AppModel.self) private var model
     @Binding var selection: Set<String>
+    let lists: [DropList]
 
     func body(content: Content) -> some View {
         content.contextMenu(forSelectionType: String.self) { ids in
             let tasks = ids.compactMap { model.snapshot.allTasks[$0] }
             if let task = tasks.first, tasks.count == 1 {
+                let open = task["completed_at"].isNull
                 Button("Edit…") { model.editing = task }
-                Button(task["completed_at"].isNull ? "Complete" : "Reopen") { model.toggle(task) }
-                if task["recurrence"].isTruthy && task["completed_at"].isNull {
+                Button(open ? "Complete" : "Reopen") { model.toggle(task) }
+                if task["recurrence"].isTruthy && open {
                     Button("Skip to Next Occurrence") { model.skip(task) }
                 }
                 Button("Labels…") { model.labelling = task.id }
+                if open {
+                    if let list = list(of: task.id) {
+                        Divider()
+                        ForEach(Nudge.allCases, id: \.self) { move in
+                            let place = list.nudge(task.id, move)
+                            Button(move.title) { if let place { model.drop(task.id, on: .place(place), named: move.title) } }
+                                .keyboardShortcut(move.shortcut)
+                                .disabled(place == nil)
+                        }
+                    }
+                    Divider()
+                    Button("Due Today") { model.drop(task.id, on: .day(model.today)) }
+                    Button("Due Tomorrow") { model.drop(task.id, on: .day(model.today + 1)) }
+                    MoveToMenu(taskId: task.id)
+                }
                 Divider()
             }
             if !tasks.isEmpty {
@@ -206,17 +228,40 @@ private struct TaskMenus: ViewModifier {
         } primaryAction: { ids in
             model.editing = ids.first.flatMap { model.snapshot.allTasks[$0] }
         }
+        .focusedValue(\.listMoves, moves)
         .onKeyPress(characters: ["l", "L"], phases: .down) { _ in
-            guard selection.count == 1, let id = selection.first, model.snapshot.allTasks[id] != nil else {
-                return .ignored
-            }
+            guard let id = selected else { return .ignored }
             model.labelling = id
+            return .handled
+        }
+        .onKeyPress(characters: ["c", "C"], phases: .down) { _ in
+            guard let task = selected.flatMap({ model.snapshot.allTasks[$0] }) else { return .ignored }
+            withAnimation { model.toggle(task) }
             return .handled
         }
         .onDeleteCommand {
             model.delete(selection.compactMap { model.snapshot.allTasks[$0] })
         }
         .onExitCommand { selection = [] }
+    }
+
+    /// The one selected task's id.
+    private var selected: String? {
+        guard selection.count == 1, let id = selection.first, model.snapshot.allTasks[id] != nil else { return nil }
+        return id
+    }
+
+    /// The selected task's moves, on a project page.
+    private var moves: ListMoves? {
+        guard let id = selected, let list = list(of: id) else { return nil }
+        return ListMoves(can: { list.nudge(id, $0) != nil }) { move in
+            if let place = list.nudge(id, move) { model.drop(id, on: .place(place), named: move.title) }
+        }
+    }
+
+    /// The list an open task sits in, on a project page.
+    private func list(of taskId: String) -> DropList? {
+        lists.first { $0.slots.contains { $0.id == taskId } }
     }
 }
 
