@@ -313,6 +313,16 @@ import Testing
         #expect(try task("a")["title"] == "Mine")
     }
 
+    @Test func notesAreMarkdownInDescriptionAlone() throws {
+        try seed("task", "a", ["title": "A", "notes_doc": "ydoc:v1:AAA="])
+        try writer.edit("a", TaskEdit(notes: "- [ ] Passport\n\n"))
+        #expect(try task("a")["description"] == "- [ ] Passport")
+        #expect(try outbox().map(\.field) == ["description"])  // notes_doc is the web app's
+        // The bound is on the JSON the Mac sends: two quotes and the text, UTF-8 and unescaped.
+        try writer.edit("a", TaskEdit(notes: String(repeating: "x", count: 65534)))
+        #expect(throws: CannotEdit.self) { try writer.edit("a", TaskEdit(notes: String(repeating: "x", count: 65535))) }
+    }
+
     // MARK: slice 5: everyday editing
 
     @Test func deleteTakesTheSubtreeAndUndoBringsItBack() throws {

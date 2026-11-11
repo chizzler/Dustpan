@@ -369,6 +369,9 @@ struct TaskRow: View {
                 Text(task["title"].string ?? "")
                     .strikethrough(done)
                     .foregroundStyle(done ? .secondary : .primary)
+                if let note = task["description"].string.map(firstLine), !note.isEmpty {
+                    Text(note).font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                }
                 details.font(.caption)
             }
         }

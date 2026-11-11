@@ -8,6 +8,7 @@ struct TaskEditor: View {
     @Environment(\.dismiss) private var dismiss
     let task: Row
     @State private var title: String
+    @State private var notes: String
     @State private var priority: Int64
     @State private var hasDue: Bool
     /// The due being edited. Without one, today at 09:00 for when Due date is turned on.
@@ -26,6 +27,7 @@ struct TaskEditor: View {
     init(task: Row) {
         self.task = task
         _title = State(initialValue: task["title"].string ?? "")
+        _notes = State(initialValue: task["description"].string ?? "")
         _priority = State(initialValue: task["priority"].int.flatMap { (1...4).contains($0) ? $0 : nil } ?? 4)
         let stored = DueDraft(task["due"])
         _hasDue = State(initialValue: stored != nil)
@@ -53,6 +55,7 @@ struct TaskEditor: View {
                 }
                 labelField
             }
+            NotesEditor(text: $notes)
             Section {
                 dueFields
                 repeatFields
@@ -272,6 +275,7 @@ struct TaskEditor: View {
         var edit = TaskEdit()
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed != task["title"].string { edit.title = trimmed }
+        if trimmedEnd(notes) != trimmedEnd(task["description"].string ?? "") { edit.notes = notes }
         if priority != task["priority"].int ?? 4 { edit.priority = priority }
         let newDue = hasDue ? due.json : .null
         if newDue != DueDraft(task["due"])?.json ?? .null { edit.due = newDue }
@@ -299,6 +303,11 @@ struct TaskEditor: View {
             dismiss()
         }
     }
+}
+
+/// Without trailing spaces and newlines: how a note is stored.
+private func trimmedEnd(_ text: String) -> String {
+    String(text.reversed().drop(while: \.isWhitespace).reversed())
 }
 
 extension Day {

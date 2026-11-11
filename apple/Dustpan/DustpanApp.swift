@@ -5,6 +5,14 @@ struct DustpanApp: App {
     @State private var model = AppModel()
     @AppStorage("outlineSpike") private var outlineSpike = false
 
+    init() {
+        // Notes and quick add are Markdown-like: curly quotes and em dashes would change what they say.
+        // Edit ▸ Substitutions turns them back on.
+        UserDefaults.standard.register(defaults: [
+            "NSAutomaticQuoteSubstitutionEnabled": false, "NSAutomaticDashSubstitutionEnabled": false,
+        ])
+    }
+
     var body: some Scene {
         Window("Dustpan", id: "main") {
             ContentView()
@@ -14,6 +22,7 @@ struct DustpanApp: App {
                 .task { await model.remind() }
         }
         .commands {
+            TextEditingCommands()
             CommandGroup(after: .newItem) {
                 Button("New View…") { model.editingView = ViewDraft() }
                     .keyboardShortcut("n", modifiers: [.command, .shift])

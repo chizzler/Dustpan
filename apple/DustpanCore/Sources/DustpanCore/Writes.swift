@@ -28,9 +28,14 @@ public struct Done: Sendable {
     public init(undo: [Change] = [], nextDue: Day? = nil) { (self.undo, self.nextDue) = (undo, nextDue) }
 }
 
+/// The server's bound on one value, as the JSON it receives.
+let maxValueBytes = 64 * 1024
+
 /// The task fields `Writer.edit` takes. Nil leaves a field alone.
 public struct TaskEdit: Equatable, Sendable {
     public var title: String?
+    /// Markdown. The web app folds it into its rich-text notes_doc, which Dustpan never writes.
+    public var notes: String?
     public var priority: Int64?
     /// .null clears it.
     public var due: JSON?
@@ -44,9 +49,11 @@ public struct TaskEdit: Equatable, Sendable {
     /// "YYYY-MM-DD", or .null for none.
     public var deadline: JSON?
 
-    public init(title: String? = nil, priority: Int64? = nil, due: JSON? = nil, recurrence: String? = nil,
-                place: Place? = nil, labels: [String]? = nil, estimateMinutes: JSON? = nil, deadline: JSON? = nil) {
-        (self.title, self.priority, self.due, self.recurrence, self.place) = (title, priority, due, recurrence, place)
+    public init(title: String? = nil, notes: String? = nil, priority: Int64? = nil, due: JSON? = nil,
+                recurrence: String? = nil, place: Place? = nil, labels: [String]? = nil, estimateMinutes: JSON? = nil,
+                deadline: JSON? = nil) {
+        (self.title, self.notes, self.priority, self.due, self.recurrence) = (title, notes, priority, due, recurrence)
+        self.place = place
         (self.labels, self.estimateMinutes, self.deadline) = (labels, estimateMinutes, deadline)
     }
 
@@ -408,6 +415,14 @@ public final class Writer {
             let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !title.isEmpty else { throw CannotEdit("A task needs a title") }
             patch["title"] = .string(title)
+        }
+        if let notes = edit.notes {
+            let note = String(notes.reversed().drop(while: \.isWhitespace).reversed())
+            // The server's bound on one value, as the JSON it receives.
+            guard JSON.string(note).data.count <= maxValueBytes else {
+                throw CannotEdit("Notes are too long: the limit is 64 KB")
+            }
+            patch["description"] = .string(note)
         }
         if let priority = edit.priority {
             guard (1...4).contains(priority) else { throw CannotEdit("Priority is 1 to 4") }
