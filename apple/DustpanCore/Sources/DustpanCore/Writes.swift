@@ -867,6 +867,24 @@ extension Writer {
         return found
     }
 
+    /// A parent a project may go under: live, not archived, and not the project or below it. Nil is the top level.
+    func checkParent(_ projects: [String: Row], _ parentId: String?, for projectId: String? = nil) throws {
+        guard let parentId else { return }
+        guard let parent = projects[parentId], isLive(parent), !parent["archived"].isTruthy else {
+            throw CannotEdit("That parent project no longer exists")
+        }
+        if let projectId, parentId == projectId || projectDescendants(projectId, projects).contains(parentId) {
+            throw CannotEdit("A project can't go under itself")
+        }
+    }
+
+    /// Last among the live projects under parentId: the web app's rule, + 1 rather than a gap.
+    func lastProjectPosition(_ projects: [String: Row], _ parentId: String?, skip: String? = nil) -> JSON {
+        let last = projects.values.filter { $0.id != skip && isLive($0) && $0["parent_id"].string == parentId }
+            .compactMap { $0["position"].number }.max()
+        return position(max(Double(now()), (last ?? 0) + 1))
+    }
+
     /// A project, last at the top level or under parentId, in the first colour no live project uses. Returns its id.
     @discardableResult
     public func addProject(_ name: String, under parentId: String? = nil, color: String? = nil) throws -> String {
@@ -875,21 +893,13 @@ extension Writer {
         let projectId = newId()
         try commit {
             let projects = try store.rows("project")
-            if let parentId {
-                guard let parent = projects[parentId], isLive(parent), !parent["archived"].isTruthy else {
-                    throw CannotEdit("That parent project no longer exists")
-                }
-            }
-            let live = projects.values.filter(isLive)
-            let used = Set(live.compactMap { $0["color"].string })
-            let now = now()
-            // Last among its siblings: the web app's rule, + 1 rather than a gap.
-            let last = live.filter { $0["parent_id"].string == parentId }.compactMap { $0["position"].number }.max()
+            try checkParent(projects, parentId)
+            let used = Set(projects.values.filter(isLive).compactMap { $0["color"].string })
             return [Change("project", projectId, [
                 "name": .string(name),
                 "color": .string(color ?? projectColours.first { !used.contains($0.hex) }?.hex ?? projectColours[0].hex),
-                "position": position(max(Double(now), (last ?? 0) + 1)), "archived": false,
-                "parent_id": parentId.map(JSON.string) ?? nil, "created_at": .int(now), "deleted_at": nil,
+                "position": lastProjectPosition(projects, parentId), "archived": false,
+                "parent_id": parentId.map(JSON.string) ?? nil, "created_at": .int(now()), "deleted_at": nil,
             ])]
         }
         return projectId
@@ -908,14 +918,7 @@ extension Writer {
                 ?? after.flatMap { order.firstIndex(of: $0) }.map { $0 + 1 } ?? order.count
             var changes = reorder("project", siblings, projectId, to: index)
             if parentId != project["parent_id"].string {
-                if let parentId {
-                    guard let parent = projects[parentId], isLive(parent), !parent["archived"].isTruthy else {
-                        throw CannotEdit("That parent project no longer exists")
-                    }
-                    if parentId == projectId || projectDescendants(projectId, projects).contains(parentId) {
-                        throw CannotEdit("A project can't go under itself")
-                    }
-                }
+                try checkParent(projects, parentId, for: projectId)
                 changes.insert(Change("project", projectId, ["parent_id": parentId.map(JSON.string) ?? nil]), at: 0)
             }
             return changes
@@ -946,6 +949,146 @@ extension Writer {
     /// One place up (-1) or down (+1) in the sidebar. Nothing at an edge.
     public func moveView(_ viewId: String, step: Int) throws -> Done {
         try undoable { self.step("view", try listViews(viewId), viewId, by: step) }
+    }
+}
+
+// MARK: - Projects and sections (spec/projects.md)
+
+/// The project fields `Writer.editProject` takes. Nil leaves a field alone.
+public struct ProjectEdit: Equatable, Sendable {
+    public var name: String?
+    /// A hex colour, "#rrggbb".
+    public var color: String?
+    /// `.some(nil)` is the top level.
+    public var parentId: String??
+
+    public init(name: String? = nil, color: String? = nil, parentId: String?? = nil) {
+        (self.name, self.color, self.parentId) = (name, color, parentId)
+    }
+}
+
+extension Writer {
+    /// Write the changed fields of a project, as one batch. A new parent also writes a position, last among
+    /// the new siblings.
+    public func editProject(_ projectId: String, _ edit: ProjectEdit) throws -> Done {
+        try undoable {
+            let projects = try store.rows("project")
+            let project = try liveProject(projects, projectId)
+            var patch: [String: JSON] = [:]
+            if let name = edit.name {
+                let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else { throw CannotEdit("A project needs a name") }
+                if name != project["name"].string { patch["name"] = .string(name) }
+            }
+            if let color = edit.color, color != project["color"].string {
+                guard color.wholeMatch(of: /#[0-9a-fA-F]{6}/) != nil else { throw CannotEdit("Not a colour: \(color)") }
+                patch["color"] = .string(color)
+            }
+            if let parentId = edit.parentId, parentId != project["parent_id"].string {
+                try checkParent(projects, parentId, for: projectId)
+                patch["parent_id"] = parentId.map(JSON.string) ?? .null
+                patch["position"] = lastProjectPosition(projects, parentId, skip: projectId)
+            }
+            return patch.isEmpty ? [] : [Change("project", projectId, patch)]
+        }
+    }
+
+    /// Archive a project and every live sub-project below it.
+    public func archiveProject(_ projectId: String) throws -> Done {
+        try commit {
+            let projects = try store.rows("project")
+            let project = try liveProject(projects, projectId)
+            let ids = ([project] + projectDescendants(projectId, projects).compactMap { projects[$0] })
+                .filter { !$0["archived"].isTruthy }.map(\.id)
+            // Undo writes false, never null: archived is a boolean even where it was never set.
+            return (ids.map { Change("project", $0, ["archived": true]) },
+                    Done(undo: ids.map { Change("project", $0, ["archived": false]) }))
+        }
+    }
+
+    /// Unarchive one project. Its archived sub-projects stay archived, as in the web app.
+    public func unarchiveProject(_ projectId: String) throws -> Done {
+        try undoable {
+            let project = try liveProject(try store.rows("project"), projectId)
+            return project["archived"].isTruthy ? [Change("project", projectId, ["archived": false])] : []
+        }
+    }
+
+    /// Tombstone a project. Its direct sub-projects move up to its parent. Its tasks keep project_id.
+    public func deleteProject(_ projectId: String) throws -> Done {
+        try undoable {
+            let projects = try store.rows("project")
+            let parentId = try liveProject(projects, projectId)["parent_id"].string
+            let lifted = projects.values
+                .filter { isLive($0) && $0["parent_id"].string == projectId && $0.id != projectId }
+                .sorted { bytesLess($0.id, $1.id) }
+                .map { Change("project", $0.id, ["parent_id": parentId == $0.id ? nil : parentId.map(JSON.string) ?? nil]) }
+            return lifted + [Change("project", projectId, ["deleted_at": .int(now())])]
+        }
+    }
+
+    /// The project's live sections, in order.
+    func liveSections(_ projectId: String?) throws -> [Row] {
+        try store.rows("section").values.filter { isLive($0) && $0["project_id"].string == projectId }
+            .sorted(by: orderLess)
+    }
+
+    func liveSection(_ sectionId: String) throws -> Row {
+        guard let section = try store.rows("section")[sectionId], isLive(section) else {
+            throw CannotEdit("That section no longer exists")
+        }
+        return section
+    }
+
+    func sectionName(_ name: String) throws -> String {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw CannotEdit("A section needs a name") }
+        return name
+    }
+
+    /// A section, last in its project. Returns its id.
+    @discardableResult
+    public func addSection(_ name: String, to projectId: String?) throws -> String {
+        let name = try sectionName(name)
+        let sectionId = newId()
+        try commit {
+            guard let projectId else { throw CannotEdit("The Inbox has no sections") }
+            try checkProject(projectId)
+            let last = try liveSections(projectId).compactMap { $0["position"].number }.max()
+            return [Change("section", sectionId, [
+                "name": .string(name), "project_id": .string(projectId),
+                "position": last.map { position($0 + positionGap) } ?? .int(now()),
+                "created_at": .int(now()), "deleted_at": nil,
+            ])]
+        }
+        return sectionId
+    }
+
+    public func renameSection(_ sectionId: String, to name: String) throws -> Done {
+        let name = try sectionName(name)
+        return try undoable {
+            try liveSection(sectionId)["name"].string == name ? [] : [Change("section", sectionId, ["name": .string(name)])]
+        }
+    }
+
+    /// One place up (-1) or down (+1) among its project's sections. Nothing at an edge.
+    public func moveSection(_ sectionId: String, step: Int) throws -> Done {
+        try undoable {
+            let sections = try liveSections(try liveSection(sectionId)["project_id"].string)
+            return self.step("section", sections, sectionId, by: step)
+        }
+    }
+
+    /// Tombstone a section. Its live open tasks go to "No section", in the same batch.
+    public func deleteSection(_ sectionId: String) throws -> Done {
+        try undoable {
+            _ = try liveSection(sectionId)
+            let tasks = try store.rows("task").values
+                .filter { isLive($0) && $0["completed_at"].isNull && $0["section_id"].string == sectionId }
+                .sorted { bytesLess($0.id, $1.id) }
+            return [Change("section", sectionId, ["deleted_at": .int(now())])]
+                + tasks.map { Change("task", $0.id, ["section_id": nil]) }
+        }
     }
 }
 

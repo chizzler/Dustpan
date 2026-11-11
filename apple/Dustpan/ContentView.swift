@@ -26,6 +26,7 @@ struct ContentView: View {
                     case .project(let id) where outlineSpike: OutlinePage(page: .project(id))
                     case .inbox: TaskList(page: .inbox)
                     case .project(let id): TaskList(page: .project(id))
+                    case .archived(let id): ArchivedPage(projectId: id)
                     case let page: GroupedTaskList(page: page)
                     }
                 }
@@ -37,7 +38,8 @@ struct ContentView: View {
             .overlay(alignment: .bottom) { ToastView() }
             .sheet(item: $model.editing, content: TaskEditor.init)
             .sheet(item: $model.editingView, content: ViewEditor.init)
-            .sheet(item: $model.newProject, content: NewProject.init)
+            .sheet(item: $model.editingProject, content: ProjectEditor.init)
+            .sheet(item: $model.editingSection, content: SectionEditor.init)
             .sheet(item: $model.editingLabel, content: LabelEditor.init)
             .onChange(of: undoManager, initial: true) { model.undoManager = undoManager }
             .frame(minWidth: 640, minHeight: 400)

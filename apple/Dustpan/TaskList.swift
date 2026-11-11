@@ -28,9 +28,18 @@ struct TaskList: View {
                             rows(items, list)
                             addRow(place, section, list)
                         } header: {
-                            heading(section.name, list)
+                            heading(section, in: projectId, list)
                         }
                     }
+                }
+                if let projectId {
+                    Button("Add Section", systemImage: "plus") {
+                        model.editingSection = SectionDraft(projectId: projectId)
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 12)
+                    .selectionDisabled()
                 }
             }
             .onChange(of: model.flash) { _, id in
@@ -42,6 +51,14 @@ struct TaskList: View {
         .taskMenus(selection: $selection, lists: lists.compactMap { $0 })
         .navigationTitle(title)
         .toolbar {
+            if let project = projectId.flatMap({ model.projectsById[$0] }) {
+                ToolbarItem(placement: .primaryAction) {
+                    Button("Edit Project", systemImage: "pencil") {
+                        model.editingProject = ProjectDraft(project: project.row)
+                    }
+                    .help("Edit project")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button("Add Task", systemImage: "plus") { adding = Place(projectId: projectId) }
                     .keyboardShortcut("n")
@@ -65,9 +82,27 @@ struct TaskList: View {
         }
     }
 
-    /// A section's heading: a drop there goes to the top of the section.
-    private func heading(_ name: String, _ list: DropList?) -> some View {
-        Text(name).listDrop(list, at: .head)
+    /// A section's heading: a drop there goes to the top of the section. Its menu renames, moves and deletes it.
+    private func heading(_ section: DustpanCore.Section, in projectId: String?, _ list: DropList?) -> some View {
+        let sections = projectId.flatMap { model.snapshot.sectionsByProject[$0] } ?? []
+        let index = sections.firstIndex { $0.id == section.id }
+        return Text(section.name)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(.rect)
+            .listDrop(list, at: .head)
+            .contextMenu {
+                if let projectId, let index {
+                    let row = sections[index]
+                    Button("Rename Section…") { model.editingSection = SectionDraft(projectId: projectId, section: row) }
+                    Divider()
+                    Button("Move Up") { model.moveSection(row.id, step: -1) }
+                        .disabled(index == 0)
+                    Button("Move Down") { model.moveSection(row.id, step: 1) }
+                        .disabled(index == sections.count - 1)
+                    Divider()
+                    Button("Delete Section", role: .destructive) { model.deleteSection(row) }
+                }
+            }
     }
 
     private func flatten(_ nodes: [Node], depth: Int, parent: String?) -> [ListItem] {

@@ -34,7 +34,7 @@ struct Sidebar: View {
                 HStack {
                     Text("Projects")
                     Spacer()
-                    Button("New Project", systemImage: "plus") { model.newProject = ProjectDraft() }
+                    Button("New Project", systemImage: "plus") { model.editingProject = ProjectDraft() }
                         .labelStyle(.iconOnly)
                         .buttonStyle(.borderless)
                         .help("New project (⌥⌘N)")
@@ -77,12 +77,21 @@ struct Sidebar: View {
                         .help("New view (⇧⌘N)")
                 }
             }
+            ArchivedRows()
         }
         .navigationSplitViewColumnWidth(min: 180, ideal: 230)
         // A project row's drag takes the click, so the list doesn't take the focus by itself.
         .focused($focused)
         .onChange(of: model.page) { focused = true }
         .focusedValue(\.listMoves, moves)
+        // Here for every project delete: the sidebar's menus, the project editor and an archived project's page.
+        .confirmationDialog("Delete project “\(model.deletingProject?["name"].string ?? "")”?",
+                            isPresented: $model.confirmsProjectDelete, presenting: model.deletingProject) { project in
+            Button("Delete Project", role: .destructive) { model.deleteProject(project.id) }
+        } message: { project in
+            let open = model.openTasks(in: project.id)
+            Text((open == 1 ? "Its open task goes" : "Its \(open) open tasks go") + " with it, on every device. Sub-projects move up a level.")
+        }
         .confirmationDialog("Delete view “\(deleting?["name"].string ?? "")”?", isPresented: $confirmsDelete,
                             presenting: deleting) { view in
             Button("Delete View", role: .destructive) { model.deleteView(view) }
@@ -199,6 +208,10 @@ private struct ProjectRow: View {
                                 next: next.map { ($0.node.id, $0.depth) }), name: name)
         .tag(Page.project(node.id))
         .contextMenu {
+            Button("Edit Project…") { model.editingProject = ProjectDraft(project: node.row) }
+            Button("New Sub-project…") { model.editingProject = ProjectDraft(parentId: node.id) }
+            Button("Add Section…") { model.editingSection = SectionDraft(projectId: node.id) }
+            Divider()
             Button("Move Up") { model.moveProject(node.id, step: -1) }
                 .keyboardShortcut(Nudge.up.shortcut)
                 .disabled(line.index == 0)
@@ -206,7 +219,8 @@ private struct ProjectRow: View {
                 .keyboardShortcut(Nudge.down.shortcut)
                 .disabled(line.index == line.siblings - 1)
             Divider()
-            Button("New Sub-project…") { model.newProject = ProjectDraft(parentId: node.id) }
+            Button("Archive") { model.archiveProject(node.id) }
+            Button("Delete Project…", role: .destructive) { model.askToDelete(node.row) }
         }
         .listRowInsets(.vertical, 0)
     }
@@ -214,6 +228,34 @@ private struct ProjectRow: View {
     private func toggle() {
         let id = line.node.id
         withAnimation { if collapsed.contains(id) { collapsed.remove(id) } else { collapsed.insert(id) } }
+    }
+}
+
+/// Archived projects, flat, with their paths. Only when there are some.
+private struct ArchivedRows: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let archived = model.snapshot.archivedProjects
+        if !archived.isEmpty {
+            Section("Archived") {
+                ForEach(archived, id: \.row.id) { project, path in
+                    Label {
+                        Text(path)
+                    } icon: {
+                        Image(systemName: "circle.fill")
+                            .foregroundStyle(Color(hex: project["color"].string) ?? .secondary)
+                            .imageScale(.small)
+                    }
+                    .tag(Page.archived(project.id))
+                    .contextMenu {
+                        Button("Unarchive") { model.unarchiveProject(project.id) }
+                        Divider()
+                        Button("Delete Project…", role: .destructive) { model.askToDelete(project) }
+                    }
+                }
+            }
+        }
     }
 }
 

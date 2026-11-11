@@ -116,7 +116,7 @@ struct GroupedTaskList: View {
                                                projects: snap.projectPaths),
                            addDue: .null, addLabels: [id],
                            empty: "No open tasks have this label. Add one below, or press L on any task.")
-        case .inbox, .project:
+        case .inbox, .project, .archived:
             return Content(title: "", empty: "")
         }
     }

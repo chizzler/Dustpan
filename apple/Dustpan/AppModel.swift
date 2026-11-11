@@ -7,6 +7,8 @@ enum Page: Hashable {
     case upcoming
     case inbox
     case project(String)
+    /// An archived project: its page offers Unarchive.
+    case archived(String)
     case label(String)
     case view(String)
 }
@@ -24,10 +26,18 @@ struct ViewDraft: Identifiable {
     var query = ""
 }
 
-/// A project being created, at the top level or under parentId.
+/// A project in the editor: an existing one, or a new one at the top level or under parentId.
 struct ProjectDraft: Identifiable {
     let id = UUID()
+    var project: Row?
     var parentId: String?
+}
+
+/// A section being named: a new one in projectId, or an existing one.
+struct SectionDraft: Identifiable {
+    let id = UUID()
+    let projectId: String
+    var section: Row?
 }
 
 /// A short message at the foot of the window, with Undo when the action can be undone.
@@ -65,8 +75,13 @@ final class AppModel {
     var editing: Row?
     /// The saved view open in its editor.
     var editingView: ViewDraft?
-    /// The project being created.
-    var newProject: ProjectDraft?
+    /// The project open in its editor.
+    var editingProject: ProjectDraft?
+    /// The project whose delete waits for a yes.
+    private(set) var deletingProject: Row?
+    var confirmsProjectDelete = false
+    /// The section being named.
+    var editingSection: SectionDraft?
     /// The label open in its editor.
     var editingLabel: LabelDraft?
     /// The task whose row shows the label picker.
@@ -194,10 +209,23 @@ final class AppModel {
         do {
             snapshot = try DustpanCore.snapshot(store)
             waiting = try store.outboxCount()
+            settlePage()
         } catch {
             status = .failed("\(error)")
         }
         checkReminders()
+    }
+
+    /// A project archived, unarchived or deleted here or elsewhere: its page follows it.
+    private func settlePage() {
+        let archived = Set(snapshot.archivedProjects.map(\.row.id))
+        switch page {
+        case .project(let id) where projectsById[id] == nil:
+            page = archived.contains(id) ? .archived(id) : .today
+        case .archived(let id) where !archived.contains(id):
+            page = projectsById[id] != nil ? .project(id) : .today
+        default: break
+        }
     }
 
     // MARK: reminders
@@ -337,9 +365,76 @@ final class AppModel {
         }) { _ in tasks.count == 1 ? "Deleted “\(first["title"].string ?? "")”" : "Deleted \(tasks.count) tasks" }
     }
 
-    /// Create a project and show it.
-    func addProject(_ name: String, under parentId: String?) throws {
-        page = .project(try apply { try $0.addProject(name, under: parentId) })
+    /// Create a project and show it, or edit one.
+    func saveProject(_ project: Row?, name: String, color: String, parentId: String??) throws {
+        if let project {
+            let done = try apply { try $0.editProject(project.id, ProjectEdit(name: name, color: color, parentId: parentId)) }
+            if !done.undo.isEmpty { registerUndo("Edit Project", done) }
+        } else {
+            page = .project(try apply { try $0.addProject(name, under: parentId ?? nil, color: color) })
+        }
+    }
+
+    /// "Parent › Child", archived projects too.
+    func projectPath(_ projectId: String) -> String {
+        DustpanCore.projectPath(projectId, Dictionary(uniqueKeysWithValues: snapshot.liveProjects.map { ($0.id, $0) }))
+    }
+
+    /// The project and its live sub-projects, with Undo.
+    func archiveProject(_ projectId: String) {
+        let path = projectPath(projectId)
+        undoable("Archive Project", { try $0.archiveProject(projectId) }) { _ in "Archived “\(path)”" }
+    }
+
+    func unarchiveProject(_ projectId: String) {
+        let done = undoable("Unarchive Project", { try $0.unarchiveProject(projectId) }) { _ in
+            "Unarchived “\(self.projectPath(projectId))”"
+        }
+        if done != nil { page = .project(projectId) }
+    }
+
+    /// Open tasks in a project, its sub-projects' apart: what deleting it hides.
+    func openTasks(in projectId: String) -> Int {
+        snapshot.allTasks.values.count { $0["deleted_at"].isNull && $0["completed_at"].isNull && $0["project_id"].string == projectId }
+    }
+
+    /// Delete a project, asking first when it has open tasks.
+    func askToDelete(_ project: Row) {
+        if openTasks(in: project.id) > 0 {
+            deletingProject = project
+            confirmsProjectDelete = true
+        } else {
+            deleteProject(project.id)
+        }
+    }
+
+    /// Its sub-projects move up a level. Undo brings it back, with its tasks.
+    func deleteProject(_ projectId: String) {
+        let path = projectPath(projectId)
+        undoable("Delete Project", { try $0.deleteProject(projectId) }) { _ in "Deleted “\(path)”" }
+    }
+
+    /// Name a new section, last in its project, or rename one.
+    func saveSection(_ draft: SectionDraft, name: String) throws {
+        if let section = draft.section {
+            let done = try apply { try $0.renameSection(section.id, to: name) }
+            if !done.undo.isEmpty { registerUndo("Rename Section", done) }
+        } else {
+            try apply { try $0.addSection(name, to: draft.projectId) }
+        }
+    }
+
+    func moveSection(_ sectionId: String, step: Int) {
+        undoable(step < 0 ? "Move Up" : "Move Down", { try $0.moveSection(sectionId, step: step) }, message: nil)
+    }
+
+    /// Its open tasks go to "No section". Undo puts them back.
+    func deleteSection(_ section: Row) {
+        let name = section["name"].string ?? ""
+        undoable("Delete Section", { try $0.deleteSection(section.id) }) { done in
+            let moved = done.undo.count - 1
+            return "Deleted section “\(name)”" + (moved > 0 ? ". \(moved) task\(moved == 1 ? "" : "s") moved to No section" : "")
+        }
     }
 
     /// Create a view and show it, or edit one.
