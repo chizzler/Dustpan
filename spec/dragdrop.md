@@ -2,7 +2,7 @@
 
 Slice 6. Drag a task to change where it lives: its place in a list, its parent, its section, its project, its date or its labels.
 Status: designed 2026-11-01. 6a built 2026-11-01, tried and approved. 6b built 2026-11-01, tried and approved. 6c partly built: the sidebar, 2026-11-02.
-The Mac client's slices 6a (2026-11-06) and 6b (2026-11-11) follow the same rules; see "On the Mac" at the end.
+The Mac client's slices 6a (2026-11-06) and 6b (2026-11-11, tried and approved) follow the same rules; see "On the Mac" at the end.
 
 ## What slice 5 had
 
@@ -344,7 +344,7 @@ drag and drop. Whether the task list moves to it is still open.
 
 Escape and drops outside a target cancel, as before. Calendar targets don't exist on the Mac yet.
 
-**6b, without a pointer** (Mac 0.9.0, 2026-11-11). `nudge` in `DragDrop.swift` is the desktop's, with its tests;
+**6b, without a pointer** (Mac 0.9.0 and 0.9.1, 2026-11-11, tried and approved). `nudge` in `DragDrop.swift` is the desktop's, with its tests;
 every key and menu move ends in `Writer.drop`, as a drag does.
 - **Keys, Mac style:** ⌥↑ ⌥↓ move a task among its siblings, ⇧⌥↑ ⇧⌥↓ to the top or bottom, ⌘] indents (the last
   subtask of the task above) and ⌘[ outdents (right after its old parent). The desktop's Tab and Shift+Tab would trap
@@ -359,3 +359,5 @@ every key and menu move ends in `Writer.drop`, as a drag does.
   The moves show on project and Inbox pages only, as on the desktop; Due and Move To on every page. Open tasks only.
 - **Feedback:** the task stays selected and comes into view, with the flash. Key and menu moves have Edit ▸ Undo
   and no toast, as the sidebar's do; Due and Move To toast as a drop does.
+- **Focus:** a row's drag takes the click, so each list takes the focus itself when its selection changes (0.9.1).
+  Without it, a clicked task stayed unfocused and its keys went to the other list.
