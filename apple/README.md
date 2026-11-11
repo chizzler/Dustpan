@@ -52,6 +52,7 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `DustpanCore/Sources/DustpanCore/Filter.swift` | The filter language: parser, error messages, evaluation, blocked tasks |
 | `DustpanCore/Sources/DustpanCore/Views.swift` | Today, Upcoming, Anytime, Completed, the Filter page's results, and saved views: sorting and grouping |
 | `DustpanCore/Sources/DustpanCore/QueryTools.swift` | Help writing a query: suggestions for the word being typed, and the builder's conditions |
+| `DustpanCore/Sources/DustpanCore/Folding.swift` | Folding subtasks away: the stored list after a fold, and unfolding the way down to a new parent |
 | `DustpanCore/Sources/DustpanCore/Sectors.swift` | The part of time sectors the filter language needs |
 | `DustpanCore/Sources/DustpanCore/Reminders.swift` | Reminders that follow their dates, default reminders, and which are due to show |
 | `DustpanCore/Sources/DustpanCore/Ids.swift` | Deterministic ids |
@@ -66,6 +67,7 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `Dustpan/FilterBar.swift` | The Filter page's query, its match count or error, and Save as View |
 | `Dustpan/ArchivedPage.swift` | An archived project's page: Unarchive or Delete |
 | `Dustpan/MoveCommands.swift` | Edit ▸ Move Up to Outdent, for whichever list has the focus (`ListMoves` in `Moves.swift`) |
+| `Dustpan/FoldCommand.swift` | View ▸ Fold Subtasks (⌘←) and Unfold Subtasks (⌘→), for the selected task (`TaskFold` in `TaskFold.swift`) |
 | `Dustpan/OutlineTaskList.swift` | Spike: project and Inbox lists on AppKit's `NSOutlineView` (View ▸ Outline Task List) |
 
 The tests read OpenTodo's vectors from the clone beside this repo (`../opentodo`, or `OPENTODO_SRC`), and skip them without it.
@@ -101,6 +103,7 @@ Before 1.0 the minor number follows the Mac client's own slices.
 
 | Version | Date | What |
 | --- | --- | --- |
+| 0.12.1 | 2026-11-12 | Folding subtasks, as on the desktop: a chevron before a parent's check, ⌘← and ⌘→ (View ▸ Fold Subtasks, Unfold Subtasks), the row menu, and "3 subtasks" on a folded row. Kept on this Mac only. Fixed: typing L or C in an Add field or the Filter query opened the selected task's labels or completed it. |
 | 0.12.0 | 2026-11-11 | Slice 10, Anytime, Completed and Filter: Anytime lists undated tasks by project; Completed lists what was finished by day, newest first, 100 at a time with Show More. Filter (⇧⌘F) shows a query's matches as you type, suggests labels, projects and keywords, adds conditions from a menu, and saves the query as a view. Each can be hidden from the sidebar and brought back from the View menu. |
 | 0.11.0 | 2026-11-11 | Slice 8, task notes in Markdown: Notes in the task editor, with Write and Preview, and the note's first line under the task on every list. Smart quotes and dashes are off by default; Edit ▸ Substitutions turns them on. |
 | 0.10.0 | 2026-11-11 | Slice 7, projects and sections: Edit Project (the pencil on its page, or its menu) renames, recolours and moves it under another; Archive, Unarchive and Delete, each with Undo. Archived projects are listed at the foot of the sidebar, with a page that offers Unarchive. A section heading's menu renames, moves and deletes it; Add Section at the end of a project. |

@@ -36,6 +36,8 @@ struct DustpanApp: App {
                 MoveCommands()
             }
             CommandGroup(after: .sidebar) {
+                FoldCommand(model: model)
+                Divider()
                 Button("Filter…", action: model.openFilter)
                     .keyboardShortcut("f", modifiers: [.command, .shift])
                     .disabled(model.setupProblem != nil)

@@ -1,5 +1,9 @@
+import AppKit
 import DustpanCore
 import SwiftUI
+
+/// The room before every check in a project list, where a parent's fold chevron sits, so checks line up.
+let foldSlotWidth: Double = 16
 
 struct TaskList: View {
     @Environment(AppModel.self) private var model
@@ -11,14 +15,19 @@ struct TaskList: View {
     var body: some View {
         let (title, projectId) = model.listHeading(page)
         let sections = projectSections(model.snapshot, projectId)
+        let folded = Set(model.foldedTasks)
         let lists = sections.map { section in
-            section.isList ? DropList(projectId: projectId, sectionId: section.id, slots: openSlots(section.tasks)) : nil
+            section.isList ? DropList(projectId: projectId, sectionId: section.id,
+                                      slots: openSlots(section.tasks, folded: folded)) : nil
         }
+        let shown = sections.map { flatten($0.tasks, depth: 0, parent: nil, folded: folded) }
+        let folds = Dictionary(shown.joined().compactMap { item in item.fold.map { (item.id, $0) } },
+                               uniquingKeysWith: { first, _ in first })
         ScrollViewReader { proxy in
             List(selection: $selection) {
                 ForEach(sections.enumerated(), id: \.offset) { index, section in
                     let place = Place(projectId: projectId, sectionId: section.id)
-                    let items = flatten(section.tasks, depth: 0, parent: nil)
+                    let items = shown[index]
                     let list = lists[index]
                     if section.name.isEmpty {
                         rows(items, list)
@@ -47,8 +56,13 @@ struct TaskList: View {
                 selection = [id]
                 withAnimation { proxy.scrollTo(id) }
             }
+            // A selected subtask folded away hands the selection to the task it's folded under.
+            .onChange(of: model.foldedTasks) { _, folded in
+                selection = Set(selection.map { shownTask($0, folded: Set(folded)) })
+            }
         }
-        .taskMenus(selection: $selection, lists: lists.compactMap { $0 })
+        .taskMenus(selection: $selection, lists: lists.compactMap { $0 }, folds: folds)
+        .focusedValue(\.taskFold, taskFold(folds))
         .navigationTitle(title)
         .toolbar {
             if let project = projectId.flatMap({ model.projectsById[$0] }) {
@@ -77,6 +91,7 @@ struct TaskList: View {
     private func addRow(_ place: Place, _ section: DustpanCore.Section, _ list: DropList?) -> some View {
         if section.isList {
             AddTaskField(place: place, focus: $adding)
+                .padding(.leading, foldSlotWidth)
                 .selectionDisabled()
                 .listDrop(list, at: .end)
         }
@@ -105,11 +120,32 @@ struct TaskList: View {
             }
     }
 
-    private func flatten(_ nodes: [Node], depth: Int, parent: String?) -> [ListItem] {
+    /// What View ▸ Fold Subtasks acts on: the one selected task, when it has subtasks.
+    /// None while an Add field has the focus, so ⌘← and ⌘→ still move its insertion point.
+    private func taskFold(_ folds: [String: Bool]) -> TaskFold? {
+        guard adding == nil, selection.count == 1, let id = selection.first, let fold = folds[id] else { return nil }
+        return TaskFold(taskId: id, folded: fold)
+    }
+
+    /// The rows in display order. A folded task's subtasks are left out.
+    private func flatten(_ nodes: [Node], depth: Int, parent: String?, folded: Set<String>) -> [ListItem] {
         nodes.flatMap { node in
-            [ListItem(node: node, slot: Slot(node.id, depth, parent))]
-                + flatten(node.children, depth: depth + 1, parent: node.id)
+            let fold = node.children.isEmpty ? nil : folded.contains(node.id)
+            return [ListItem(node: node, slot: Slot(node.id, depth, parent), fold: fold)]
+                + (fold == true ? [] : flatten(node.children, depth: depth + 1, parent: node.id, folded: folded))
         }
+    }
+
+    /// The task, or the highest task above it that's folded: the row that shows it.
+    private func shownTask(_ taskId: String, folded: Set<String>) -> String {
+        var shown = taskId
+        var seen: Set = [taskId]
+        var next = model.snapshot.allTasks[taskId]?["parent_id"].string
+        while let parent = next, seen.insert(parent).inserted {
+            if folded.contains(parent) { shown = parent }
+            next = model.snapshot.allTasks[parent]?["parent_id"].string
+        }
+        return shown
     }
 }
 
@@ -117,6 +153,8 @@ struct TaskList: View {
 private struct ListItem: Identifiable {
     let node: Node
     let slot: Slot
+    /// Nil for a task without subtasks, else whether they're folded away.
+    let fold: Bool?
     var id: String { node.id }
     var isOpen: Bool { node.row["completed_at"].isNull }
 }
@@ -133,23 +171,40 @@ private struct PlacedTaskRow: View {
         let id = task.id
         let drop = mark
         let indent = Double(item.slot.depth) * indentWidth
-        TaskRow(task: task, labels: model.snapshot.labels) {
-            withAnimation { model.toggle(task) }
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+            // A ZStack, not a Group: an empty Group is no view, so a leaf would lose the chevron's room.
+            ZStack {
+                if let fold = item.fold {
+                    Button(fold ? "Unfold Subtasks" : "Fold Subtasks", systemImage: "chevron.right", action: toggleFold)
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .imageScale(.small)
+                        .rotationEffect(.degrees(fold ? 0 : 90))
+                        .help(fold ? "Unfold subtasks (⌘→)" : "Fold subtasks (⌘←)")
+                }
+            }
+            .frame(width: foldSlotWidth)
+            TaskRow(task: task, labels: model.snapshot.labels, folded: item.fold == true ? openBelow(item.node) : 0) {
+                withAnimation { model.toggle(task) }
+            }
         }
         // Inside the drag: outside it, onGeometryChange breaks the List's clicks after a drag (macOS 27).
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
         .taskDrag(task, subtasks: openBelow(item.node), indent: indent)
         .overlay(alignment: .bottomLeading) {
-            if let drop, drop.ring == nil, drop.prev == id { DropLine(depth: drop.depth) }
+            if let drop, drop.ring == nil, drop.prev == id { DropLine(depth: drop.depth).padding(.leading, foldSlotWidth) }
         }
         .overlay(alignment: .topLeading) {
-            if let drop, drop.ring == nil, drop.prev == nil, drop.next == id { DropLine(depth: drop.depth) }
+            if let drop, drop.ring == nil, drop.prev == nil, drop.next == id {
+                DropLine(depth: drop.depth).padding(.leading, foldSlotWidth)
+            }
         }
         .overlay {
             if drop?.ring == id {
                 // From the task's own indent, with the same gap beside its check circle as above it.
                 RoundedRectangle(cornerRadius: 5).strokeBorder(.tint, lineWidth: 2)
-                    .padding(EdgeInsets(top: 1, leading: indent - 5, bottom: 1, trailing: 1))
+                    .padding(EdgeInsets(top: 1, leading: indent + foldSlotWidth - 5, bottom: 1, trailing: 1))
                     .allowsHitTesting(false)
             }
         }
@@ -162,6 +217,11 @@ private struct PlacedTaskRow: View {
     private var mark: Drop? {
         guard let list, case .list(list.key, let drop) = model.dropMark else { return nil }
         return drop
+    }
+
+    private func toggleFold() {
+        guard let fold = item.fold else { return }
+        withAnimation { model.setFolded(item.id, !fold) }
     }
 
     private func openBelow(_ node: Node) -> Int {
@@ -206,7 +266,7 @@ private struct ListEndDrop: ViewModifier {
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
             .overlay(alignment: .topLeading) {
                 if case .end = hit, case .list(list.key, let drop) = model.dropMark, drop.ring == nil, drop.prev == nil, drop.next == nil {
-                    DropLine(depth: 0)
+                    DropLine(depth: 0).padding(.leading, foldSlotWidth)
                 }
             }
             .onDrop(of: [.text], delegate: ListDrop(model: model, list: list, frame: frame) { _ in hit })
@@ -217,8 +277,8 @@ extension View {
     /// The row menu, double-click and keys of a list of tasks, keyed by task id.
     /// L opens the label picker on the selected task, C completes or reopens it; Delete deletes the selection;
     /// Esc clears it. lists: a project page's lists, whose tasks can also be moved by key and menu.
-    func taskMenus(selection: Binding<Set<String>>, lists: [DropList] = []) -> some View {
-        modifier(TaskMenus(selection: selection, lists: lists))
+    func taskMenus(selection: Binding<Set<String>>, lists: [DropList] = [], folds: [String: Bool] = [:]) -> some View {
+        modifier(TaskMenus(selection: selection, lists: lists, folds: folds))
     }
 }
 
@@ -226,6 +286,8 @@ private struct TaskMenus: ViewModifier {
     @Environment(AppModel.self) private var model
     @Binding var selection: Set<String>
     let lists: [DropList]
+    /// Whether each task with subtasks on the page has them folded away.
+    let folds: [String: Bool]
     @FocusState private var focused: Bool
 
     func body(content: Content) -> some View {
@@ -239,6 +301,9 @@ private struct TaskMenus: ViewModifier {
                     Button("Skip to Next Occurrence") { model.skip(task) }
                 }
                 Button("Labels…") { model.labelling = task.id }
+                if let fold = folds[task.id] {
+                    Button(fold ? "Unfold Subtasks" : "Fold Subtasks") { withAnimation { model.setFolded(task.id, !fold) } }
+                }
                 if open {
                     if let list = list(of: task.id) {
                         Divider()
@@ -269,12 +334,12 @@ private struct TaskMenus: ViewModifier {
         .onChange(of: selection) { if !selection.isEmpty { focused = true } }
         .focusedValue(\.listMoves, moves)
         .onKeyPress(characters: ["l", "L"], phases: .down) { _ in
-            guard let id = selected else { return .ignored }
+            guard !typing, let id = selected else { return .ignored }
             model.labelling = id
             return .handled
         }
         .onKeyPress(characters: ["c", "C"], phases: .down) { _ in
-            guard let task = selected.flatMap({ model.snapshot.allTasks[$0] }) else { return .ignored }
+            guard !typing, let task = selected.flatMap({ model.snapshot.allTasks[$0] }) else { return .ignored }
             withAnimation { model.toggle(task) }
             return .handled
         }
@@ -283,6 +348,10 @@ private struct TaskMenus: ViewModifier {
         }
         .onExitCommand { selection = [] }
     }
+
+    /// True while a text field in the list, such as an Add field or the Filter query, is being typed in.
+    /// Its keys reach these handlers first, so L and C would act on the selected task.
+    private var typing: Bool { NSApp.keyWindow?.firstResponder is NSText }
 
     /// The one selected task's id.
     private var selected: String? {
@@ -352,6 +421,8 @@ struct TaskRow: View {
     var place: String?
     /// The label page this row is on: its own chip is left out.
     var labelPage: String?
+    /// The open subtasks folded away under it.
+    var folded = 0
     let toggle: () -> Void
 
     var body: some View {
@@ -385,7 +456,7 @@ struct TaskRow: View {
         let chips = shownLabels(task["labels"], labels, skip: labelPage)
         let rule = task["recurrence"].string.flatMap { $0.isEmpty ? nil : $0 }
         let deadline = task["deadline"].string.flatMap(Day.init)
-        if due != nil || estimate != nil || !chips.isEmpty || rule != nil || place != nil || deadline != nil {
+        if due != nil || estimate != nil || !chips.isEmpty || rule != nil || place != nil || deadline != nil || folded > 0 {
             HStack(spacing: 10) {
                 if let due {
                     Label(due.text, systemImage: "calendar")
@@ -404,6 +475,10 @@ struct TaskRow: View {
                 }
                 if let estimate {
                     Label(formatMinutes(Int(estimate)), systemImage: "timer").foregroundStyle(.secondary)
+                }
+                if folded > 0 {
+                    Label(folded == 1 ? "1 subtask" : "\(folded) subtasks", systemImage: "list.bullet.indent")
+                        .foregroundStyle(.secondary)
                 }
                 ForEach(chips.prefix(rowChips)) { label in
                     LabelChip(name: label["name"].string ?? "", color: label["color"].string)

@@ -129,6 +129,8 @@ final class AppModel {
     var page: Page? = .today
     /// The optional pages hidden from the sidebar here, by key.
     private(set) var hiddenPages: Set<String> = []
+    /// Tasks whose subtasks are folded away on this device, in the order they were folded.
+    private(set) var foldedTasks: [String] = []
     /// The Filter page's query, kept while other pages are shown.
     var filterQuery = ""
     /// Bumped to put the focus in the Filter page's query.
@@ -252,6 +254,7 @@ final class AppModel {
             snapshot = try DustpanCore.snapshot(store)
             waiting = try store.outboxCount()
             hiddenPages = Set(try store.meta(hiddenPagesKey).array?.compactMap(\.string) ?? [])
+            foldedTasks = try store.meta(foldedTasksKey).array?.compactMap(\.string) ?? []
             settlePage()
         } catch {
             status = .failed("\(error)")
@@ -514,6 +517,21 @@ final class AppModel {
         Page.optional.filter { !hiddenPages.contains($0.key ?? "") || $0 == page }
     }
 
+    /// Fold a task's subtasks away in project lists, or show them. Kept on this device, never synced.
+    func setFolded(_ taskId: String, _ fold: Bool) {
+        saveFolds(foldedAfter(foldedTasks, taskId, fold: fold, tasks: snapshot.allTasks))
+    }
+
+    private func saveFolds(_ folded: [String]) {
+        guard let store, folded != foldedTasks else { return }
+        do {
+            try store.setMeta(foldedTasksKey, .array(folded.map(JSON.string)))
+            foldedTasks = folded
+        } catch {
+            show(Toast(message: "\(error)"))
+        }
+    }
+
     /// Hide an optional page from the sidebar on this device, with Undo; or show it again.
     func setHidden(_ page: Page, _ hidden: Bool) {
         guard let store, let key = page.key else { return }
@@ -759,6 +777,10 @@ final class AppModel {
     func drop(_ taskId: String, on target: DropTarget, named name: String? = nil) {
         spring?.cancel()
         guard let task = snapshot.allTasks[taskId] else { return }
+        // Put under a folded task, it would vanish: unfold the way down to it.
+        if case .place(let place) = target, let parent = place.parentId {
+            saveFolds(unfoldedDownTo(foldedTasks, parent, tasks: snapshot.allTasks))
+        }
         let names = dropNames(target, task)
         if case .label(let id) = target, task["labels"].array?.contains(.string(id)) == true {
             show(Toast(message: "Already has @\(names[id] ?? "")"))

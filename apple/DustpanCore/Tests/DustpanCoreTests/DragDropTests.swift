@@ -139,6 +139,7 @@ private func spot(_ parent: String? = nil, before: String? = nil, after: String?
         let done = Row(id: "d", values: ["completed_at": 5])
         let tree = [Node(row: Row(id: "a"), children: [Node(row: Row(id: "a1")), Node(row: done)]), Node(row: Row(id: "b"))]
         #expect(openSlots(tree) == [Slot("a", 0), Slot("a1", 1, "a"), Slot("b", 0)])
+        #expect(openSlots(tree, folded: ["a"]) == [Slot("a", 0), Slot("b", 0)])
     }
 
     @Test func describesEachKindOfChange() {

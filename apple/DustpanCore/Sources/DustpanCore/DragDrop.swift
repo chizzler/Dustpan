@@ -183,9 +183,11 @@ public func nudge(_ rows: [Slot], projectId: String?, sectionId: String?, taskId
 }
 
 /// The open rows of a task tree in display order, as Slots. Completed rows hold only completed children.
-public func openSlots(_ nodes: [Node], depth: Int = 0, parent: String? = nil) -> [Slot] {
+/// A folded task's subtasks are left out, so drops and moves treat it as a leaf.
+public func openSlots(_ nodes: [Node], depth: Int = 0, parent: String? = nil, folded: Set<String> = []) -> [Slot] {
     nodes.filter { $0.row["completed_at"].isNull }.flatMap { node in
-        [Slot(node.id, depth, parent)] + openSlots(node.children, depth: depth + 1, parent: node.id)
+        [Slot(node.id, depth, parent)]
+            + (folded.contains(node.id) ? [] : openSlots(node.children, depth: depth + 1, parent: node.id, folded: folded))
     }
 }
 

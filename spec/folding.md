@@ -29,3 +29,15 @@ What the desktop client implements from `docs/notes-and-subtasks.md`, `docs/keyb
   drag, by design (`Window.refresh_view`), so a drop inside still works, and unfolds it.
 - Fold all and Unfold all.
 - Folding in the task editor's subtask list.
+
+## On the Mac (0.12.1)
+
+- **The same rules,** with these differences. `Folding.swift` ports `folded_after` and `unfolded_down_to`, with their
+  tests, and `openSlots` leaves a folded task's subtasks out.
+- **The leading slot** is only on project and Inbox lists, the pages with trees. The Add field lines up with it.
+- **Keys.** ⌘← folds and ⌘→ unfolds, as Finder folds a list's folders: View ▸ Fold Subtasks and Unfold Subtasks.
+  A bare ← can't be had: SwiftUI's List is an outline view underneath and takes it before `onKeyPress` does.
+  So there's no ← to the parent. The commands are off while an Add field has the focus, so ⌘← and ⌘→ still move
+  its insertion point.
+- **Menu.** The row menu's Fold Subtasks or Unfold Subtasks, after Labels….
+- **Focus.** A selected subtask folded away hands the selection to the row it's folded under.
