@@ -7,8 +7,46 @@ enum Page: Hashable {
     case upcoming
     case inbox
     case project(String)
+    /// An archived project: its page offers Unarchive.
+    case archived(String)
     case label(String)
     case view(String)
+    case anytime
+    case completed
+    case filter
+}
+
+extension Page {
+    /// Built-in pages that can be hidden from the sidebar on this device, never deleted.
+    static let optional: [Page] = [.anytime, .completed, .filter]
+
+    /// The key in store meta `hidden_pages`, the desktop client's.
+    var key: String? {
+        switch self {
+        case .anytime: "anytime"
+        case .completed: "completed"
+        case .filter: "filter"
+        default: nil
+        }
+    }
+
+    var name: String {
+        switch self {
+        case .anytime: "Anytime"
+        case .completed: "Completed"
+        case .filter: "Filter"
+        default: ""
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .anytime: "square.stack"
+        case .completed: "checkmark.circle"
+        case .filter: "magnifyingglass"
+        default: "questionmark"
+        }
+    }
 }
 
 /// A label in the editor: an existing one, or a new one.
@@ -22,6 +60,20 @@ struct ViewDraft: Identifiable {
     let id = UUID()
     var view: Row?
     var query = ""
+}
+
+/// A project in the editor: an existing one, or a new one at the top level or under parentId.
+struct ProjectDraft: Identifiable {
+    let id = UUID()
+    var project: Row?
+    var parentId: String?
+}
+
+/// A section being named: a new one in projectId, or an existing one.
+struct SectionDraft: Identifiable {
+    let id = UUID()
+    let projectId: String
+    var section: Row?
 }
 
 /// A short message at the foot of the window, with Undo when the action can be undone.
@@ -59,6 +111,13 @@ final class AppModel {
     var editing: Row?
     /// The saved view open in its editor.
     var editingView: ViewDraft?
+    /// The project open in its editor.
+    var editingProject: ProjectDraft?
+    /// The project whose delete waits for a yes.
+    private(set) var deletingProject: Row?
+    var confirmsProjectDelete = false
+    /// The section being named.
+    var editingSection: SectionDraft?
     /// The label open in its editor.
     var editingLabel: LabelDraft?
     /// The task whose row shows the label picker.
@@ -68,6 +127,27 @@ final class AppModel {
     /// Why the app can't start: no config, or no database.
     private(set) var setupProblem: String?
     var page: Page? = .today
+    /// The optional pages hidden from the sidebar here, by key.
+    private(set) var hiddenPages: Set<String> = []
+    /// Tasks whose subtasks are folded away on this device, in the order they were folded.
+    private(set) var foldedTasks: [String] = []
+    /// The Filter page's query, kept while other pages are shown.
+    var filterQuery = ""
+    /// Bumped to put the focus in the Filter page's query.
+    private(set) var filterFocus = 0
+    /// The task being dragged, and the drop under the pointer.
+    private(set) var drag: TaskDrag?
+    /// The sidebar project being dragged, apart from task drags.
+    private(set) var projectDrag: ProjectDrag?
+    private(set) var dropMark: DropMark?
+    /// The task just dropped: its row flashes and comes into view.
+    private(set) var flash: String?
+    /// Where the pointer is over the row it hovers, from the row's left: a drag's grab point.
+    @ObservationIgnored var hoverX: Double = 0
+    @ObservationIgnored private var markTick = 0
+    @ObservationIgnored private var spring: Task<Void, Never>?
+    /// A sync waits until the drop, so the page isn't rebuilt under the pointer.
+    @ObservationIgnored private var syncAfterDrag = false
 
     private let store: Store?
     private let api: Api?
@@ -131,6 +211,10 @@ final class AppModel {
     /// Exchange with the server. A call while one runs makes it go round again.
     func sync() async {
         guard let syncer else { return }
+        guard drag == nil && projectDrag == nil else {
+            syncAfterDrag = true
+            return
+        }
         guard status != .syncing else {
             syncAgain = true
             return
@@ -169,10 +253,25 @@ final class AppModel {
         do {
             snapshot = try DustpanCore.snapshot(store)
             waiting = try store.outboxCount()
+            hiddenPages = Set(try store.meta(hiddenPagesKey).array?.compactMap(\.string) ?? [])
+            foldedTasks = try store.meta(foldedTasksKey).array?.compactMap(\.string) ?? []
+            settlePage()
         } catch {
             status = .failed("\(error)")
         }
         checkReminders()
+    }
+
+    /// A project archived, unarchived or deleted here or elsewhere: its page follows it.
+    private func settlePage() {
+        let archived = Set(snapshot.archivedProjects.map(\.row.id))
+        switch page {
+        case .project(let id) where projectsById[id] == nil:
+            page = archived.contains(id) ? .archived(id) : .today
+        case .archived(let id) where !archived.contains(id):
+            page = projectsById[id] != nil ? .project(id) : .today
+        default: break
+        }
     }
 
     // MARK: reminders
@@ -265,15 +364,34 @@ final class AppModel {
         }
     }
 
-    /// Add a task at the end of a list. False when it can't be added.
-    func add(_ title: String, to place: Place, due: JSON = nil, labels: [String] = []) -> Bool {
+    /// Add a task from a quick-add line at the end of a list. The page's place, due and labels fill in
+    /// what the line leaves out. False when it can't be added.
+    func add(_ line: String, to place: Place, due: JSON = nil, labels: [String] = []) -> Bool {
         perform {
-            try $0.addTask(title, projectId: place.projectId, sectionId: place.sectionId, due: due, labels: labels)
+            try $0.quickAdd(line, projectId: place.projectId, sectionId: place.sectionId, due: due, labels: labels)
         } != nil
     }
 
-    func addSubtask(_ title: String, to parentId: String) throws {
-        try apply { try $0.addTask(title, parentId: parentId) }
+    func addSubtask(_ line: String, to parentId: String) throws {
+        try apply { try $0.quickAdd(line, parentId: parentId) }
+    }
+
+    /// What a quick-add line will set besides the title, as "Tomorrow 15:00 · Work · @phone · p1".
+    func quickAddPreview(_ line: String) -> String {
+        guard !line.trimmingCharacters(in: .whitespaces).isEmpty, let parsed = try? writer?.parseLine(line) else {
+            return ""
+        }
+        let reminders = parsed.reminders.count
+        let parts: [String?] = [
+            formatDue(parsed.due)?.text, parsed.someday ? "Someday" : nil, parsed.sector,
+            parsed.evening ? "This evening" : nil, parsed.dayPart,
+            parsed.deadline.map { "Deadline \(formatDay($0))" },
+            parsed.projectId.map { id in snapshot.projectPaths.first { $0.id == id }?.path ?? "Project" },
+        ] + parsed.labels.map { "@\($0)" } + [
+            parsed.priority.map { "p\($0)" }, parsed.estimateMinutes.map(formatMinutes), parsed.recurrence,
+            reminders > 0 ? "\(reminders) reminder\(reminders == 1 ? "" : "s")" : nil,
+        ]
+        return parts.compactMap { $0 }.joined(separator: " · ")
     }
 
     /// Delete tasks and their subtasks. One Undo brings them all back.
@@ -293,6 +411,78 @@ final class AppModel {
         }) { _ in tasks.count == 1 ? "Deleted “\(first["title"].string ?? "")”" : "Deleted \(tasks.count) tasks" }
     }
 
+    /// Create a project and show it, or edit one.
+    func saveProject(_ project: Row?, name: String, color: String, parentId: String??) throws {
+        if let project {
+            let done = try apply { try $0.editProject(project.id, ProjectEdit(name: name, color: color, parentId: parentId)) }
+            if !done.undo.isEmpty { registerUndo("Edit Project", done) }
+        } else {
+            page = .project(try apply { try $0.addProject(name, under: parentId ?? nil, color: color) })
+        }
+    }
+
+    /// "Parent › Child", archived projects too.
+    func projectPath(_ projectId: String) -> String {
+        DustpanCore.projectPath(projectId, Dictionary(uniqueKeysWithValues: snapshot.liveProjects.map { ($0.id, $0) }))
+    }
+
+    /// The project and its live sub-projects, with Undo.
+    func archiveProject(_ projectId: String) {
+        let path = projectPath(projectId)
+        undoable("Archive Project", { try $0.archiveProject(projectId) }) { _ in "Archived “\(path)”" }
+    }
+
+    func unarchiveProject(_ projectId: String) {
+        let done = undoable("Unarchive Project", { try $0.unarchiveProject(projectId) }) { _ in
+            "Unarchived “\(self.projectPath(projectId))”"
+        }
+        if done != nil { page = .project(projectId) }
+    }
+
+    /// Open tasks in a project, its sub-projects' apart: what deleting it hides.
+    func openTasks(in projectId: String) -> Int {
+        snapshot.allTasks.values.count { $0["deleted_at"].isNull && $0["completed_at"].isNull && $0["project_id"].string == projectId }
+    }
+
+    /// Delete a project, asking first when it has open tasks.
+    func askToDelete(_ project: Row) {
+        if openTasks(in: project.id) > 0 {
+            deletingProject = project
+            confirmsProjectDelete = true
+        } else {
+            deleteProject(project.id)
+        }
+    }
+
+    /// Its sub-projects move up a level. Undo brings it back, with its tasks.
+    func deleteProject(_ projectId: String) {
+        let path = projectPath(projectId)
+        undoable("Delete Project", { try $0.deleteProject(projectId) }) { _ in "Deleted “\(path)”" }
+    }
+
+    /// Name a new section, last in its project, or rename one.
+    func saveSection(_ draft: SectionDraft, name: String) throws {
+        if let section = draft.section {
+            let done = try apply { try $0.renameSection(section.id, to: name) }
+            if !done.undo.isEmpty { registerUndo("Rename Section", done) }
+        } else {
+            try apply { try $0.addSection(name, to: draft.projectId) }
+        }
+    }
+
+    func moveSection(_ sectionId: String, step: Int) {
+        undoable(step < 0 ? "Move Up" : "Move Down", { try $0.moveSection(sectionId, step: step) }, message: nil)
+    }
+
+    /// Its open tasks go to "No section". Undo puts them back.
+    func deleteSection(_ section: Row) {
+        let name = section["name"].string ?? ""
+        undoable("Delete Section", { try $0.deleteSection(section.id) }) { done in
+            let moved = done.undo.count - 1
+            return "Deleted section “\(name)”" + (moved > 0 ? ". \(moved) task\(moved == 1 ? "" : "s") moved to No section" : "")
+        }
+    }
+
     /// Create a view and show it, or edit one.
     func saveView(_ view: Row?, _ edit: ViewEdit) throws {
         if let view {
@@ -307,6 +497,61 @@ final class AppModel {
     func deleteView(_ view: Row) {
         if page == .view(view.id) { page = .today }
         undoable("Delete View", { try $0.deleteView(view.id) }) { _ in "Deleted view “\(view["name"].string ?? "")”" }
+    }
+
+    // MARK: built-in pages
+
+    /// The Filter page, with its query focused.
+    func openFilter() {
+        page = .filter
+        filterFocus += 1
+    }
+
+    /// Label and project names for the query helper, in sidebar order.
+    var queryNames: (labels: [String], projects: [String]) {
+        (snapshot.labelsInOrder.map { $0["name"].string ?? "" }, flatProjects.map { $0.node.row["name"].string ?? "" })
+    }
+
+    /// The optional pages the sidebar lists: those not hidden, and a hidden one while it's open.
+    var sidebarPages: [Page] {
+        Page.optional.filter { !hiddenPages.contains($0.key ?? "") || $0 == page }
+    }
+
+    /// Fold a task's subtasks away in project lists, or show them. Kept on this device, never synced.
+    func setFolded(_ taskId: String, _ fold: Bool) {
+        saveFolds(foldedAfter(foldedTasks, taskId, fold: fold, tasks: snapshot.allTasks))
+    }
+
+    private func saveFolds(_ folded: [String]) {
+        guard let store, folded != foldedTasks else { return }
+        do {
+            try store.setMeta(foldedTasksKey, .array(folded.map(JSON.string)))
+            foldedTasks = folded
+        } catch {
+            show(Toast(message: "\(error)"))
+        }
+    }
+
+    /// Hide an optional page from the sidebar on this device, with Undo; or show it again.
+    func setHidden(_ page: Page, _ hidden: Bool) {
+        guard let store, let key = page.key else { return }
+        var keys = (try? store.meta(hiddenPagesKey).array?.compactMap(\.string)) ?? []
+        keys.removeAll { $0 == key }
+        if hidden { keys.append(key) }
+        do {
+            try store.setMeta(hiddenPagesKey, .array(keys.map(JSON.string)))
+        } catch {
+            show(Toast(message: "\(error)"))
+            return
+        }
+        hiddenPages = Set(keys)
+        if hidden && self.page == page { self.page = .today }
+        undoManager?.registerUndo(withTarget: self) { $0.setHidden(page, !hidden) }
+        undoManager?.setActionName(hidden ? "Hide \(page.name)" : "Show \(page.name)")
+        if hidden {
+            show(Toast(message: "\(page.name) is hidden. Bring it back from View ▸ Show \(page.name).",
+                       undoable: undoManager != nil))
+        }
     }
 
     func edit(_ taskId: String, _ edit: TaskEdit) throws {
@@ -356,6 +601,31 @@ final class AppModel {
         } else {
             page = .label(try apply { try $0.addLabel(name, color: color) })
         }
+    }
+
+    /// A project dropped on a sidebar row, as one batch with Undo.
+    func placeProject(_ projectId: String, at place: ItemPlace) {
+        let name = { (id: String?) in self.snapshot.liveProjects.first { $0.id == id }?["name"].string ?? "" }
+        let oldParent = snapshot.liveProjects.first { $0.id == projectId }?["parent_id"].string
+        undoable("Move Project", {
+            try $0.placeProject(projectId, under: place.parentId, before: place.before, after: place.after)
+        }) { _ in
+            if place.parentId == oldParent { return "Order changed" }
+            guard let parent = place.parentId else { return "Moved “\(name(projectId))” to the top level" }
+            return "Moved “\(name(projectId))” under “\(name(parent))”"
+        }
+    }
+
+    func moveProject(_ projectId: String, step: Int) {
+        undoable(step < 0 ? "Move Up" : "Move Down", { try $0.moveProject(projectId, step: step) }, message: nil)
+    }
+
+    func moveView(_ view: Row, step: Int) {
+        undoable(step < 0 ? "Move Up" : "Move Down", { try $0.moveView(view.id, step: step) }, message: nil)
+    }
+
+    func moveView(_ view: Row, to index: Int) {
+        undoable("Move View", { try $0.moveView(view.id, to: index) }, message: nil)
     }
 
     func moveLabel(_ label: Row, step: Int) {
@@ -410,9 +680,10 @@ final class AppModel {
 
     /// Run an action and offer its Undo in the toast and in Edit ▸ Undo. Redo runs the action again.
     /// Without a message, there's no toast: Edit ▸ Undo alone.
+    @discardableResult
     private func undoable(_ name: String, _ action: @escaping (Writer) throws -> Done,
-                          message: ((Done) -> String)?) {
-        guard let done = perform(action), !done.undo.isEmpty else { return }
+                          message: ((Done) -> String)?) -> Done? {
+        guard let done = perform(action), !done.undo.isEmpty else { return nil }
         if let message { show(Toast(message: message(done), undoable: undoManager != nil)) }
         undoManager?.registerUndo(withTarget: self) { model in
             model.toast = nil
@@ -421,6 +692,7 @@ final class AppModel {
             model.undoManager?.setActionName(name)
         }
         undoManager?.setActionName(name)
+        return done
     }
 
     /// Edit ▸ Undo for an edit made in a sheet. Redo isn't offered: the sheet's values are gone.
@@ -434,7 +706,125 @@ final class AppModel {
         self.toast = toast
     }
 
+    // MARK: drag and drop
+
+    /// A drag starts. Its source calls endDrag when it ends, dropped or not.
+    func startDrag(_ taskId: String, grabX: Double = 0) {
+        drag = TaskDrag(taskId: taskId, grabX: grabX)
+    }
+
+    func startProjectDrag(_ projectId: String) {
+        /// The project, its parent and its siblings.
+        func find(_ nodes: [Node], under parent: String?) -> (Node, String?, [Node])? {
+            for node in nodes {
+                if node.id == projectId { return (node, parent, nodes) }
+                if let hit = find(node.children, under: node.id) { return hit }
+            }
+            return nil
+        }
+        func ids(_ nodes: [Node]) -> [String] { nodes.flatMap { [$0.id] + ids($0.children) } }
+        guard let (node, parent, siblings) = find(snapshot.projects, under: nil),
+              let index = siblings.firstIndex(where: { $0.id == projectId }) else {
+            projectDrag = ProjectDrag(projectId: projectId, below: [])
+            return
+        }
+        projectDrag = ProjectDrag(projectId: projectId, below: Set(ids(node.children)), parentId: parent,
+                                  prev: index > 0 ? siblings[index - 1].id : nil,
+                                  next: index + 1 < siblings.count ? siblings[index + 1].id : nil)
+    }
+
+    func endDrag() {
+        dropMark = nil
+        spring?.cancel()
+        guard drag != nil || projectDrag != nil else { return }
+        drag = nil
+        projectDrag = nil
+        if syncAfterDrag {
+            syncAfterDrag = false
+            Task { await sync() }
+        }
+    }
+
+    func mark(_ mark: DropMark) {
+        markTick += 1
+        if dropMark != mark { dropMark = mark }
+    }
+
+    /// The pointer left a target. The mark goes unless another target takes over soon, so it doesn't flicker
+    /// in the gaps between rows.
+    func unmark() {
+        let tick = markTick
+        Task {
+            try? await Task.sleep(for: .milliseconds(150))
+            if markTick == tick {
+                dropMark = nil
+                spring?.cancel()
+            }
+        }
+    }
+
+    /// Holding a drag over a sidebar row for 700 ms opens its page, so the task can be placed exactly.
+    func springLoad(_ page: Page, from key: String) {
+        spring?.cancel()
+        spring = Task {
+            try? await Task.sleep(for: .milliseconds(700))
+            if !Task.isCancelled && drag != nil && dropMark == .target(key) { self.page = page }
+        }
+    }
+
+    /// Apply a drop as one batch with Undo, then flash the task where it landed.
+    /// A move by key or menu (named) has Edit ▸ Undo and no toast, as the sidebar's moves do.
+    func drop(_ taskId: String, on target: DropTarget, named name: String? = nil) {
+        spring?.cancel()
+        guard let task = snapshot.allTasks[taskId] else { return }
+        // Put under a folded task, it would vanish: unfold the way down to it.
+        if case .place(let place) = target, let parent = place.parentId {
+            saveFolds(unfoldedDownTo(foldedTasks, parent, tasks: snapshot.allTasks))
+        }
+        let names = dropNames(target, task)
+        if case .label(let id) = target, task["labels"].array?.contains(.string(id)) == true {
+            show(Toast(message: "Already has @\(names[id] ?? "")"))
+            return
+        }
+        let message: (Done) -> String = { _ in describeDrop(target, task: task, names: names) { formatDay($0) } }
+        let done = undoable(name ?? "Move", { try $0.drop(taskId, on: target) }, message: name == nil ? message : nil)
+        guard done != nil else { return }
+        flash = taskId
+        Task {
+            try? await Task.sleep(for: .milliseconds(700))
+            if flash == taskId { flash = nil }
+        }
+    }
+
+    /// The names describeDrop needs: projects, sections, tasks and labels the drop refers to.
+    private func dropNames(_ target: DropTarget, _ task: Row) -> [String: String] {
+        var ids = [task["parent_id"].string]
+        switch target {
+        case .place(let place): ids += [place.projectId, place.sectionId, place.parentId]
+        case .project(let id): ids.append(id)
+        case .label(let id): ids.append(id)
+        case .day: break
+        }
+        let sections = snapshot.sectionsByProject.values.joined()
+        var names: [String: String] = [:]
+        for id in ids.compactMap({ $0 }) {
+            names[id] = snapshot.liveProjects.first { $0.id == id }?["name"].string
+                ?? sections.first { $0.id == id }?["name"].string
+                ?? snapshot.labels[id]?["name"].string
+                ?? snapshot.allTasks[id]?["title"].string
+        }
+        return names
+    }
+
     // MARK: reads
+
+    /// A list page's title and project. A project that's gone shows the Inbox.
+    func listHeading(_ page: Page) -> (title: String, projectId: String?) {
+        if case .project(let id) = page, let node = flatProjects.first(where: { $0.node.id == id })?.node {
+            return (node.row["name"].string ?? "", id)
+        }
+        return ("Inbox", nil)
+    }
 
     var today: Day { (try? writer?.today()) ?? Day(.now) }
 

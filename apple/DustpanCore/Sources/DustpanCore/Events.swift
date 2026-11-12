@@ -83,7 +83,8 @@ extension Api {
         var request = URLRequest(url: components.url!, timeoutInterval: Self.streamTimeout)
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-        let (bytes, response) = try await session.bytes(for: request)
+        let (bytes, response) = try await session.bytes(for: request, delegate: NoRedirect.shared)
+        try refuseRedirect(response)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(status) else {
             throw ApiError.server(status: status, code: "http_error",

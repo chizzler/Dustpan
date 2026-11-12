@@ -72,3 +72,10 @@ Typed reminders are resolved against the task's final due, in the same batch:
 The user's default reminder still applies to a task that gets its first due, as for every write.
 
 **Not yet:** the web app's chips (dismissing a recognised part), the per-device language list, and suggestions while typing.
+
+## On the Mac
+
+Mac slice 4b, 2026-11-07. `QuickAdd*.swift` in DustpanCore port these modules file for file, and pass the same 160
+vectors. `vocab.json` is a package resource, checked against the clone like the desktop's copy.
+`Writer.quickAdd` ports `Writer.quick_add`. The Add fields and the editor's subtask line use it, with the same
+preview line. The languages come from `user_prefs.language` and the Mac's first preferred language.

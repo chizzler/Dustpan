@@ -36,6 +36,18 @@ and not yet seen loses once, as last-writer-wins.
 `dustpan/noteview.py` turns the parsed blocks into GTK labels. A task row shows the note's first line, dimmed.
 Filters already search notes (`search:`).
 
+## On the Mac (0.11.0)
+
+- `Markdown.swift` ports `markdown.py`. Inline text becomes an `AttributedString` (presentation intents and links),
+  which SwiftUI's `Text` shows; `NoteView` lays out the blocks. Links open in the browser.
+- The editor's Notes section has Write (a monospaced `TextEditor`) and Preview, opening as on the desktop.
+  There's no ⌘Return: Command keys go to the menus before the text view, so Return is a newline and Save is the button.
+- The 64 KB bound is on the JSON the Mac sends: UTF-8, unescaped, so `JSON.string(note).data.count <= 65536`.
+- Smart quotes and dashes are registered off for the app (`NSAutomaticQuoteSubstitutionEnabled`,
+  `NSAutomaticDashSubstitutionEnabled`): curly quotes and em dashes break tables and code. Edit ▸ Substitutions
+  (`TextEditingCommands`) turns them back on. The iPhone will need its own answer.
+- A row shows the first line under the title, dimmed, on every list.
+
 ## Tests
 
 `tests/test_markdown.py` ports the cases of `markdown.test.ts` that don't depend on React or mentions,

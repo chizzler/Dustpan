@@ -36,6 +36,8 @@ public struct Snapshot: Sendable {
     public var liveProjects: [Row] = []
     /// Visible projects in sidebar order, as "Parent › Child", for headings.
     public var projectPaths: [(id: String, path: String)] = []
+    /// Archived projects, flat, by path: what the sidebar lists under "Archived".
+    public var archivedProjects: [(row: Row, path: String)] = []
     public var prefs: [String: JSON] = [:]
 
     /// Live labels in sidebar order.
@@ -151,6 +153,12 @@ public func snapshot(_ store: Store) throws -> Snapshot {
     }
     walk(snap.projects, [])
     snap.liveProjects = projects.values.filter(isLive).sorted(by: orderLess)
+    snap.archivedProjects = snap.liveProjects.filter { $0["archived"].isTruthy }
+        .map { ($0, projectPath($0.id, projects)) }
+        .sorted { a, b in
+            let pa = a.path.lowercased(), pb = b.path.lowercased()
+            return pa != pb ? pa < pb : bytesLess(a.row.id, b.row.id)
+        }
     snap.views = try store.rows("view").values.filter(isListView).sorted(by: viewOrderLess)
     snap.prefs = try store.rows("user_prefs")["me"]?.values ?? [:]
     for reminder in try store.rows("reminder").values where isLive(reminder) {
@@ -163,6 +171,16 @@ public func snapshot(_ store: Store) throws -> Snapshot {
         }
     }
     return snap
+}
+
+/// "Parent › Child": the project's name after its live ancestors'. Stops at a deleted ancestor and in a cycle.
+public func projectPath(_ projectId: String, _ projects: [String: Row]) -> String {
+    var names: [String] = [], seen: Set<String> = [], id: String? = projectId
+    while let current = id, seen.insert(current).inserted, let row = projects[current], isLive(row) {
+        names.append(row["name"].string ?? "")
+        id = row["parent_id"].string
+    }
+    return names.reversed().joined(separator: " › ")
 }
 
 /// Sections of a project, each with its task trees. "No section" first.

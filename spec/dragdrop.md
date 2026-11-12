@@ -1,7 +1,8 @@
 # Drag and drop
 
 Slice 6. Drag a task to change where it lives: its place in a list, its parent, its section, its project, its date or its labels.
-Status: designed 2026-11-01. 6a built 2026-11-01, tried and approved. 6b built 2026-11-01, tried and approved. 6c not built.
+Status: designed 2026-11-01. 6a built 2026-11-01, tried and approved. 6b built 2026-11-01, tried and approved. 6c partly built: the sidebar, 2026-11-02.
+The Mac client's slices 6a (2026-11-06) and 6b (2026-11-11, tried and approved) follow the same rules; see "On the Mac" at the end.
 
 ## What slice 5 had
 
@@ -272,3 +273,91 @@ Built 2026-11-02. Projects, labels and views can be dragged within their own gro
 - [GNOME Discourse: autoscroll during drag and drop](https://discourse.gnome.org/t/gtkscrolledwindow-auto-scroll-during-drag-n-drop/5727)
 - [Nautilus DnD cleanup (old autoscroll constants)](https://lists.gnome.org/archives/commits-list/2022-June/msg10671.html)
 - [Kleppmann et al.: a highly-available move operation for replicated trees](https://martin.kleppmann.com/2021/10/07/crdt-tree-move-operation.html)
+
+## On the Mac
+
+Mac slice 6a, 2026-11-06. `DragDrop.swift` ports the rules here (`Placement` is the desktop's `Place`, which
+the Swift code already used for a project and section), and `Writer.drop` ports `Writer.drop`. The tests are ports.
+
+**The SwiftUI list** (the default):
+- **Each row is its own drop target** (`ListDrop`, an `onDrop` delegate), and so are a section's heading and its
+  Add field (the end of the section). The pointer's y in the row picks the zone, its x the level, as above.
+  Leaving a target keeps the mark for 150 ms, so it doesn't flicker in the gaps between rows.
+- **The whole row width drags**, so a press-and-drag beside the text never selects the rows it crosses.
+  Esc clears a selection.
+- **The grab point** comes from the pointer's last hover position over the row, since the drag doesn't give one.
+- **The drag starts** when SwiftUI asks `draggable` for its payload, and **ends** when the mouse button is up.
+  `onDragSessionUpdated` doesn't fire for a plain `draggable` row.
+- **Rows drag with `draggable`, never `onDrag`, and nothing List-aware goes outside it.** Found 2026-11-09 on
+  macOS 27: after one drag, the list swallowed every other click, so selection lagged or stuck and a press-and-drag
+  selected a range. `onDrag` does that on its own; so does `onGeometryChange` or `.badge` applied outside the drag
+  modifier, even with `draggable`. Inside it, both are fine. Overlays, `onDrop`, popovers and menus outside are fine.
+  A minimal app reproduces each case.
+- **Each row's drop area is the whole row.** The List's 4-point vertical row insets become padding inside the row
+  (`fullRowDropArea`). In an inset, the List showed its own "drop on this row" fill, and the row's target took the
+  pointer as below itself: a third indicator, and drops that landed one slot off. A drop line stays inside one row's
+  padding (the next row draws over anything that crosses the boundary), and the nest ring just inside the row,
+  from the task's own indent, so it sits the same distance from the check circle at every level.
+- **Sidebar rows too** (Mac 0.8.6): the sidebar keeps its own row height, so a row fills it (`sidebarDropArea`), and
+  `.listRowInsets(.vertical, 0)` goes on the row's outermost view, the only place the sidebar reads it. In the inset,
+  the drop's location was meaningless (y = 136 in a 25-point row), which read as "after" at the top of every row.
+- **The pointer's place in a row comes from the mouse and the row's frame**, not `DropInfo.location`: in the List's
+  margin left of a row (16 points in the sidebar), SwiftUI gives the location in the List's coordinates. That margin
+  takes no drop at all; accepting one there drew the List's highlight. (Mac 0.8.7.)
+- **A spot that leaves the item where it is shows nothing** and takes no drop (`leavesInPlace` for tasks,
+  `ProjectDrag.moves(to:)` for projects): the gaps either side of it at its own level. Another level still moves it.
+- **The sidebar's projects are plain rows**, indented and with their own disclosure arrows, like the task list: an
+  outline row's arrow and indent sit outside the row's view. Each gap gets one line: "before" the row below is drawn
+  at the bottom of the row above, like "after" it, indented to the level the project lands on. ← and → no longer
+  fold projects. Rows are keyed by project id, so a moved project keeps its List row and its selection. (Mac 0.8.8.)
+- **A drop ends its drag**, and a drag let go elsewhere ends 500 ms after mouse-up. Ending at mouse-up raced the
+  drop: a drop that found no drag was refused and its preview slid back. About 350 ms after a drop, while the preview
+  fades, one more `dropUpdated` arrives, so a target marks nothing unless a drag of its kind is on, and ending a drag
+  always clears the mark. `onDragSessionUpdated` doesn't fire for a List row's `draggable` (macOS 27). (Mac 0.8.8.)
+- **The drop animation is the system's.** An accepted drop glides the preview onto the pointer and fades it; we
+  keep it rather than fake a preview or own the gesture, for the iPhone app's sake. `onMove` rows (labels, views)
+  settle into place instead, because the List owns those drops.
+- **The ring shows alone.** Nesting has a place among the children too, but the ring already says where the task
+  goes, so no line goes with it.
+- **Autoscroll** is whatever the system list does during a drag. Not written by hand.
+
+**The `NSOutlineView` spike** (View ▸ Outline Task List, project and Inbox pages only), added 2026-11-07:
+- AppKit draws the drop line or ring, proposes a parent and child index, scrolls, and opens collapsed rows on hover.
+- `resolveDrop(_:projectId:sectionId:parent:before:inside:moving:)` turns that proposal into the same `Drop`,
+  so both lists share one rule. Section headings are flat group rows, and a drop on one means the top of its section.
+- The outline view reports the drag's start and end itself.
+- Not there yet: the row menu, keys, an Add field per section, the label picker, the Inbox's planned tasks.
+
+**Why the spike:** SwiftUI's own list moves (`onMove`, macOS 27's `reorderable`) are flat, with no "inside" and no
+level, and nested drag and drop in a SwiftUI `List` has a poor record. `NSOutlineView` is where macOS does tree
+drag and drop. Whether the task list moves to it is still open.
+
+**The sidebar** (Mac 0.8.0, 2026-11-07), as "In the sidebar" above:
+- **Projects** drag with their own drag, apart from the task drag. Each project row is one drop target for both:
+  a task moves into the project, as before; a project lands by the row's zones through `placeItem`, with a line
+  along the row's top or bottom edge or a ring to nest. Over itself or its own sub-projects it's refused.
+- **Views and labels** reorder with SwiftUI's `onMove`, which is flat and enough for them. Labels already did.
+- **Without a pointer:** Move Up and Move Down in each project's and view's menu, as labels have, and ⌥↑ ⌥↓ on the
+  selected project, view or label (through Edit ▸ Move Up and Move Down since Mac 0.9.0; see 6b below). A project's parent changes by drag only: the Mac has no project editor yet.
+- Writes: `Writer.placeProject`, `moveProject` and `moveView`; labels share their helpers. Tests: `SidebarOrderTests.swift`.
+- A project drop toasts as the desktop's does. Moves by menu, key or `onMove` have Edit ▸ Undo and no toast, as labels had.
+
+Escape and drops outside a target cancel, as before. Calendar targets don't exist on the Mac yet.
+
+**6b, without a pointer** (Mac 0.9.0 and 0.9.1, 2026-11-11, tried and approved). `nudge` in `DragDrop.swift` is the desktop's, with its tests;
+every key and menu move ends in `Writer.drop`, as a drag does.
+- **Keys, Mac style:** ⌥↑ ⌥↓ move a task among its siblings, ⇧⌥↑ ⇧⌥↓ to the top or bottom, ⌘] indents (the last
+  subtask of the task above) and ⌘[ outdents (right after its old parent). The desktop's Tab and Shift+Tab would trap
+  the Mac's focus in the list, so they're the Mac's usual indent keys instead. C completes or reopens, L picks labels,
+  Return or a double-click opens the editor, Delete deletes, Esc clears the selection. ↑ ↓ are the List's own.
+- **They're Edit menu commands** (Edit ▸ Move Up to Outdent), fed by the focused list through a focused value
+  (`ListMoves`). A List's table takes ⌥↑ and ⌥↓ itself (it jumps to the first or last row) before `onKeyPress` sees
+  them; menu key equivalents come first. The sidebar's ⌥↑ ⌥↓ go the same way: before 0.9.0 they only moved the
+  selection. Moves that can't go anywhere are greyed out, and the key then does nothing.
+- **The row menu:** Edit…, Complete, Labels…; the six moves with their keys shown, greyed where they can't go;
+  Due Today, Due Tomorrow and Move To (the Inbox, or any project, with a submenu of sections); Delete.
+  The moves show on project and Inbox pages only, as on the desktop; Due and Move To on every page. Open tasks only.
+- **Feedback:** the task stays selected and comes into view, with the flash. Key and menu moves have Edit ▸ Undo
+  and no toast, as the sidebar's do; Due and Move To toast as a drop does.
+- **Focus:** a row's drag takes the click, so each list takes the focus itself when its selection changes (0.9.1).
+  Without it, a clicked task stayed unfocused and its keys went to the other list.

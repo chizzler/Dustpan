@@ -28,9 +28,14 @@ public struct Done: Sendable {
     public init(undo: [Change] = [], nextDue: Day? = nil) { (self.undo, self.nextDue) = (undo, nextDue) }
 }
 
+/// The server's bound on one value, as the JSON it receives.
+let maxValueBytes = 64 * 1024
+
 /// The task fields `Writer.edit` takes. Nil leaves a field alone.
 public struct TaskEdit: Equatable, Sendable {
     public var title: String?
+    /// Markdown. The web app folds it into its rich-text notes_doc, which Dustpan never writes.
+    public var notes: String?
     public var priority: Int64?
     /// .null clears it.
     public var due: JSON?
@@ -44,9 +49,11 @@ public struct TaskEdit: Equatable, Sendable {
     /// "YYYY-MM-DD", or .null for none.
     public var deadline: JSON?
 
-    public init(title: String? = nil, priority: Int64? = nil, due: JSON? = nil, recurrence: String? = nil,
-                place: Place? = nil, labels: [String]? = nil, estimateMinutes: JSON? = nil, deadline: JSON? = nil) {
-        (self.title, self.priority, self.due, self.recurrence, self.place) = (title, priority, due, recurrence, place)
+    public init(title: String? = nil, notes: String? = nil, priority: Int64? = nil, due: JSON? = nil,
+                recurrence: String? = nil, place: Place? = nil, labels: [String]? = nil, estimateMinutes: JSON? = nil,
+                deadline: JSON? = nil) {
+        (self.title, self.notes, self.priority, self.due, self.recurrence) = (title, notes, priority, due, recurrence)
+        self.place = place
         (self.labels, self.estimateMinutes, self.deadline) = (labels, estimateMinutes, deadline)
     }
 
@@ -288,28 +295,35 @@ public final class Writer {
                         parentId: String? = nil, due: JSON = nil, labels: [String] = []) throws -> String {
         let taskId = newId()
         try commit {
-            let tasks = try store.rows("task")
-            let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !title.isEmpty else { throw CannotEdit("A task needs a title") }
-            var (projectId, sectionId) = (projectId, sectionId)
-            if let parentId {
-                projectId = try liveTask(tasks, parentId)["project_id"].string
-                sectionId = nil
-            }
-            try checkProject(projectId)
-            try checkSection(sectionId, in: projectId)
-            var patch: [String: JSON] = [
-                "title": .string(title), "description": "", "project_id": projectId.json,
-                "parent_id": parentId.json, "priority": 4, "due": try checkDue(due),
-                "labels": [], "position": newPosition(tasks), "created_at": .int(now()), "completed_at": nil,
-                "deleted_at": nil, "estimate_minutes": nil,
-            ]
-            if let sectionId { patch["section_id"] = .string(sectionId) }
+            var patch = try newTask(title, projectId: projectId, sectionId: sectionId, parentId: parentId, due: due)
             let (ids, created) = try resolveLabels(labels)
             patch["labels"] = .array(ids.map(JSON.string))
             return created + [Change("task", taskId, patch)]
         }
         return taskId
+    }
+
+    /// The fields of a new task at the end of its list. A subtask takes its parent's project and no section.
+    func newTask(_ title: String, projectId: String?, sectionId: String?, parentId: String?,
+                 due: JSON) throws -> [String: JSON] {
+        let tasks = try store.rows("task")
+        let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { throw CannotEdit("A task needs a title") }
+        var (projectId, sectionId) = (projectId, sectionId)
+        if let parentId {
+            projectId = try liveTask(tasks, parentId)["project_id"].string
+            sectionId = nil
+        }
+        try checkProject(projectId)
+        try checkSection(sectionId, in: projectId)
+        var patch: [String: JSON] = [
+            "title": .string(title), "description": "", "project_id": projectId.json,
+            "parent_id": parentId.json, "priority": 4, "due": try checkDue(due),
+            "labels": [], "position": newPosition(tasks), "created_at": .int(now()), "completed_at": nil,
+            "deleted_at": nil, "estimate_minutes": nil,
+        ]
+        if let sectionId { patch["section_id"] = .string(sectionId) }
+        return patch
     }
 
     /// Complete a task and its open descendants, or roll a repeating task to its next occurrence.
@@ -388,63 +402,74 @@ public final class Writer {
 
     /// Write the changed fields of one task, in one batch.
     public func edit(_ taskId: String, _ edit: TaskEdit) throws {
-        try commit {
-            let tasks = try store.rows("task")
-            let task = try liveTask(tasks, taskId)
-            var patch: [String: JSON] = [:]
-            var out: [Change] = []
-            if let title = edit.title {
-                let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !title.isEmpty else { throw CannotEdit("A task needs a title") }
-                patch["title"] = .string(title)
-            }
-            if let priority = edit.priority {
-                guard (1...4).contains(priority) else { throw CannotEdit("Priority is 1 to 4") }
-                patch["priority"] = .int(priority)
-            }
-            if let due = edit.due {
-                patch["due"] = try checkDue(due)
-                if due.isNull && task["recurrence"].isTruthy && edit.recurrence == nil { patch["recurrence"] = .null }
-                if !due.isNull && task["start"].string == "someday" { patch["start"] = .null }
-            }
-            if let text = edit.recurrence?.trimmingCharacters(in: .whitespacesAndNewlines) {
-                if text.isEmpty {
-                    patch["recurrence"] = .null
-                } else {
-                    let rule: Rule
-                    do { rule = try Rule(parsing: text) } catch { throw CannotEdit("Repeat: \(error)") }
-                    patch["recurrence"] = .string(rule.canonical)
-                    // A rule needs a due date: the first occurrence from today.
-                    if (patch["due"] ?? task["due"]).isNull {
-                        patch["due"] = ["date": .string(rule.first(from: try today()).description)]
-                    }
-                }
-            }
-            if let labels = edit.labels {
-                let (ids, created) = try resolveLabels(labels)
-                patch["labels"] = .array(ids.map(JSON.string))
-                out += created
-            }
-            if let minutes = edit.estimateMinutes {
-                if !minutes.isNull {
-                    guard let n = minutes.int, (1...maxEstimate).contains(n) else {
-                        throw CannotEdit("An estimate is 1 minute to 1 week")
-                    }
-                }
-                patch["estimate_minutes"] = minutes
-            }
-            if let deadline = edit.deadline {
-                if !deadline.isNull {
-                    guard let text = deadline.string, isRealDate(text) else { throw CannotEdit("That isn't a valid date") }
-                }
-                patch["deadline"] = deadline
-            }
-            if let place = edit.place {
-                out += try planMove(tasks, task, to: place, into: &patch)
-            }
-            // New labels come first in the batch, so they exist before the task refers to them.
-            return patch.isEmpty ? out : out + [Change("task", taskId, patch)]
+        try commit { try planEdit(taskId, edit) }
+    }
+
+    /// The changes edit makes, for use inside another plan.
+    func planEdit(_ taskId: String, _ edit: TaskEdit) throws -> [Change] {
+        let tasks = try store.rows("task")
+        let task = try liveTask(tasks, taskId)
+        var patch: [String: JSON] = [:]
+        var out: [Change] = []
+        if let title = edit.title {
+            let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !title.isEmpty else { throw CannotEdit("A task needs a title") }
+            patch["title"] = .string(title)
         }
+        if let notes = edit.notes {
+            let note = String(notes.reversed().drop(while: \.isWhitespace).reversed())
+            // The server's bound on one value, as the JSON it receives.
+            guard JSON.string(note).data.count <= maxValueBytes else {
+                throw CannotEdit("Notes are too long: the limit is 64 KB")
+            }
+            patch["description"] = .string(note)
+        }
+        if let priority = edit.priority {
+            guard (1...4).contains(priority) else { throw CannotEdit("Priority is 1 to 4") }
+            patch["priority"] = .int(priority)
+        }
+        if let due = edit.due {
+            patch["due"] = try checkDue(due)
+            if due.isNull && task["recurrence"].isTruthy && edit.recurrence == nil { patch["recurrence"] = .null }
+            if !due.isNull && task["start"].string == "someday" { patch["start"] = .null }
+        }
+        if let text = edit.recurrence?.trimmingCharacters(in: .whitespacesAndNewlines) {
+            if text.isEmpty {
+                patch["recurrence"] = .null
+            } else {
+                let rule: Rule
+                do { rule = try Rule(parsing: text) } catch { throw CannotEdit("Repeat: \(error)") }
+                patch["recurrence"] = .string(rule.canonical)
+                // A rule needs a due date: the first occurrence from today.
+                if (patch["due"] ?? task["due"]).isNull {
+                    patch["due"] = ["date": .string(rule.first(from: try today()).description)]
+                }
+            }
+        }
+        if let labels = edit.labels {
+            let (ids, created) = try resolveLabels(labels)
+            patch["labels"] = .array(ids.map(JSON.string))
+            out += created
+        }
+        if let minutes = edit.estimateMinutes {
+            if !minutes.isNull {
+                guard let n = minutes.int, (1...maxEstimate).contains(n) else {
+                    throw CannotEdit("An estimate is 1 minute to 1 week")
+                }
+            }
+            patch["estimate_minutes"] = minutes
+        }
+        if let deadline = edit.deadline {
+            if !deadline.isNull {
+                guard let text = deadline.string, isRealDate(text) else { throw CannotEdit("That isn't a valid date") }
+            }
+            patch["deadline"] = deadline
+        }
+        if let place = edit.place {
+            out += try planMove(tasks, task, to: place, into: &patch)
+        }
+        // New labels come first in the batch, so they exist before the task refers to them.
+        return patch.isEmpty ? out : out + [Change("task", taskId, patch)]
     }
 
     /// Add a move to patch. Returns the changes for descendants.
@@ -460,8 +485,12 @@ public final class Writer {
         if sectionId != task["section_id"].string { patch["section_id"] = sectionId.json }
         if task["parent_id"].isTruthy { patch["parent_id"] = .null }
         patch["position"] = endOfList(tasks, projectId: projectId, sectionId: sectionId, skip: task.id)
-        // Subtasks follow their parent into another project, out of its sections.
-        return descendants(of: task.id, in: tasks).filter { $0["project_id"].string != projectId }.map { d in
+        return carrySubtree(tasks, task.id, to: projectId)
+    }
+
+    /// Subtasks follow their parent into another project, out of its sections.
+    func carrySubtree(_ tasks: [String: Row], _ taskId: String, to projectId: String?) -> [Change] {
+        descendants(of: taskId, in: tasks).filter { $0["project_id"].string != projectId }.map { d in
             var patch: [String: JSON] = ["project_id": projectId.json]
             if d["section_id"].isTruthy { patch["section_id"] = .null }
             return Change("task", d.id, patch)
@@ -757,20 +786,16 @@ extension Writer {
     public func moveLabel(_ labelId: String, to index: Int) throws -> Done {
         try undoable {
             _ = try liveLabel(labelId)
-            let siblings = try liveLabels().map { (id: $0.id, position: $0["position"].number ?? 0) }
-            return planOrder(siblings, moving: labelId, to: index, fallback: Double(now())).map {
-                Change("label", $0.id, ["position": position($0.position)])
-            }
+            return reorder("label", try liveLabels(), labelId, to: index)
         }
     }
 
     /// One place up (-1) or down (+1) in the sidebar. Nothing at an edge.
     public func moveLabel(_ labelId: String, step: Int) throws -> Done {
-        let order = try liveLabels().sorted(by: orderLess).map(\.id)
-        guard let index = order.firstIndex(of: labelId).map({ $0 + step }), order.indices.contains(index) else {
-            return Done()
+        try undoable {
+            _ = try liveLabel(labelId)
+            return self.step("label", try liveLabels().sorted(by: orderLess), labelId, by: step)
         }
-        return try moveLabel(labelId, to: index)
     }
 
     /// Tombstone a label and take its id off every live task, one op per task.
@@ -810,5 +835,451 @@ extension Writer {
             if wanted == current { return [] }
             return created + [Change("task", taskId, ["labels": .array(wanted.map(JSON.string))])]
         }
+    }
+}
+
+// MARK: - The sidebar's order: projects, labels, views (spec/dragdrop.md, "In the sidebar")
+
+extension Writer {
+    /// The position writes that put movedId at index of rows, counted without it.
+    func reorder(_ entity: String, _ rows: [Row], _ movedId: String, to index: Int) -> [Change] {
+        planOrder(rows.map { (id: $0.id, position: $0["position"].number ?? 0) }, moving: movedId, to: index,
+                  fallback: Double(now())).map { Change(entity, $0.id, ["position": position($0.position)]) }
+    }
+
+    /// One place up (-1) or down (+1) among rows, in sidebar order. Nothing at an edge.
+    func step(_ entity: String, _ rows: [Row], _ movedId: String, by step: Int) -> [Change] {
+        guard let index = rows.firstIndex(where: { $0.id == movedId }).map({ $0 + step }),
+              rows.indices.contains(index) else { return [] }
+        return reorder(entity, rows, movedId, to: index)
+    }
+
+    /// The live, unarchived projects under parentId, in sidebar order.
+    func projectSiblings(_ projects: [String: Row], _ parentId: String?) -> [Row] {
+        projects.values.filter { isLive($0) && !$0["archived"].isTruthy && $0["parent_id"].string == parentId }
+            .sorted(by: orderLess)
+    }
+
+    func liveProject(_ projects: [String: Row], _ projectId: String) throws -> Row {
+        guard let project = projects[projectId], isLive(project) else {
+            throw CannotEdit("That project no longer exists")
+        }
+        return project
+    }
+
+    /// Every live project below projectId. Safe against cycles.
+    func projectDescendants(_ projectId: String, _ projects: [String: Row]) -> Set<String> {
+        var children: [String: [String]] = [:]
+        for p in projects.values where isLive(p) {
+            if let parent = p["parent_id"].string { children[parent, default: []].append(p.id) }
+        }
+        var found: Set<String> = [], stack = [projectId]
+        while let id = stack.popLast() {
+            for child in children[id] ?? [] where child != projectId && found.insert(child).inserted {
+                stack.append(child)
+            }
+        }
+        return found
+    }
+
+    /// A parent a project may go under: live, not archived, and not the project or below it. Nil is the top level.
+    func checkParent(_ projects: [String: Row], _ parentId: String?, for projectId: String? = nil) throws {
+        guard let parentId else { return }
+        guard let parent = projects[parentId], isLive(parent), !parent["archived"].isTruthy else {
+            throw CannotEdit("That parent project no longer exists")
+        }
+        if let projectId, parentId == projectId || projectDescendants(projectId, projects).contains(parentId) {
+            throw CannotEdit("A project can't go under itself")
+        }
+    }
+
+    /// Last among the live projects under parentId: the web app's rule, + 1 rather than a gap.
+    func lastProjectPosition(_ projects: [String: Row], _ parentId: String?, skip: String? = nil) -> JSON {
+        let last = projects.values.filter { $0.id != skip && isLive($0) && $0["parent_id"].string == parentId }
+            .compactMap { $0["position"].number }.max()
+        return position(max(Double(now()), (last ?? 0) + 1))
+    }
+
+    /// A project, last at the top level or under parentId, in the first colour no live project uses. Returns its id.
+    @discardableResult
+    public func addProject(_ name: String, under parentId: String? = nil, color: String? = nil) throws -> String {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw CannotEdit("A project needs a name") }
+        let projectId = newId()
+        try commit {
+            let projects = try store.rows("project")
+            try checkParent(projects, parentId)
+            let used = Set(projects.values.filter(isLive).compactMap { $0["color"].string })
+            return [Change("project", projectId, [
+                "name": .string(name),
+                "color": .string(color ?? projectColours.first { !used.contains($0.hex) }?.hex ?? projectColours[0].hex),
+                "position": lastProjectPosition(projects, parentId), "archived": false,
+                "parent_id": parentId.map(JSON.string) ?? nil, "created_at": .int(now()), "deleted_at": nil,
+            ])]
+        }
+        return projectId
+    }
+
+    /// Put a project under parentId (nil: the top level), right before or after a sibling, or last.
+    /// One batch: the parent when it changes, and the positions. Never under itself or below it.
+    public func placeProject(_ projectId: String, under parentId: String?, before: String? = nil,
+                             after: String? = nil) throws -> Done {
+        try undoable {
+            let projects = try store.rows("project")
+            let project = try liveProject(projects, projectId)
+            let siblings = projectSiblings(projects, parentId)
+            let order = siblings.map(\.id).filter { $0 != projectId }
+            let index = before.flatMap { order.firstIndex(of: $0) }
+                ?? after.flatMap { order.firstIndex(of: $0) }.map { $0 + 1 } ?? order.count
+            var changes = reorder("project", siblings, projectId, to: index)
+            if parentId != project["parent_id"].string {
+                try checkParent(projects, parentId, for: projectId)
+                changes.insert(Change("project", projectId, ["parent_id": parentId.map(JSON.string) ?? nil]), at: 0)
+            }
+            return changes
+        }
+    }
+
+    /// One place up (-1) or down (+1) among its siblings.
+    public func moveProject(_ projectId: String, step: Int) throws -> Done {
+        try undoable {
+            let projects = try store.rows("project")
+            let project = try liveProject(projects, projectId)
+            return self.step("project", projectSiblings(projects, project["parent_id"].string), projectId, by: step)
+        }
+    }
+
+    /// The views the sidebar lists, in its order. Dashboards keep their positions.
+    func listViews(_ viewId: String) throws -> [Row] {
+        let views = try store.rows("view")
+        guard let view = views[viewId], isLive(view) else { throw CannotEdit("That view no longer exists") }
+        return views.values.filter(isListView).sorted(by: viewOrderLess)
+    }
+
+    /// Put a view at index of the sidebar's views, counted without it.
+    public func moveView(_ viewId: String, to index: Int) throws -> Done {
+        try undoable { reorder("view", try listViews(viewId), viewId, to: index) }
+    }
+
+    /// One place up (-1) or down (+1) in the sidebar. Nothing at an edge.
+    public func moveView(_ viewId: String, step: Int) throws -> Done {
+        try undoable { self.step("view", try listViews(viewId), viewId, by: step) }
+    }
+}
+
+// MARK: - Projects and sections (spec/projects.md)
+
+/// The project fields `Writer.editProject` takes. Nil leaves a field alone.
+public struct ProjectEdit: Equatable, Sendable {
+    public var name: String?
+    /// A hex colour, "#rrggbb".
+    public var color: String?
+    /// `.some(nil)` is the top level.
+    public var parentId: String??
+
+    public init(name: String? = nil, color: String? = nil, parentId: String?? = nil) {
+        (self.name, self.color, self.parentId) = (name, color, parentId)
+    }
+}
+
+extension Writer {
+    /// Write the changed fields of a project, as one batch. A new parent also writes a position, last among
+    /// the new siblings.
+    public func editProject(_ projectId: String, _ edit: ProjectEdit) throws -> Done {
+        try undoable {
+            let projects = try store.rows("project")
+            let project = try liveProject(projects, projectId)
+            var patch: [String: JSON] = [:]
+            if let name = edit.name {
+                let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else { throw CannotEdit("A project needs a name") }
+                if name != project["name"].string { patch["name"] = .string(name) }
+            }
+            if let color = edit.color, color != project["color"].string {
+                guard color.wholeMatch(of: /#[0-9a-fA-F]{6}/) != nil else { throw CannotEdit("Not a colour: \(color)") }
+                patch["color"] = .string(color)
+            }
+            if let parentId = edit.parentId, parentId != project["parent_id"].string {
+                try checkParent(projects, parentId, for: projectId)
+                patch["parent_id"] = parentId.map(JSON.string) ?? .null
+                patch["position"] = lastProjectPosition(projects, parentId, skip: projectId)
+            }
+            return patch.isEmpty ? [] : [Change("project", projectId, patch)]
+        }
+    }
+
+    /// Archive a project and every live sub-project below it.
+    public func archiveProject(_ projectId: String) throws -> Done {
+        try commit {
+            let projects = try store.rows("project")
+            let project = try liveProject(projects, projectId)
+            let ids = ([project] + projectDescendants(projectId, projects).compactMap { projects[$0] })
+                .filter { !$0["archived"].isTruthy }.map(\.id)
+            // Undo writes false, never null: archived is a boolean even where it was never set.
+            return (ids.map { Change("project", $0, ["archived": true]) },
+                    Done(undo: ids.map { Change("project", $0, ["archived": false]) }))
+        }
+    }
+
+    /// Unarchive one project. Its archived sub-projects stay archived, as in the web app.
+    public func unarchiveProject(_ projectId: String) throws -> Done {
+        try undoable {
+            let project = try liveProject(try store.rows("project"), projectId)
+            return project["archived"].isTruthy ? [Change("project", projectId, ["archived": false])] : []
+        }
+    }
+
+    /// Tombstone a project. Its direct sub-projects move up to its parent. Its tasks keep project_id.
+    public func deleteProject(_ projectId: String) throws -> Done {
+        try undoable {
+            let projects = try store.rows("project")
+            let parentId = try liveProject(projects, projectId)["parent_id"].string
+            let lifted = projects.values
+                .filter { isLive($0) && $0["parent_id"].string == projectId && $0.id != projectId }
+                .sorted { bytesLess($0.id, $1.id) }
+                .map { Change("project", $0.id, ["parent_id": parentId == $0.id ? nil : parentId.map(JSON.string) ?? nil]) }
+            return lifted + [Change("project", projectId, ["deleted_at": .int(now())])]
+        }
+    }
+
+    /// The project's live sections, in order.
+    func liveSections(_ projectId: String?) throws -> [Row] {
+        try store.rows("section").values.filter { isLive($0) && $0["project_id"].string == projectId }
+            .sorted(by: orderLess)
+    }
+
+    func liveSection(_ sectionId: String) throws -> Row {
+        guard let section = try store.rows("section")[sectionId], isLive(section) else {
+            throw CannotEdit("That section no longer exists")
+        }
+        return section
+    }
+
+    func sectionName(_ name: String) throws -> String {
+        let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { throw CannotEdit("A section needs a name") }
+        return name
+    }
+
+    /// A section, last in its project. Returns its id.
+    @discardableResult
+    public func addSection(_ name: String, to projectId: String?) throws -> String {
+        let name = try sectionName(name)
+        let sectionId = newId()
+        try commit {
+            guard let projectId else { throw CannotEdit("The Inbox has no sections") }
+            try checkProject(projectId)
+            let last = try liveSections(projectId).compactMap { $0["position"].number }.max()
+            return [Change("section", sectionId, [
+                "name": .string(name), "project_id": .string(projectId),
+                "position": last.map { position($0 + positionGap) } ?? .int(now()),
+                "created_at": .int(now()), "deleted_at": nil,
+            ])]
+        }
+        return sectionId
+    }
+
+    public func renameSection(_ sectionId: String, to name: String) throws -> Done {
+        let name = try sectionName(name)
+        return try undoable {
+            try liveSection(sectionId)["name"].string == name ? [] : [Change("section", sectionId, ["name": .string(name)])]
+        }
+    }
+
+    /// One place up (-1) or down (+1) among its project's sections. Nothing at an edge.
+    public func moveSection(_ sectionId: String, step: Int) throws -> Done {
+        try undoable {
+            let sections = try liveSections(try liveSection(sectionId)["project_id"].string)
+            return self.step("section", sections, sectionId, by: step)
+        }
+    }
+
+    /// Tombstone a section. Its live open tasks go to "No section", in the same batch.
+    public func deleteSection(_ sectionId: String) throws -> Done {
+        try undoable {
+            _ = try liveSection(sectionId)
+            let tasks = try store.rows("task").values
+                .filter { isLive($0) && $0["completed_at"].isNull && $0["section_id"].string == sectionId }
+                .sorted { bytesLess($0.id, $1.id) }
+            return [Change("section", sectionId, ["deleted_at": .int(now())])]
+                + tasks.map { Change("task", $0.id, ["section_id": nil]) }
+        }
+    }
+}
+
+// MARK: - Drag and drop (spec/dragdrop.md)
+
+extension Writer {
+    /// Apply a drop target to an open task, as one batch.
+    /// Returns Done whose undo restores every field written. Nothing changed: an empty undo.
+    public func drop(_ taskId: String, on target: DropTarget) throws -> Done {
+        try undoable {
+            let tasks = try store.rows("task")
+            let task = try liveTask(tasks, taskId)
+            guard task["completed_at"].isNull else { throw CannotEdit("Only open tasks can be moved") }
+            switch target {
+            case .place(let place):
+                return try planPlace(tasks, task, place)
+            case .project(let projectId):
+                return try planEdit(taskId, TaskEdit(place: Place(projectId: projectId)))
+            case .day(let day):
+                let due = task["due"]
+                if due["date"].string == day.description { return [] }
+                var fields = due.object ?? [:]
+                fields["date"] = .string(day.description)
+                return try planEdit(taskId, TaskEdit(due: .object(fields)))
+            case .label(let labelId):
+                _ = try liveLabel(labelId)
+                let labels = labelIds(task)
+                if labels.contains(labelId) { return [] }
+                return [Change("task", taskId, ["labels": .array((labels + [labelId]).map(JSON.string))])]
+            }
+        }
+    }
+
+    /// The changes that put an open task at a Placement: one position write, unless the list needs renumbering.
+    /// The list is a parent's open subtasks, or the open top-level tasks of one section.
+    func planPlace(_ tasks: [String: Row], _ task: Row, _ place: Placement) throws -> [Change] {
+        let (projectId, sectionId, parentId) = (place.projectId, place.sectionId, place.parentId)
+        try checkProject(projectId)
+        if parentId == nil { try checkSection(sectionId, in: projectId) }
+        let open = tasks.values.filter { t in
+            isLive(t) && t["completed_at"].isNull && t["project_id"].string == projectId
+        }
+        var parents: [String: String?] = [:]
+        func walk(_ nodes: [Node], _ parent: String?) {
+            for node in nodes {
+                parents[node.id] = .some(parent)
+                walk(node.children, node.id)
+            }
+        }
+        walk(buildTree(open) { $0["parent_id"].string }, nil)
+        if let parentId {
+            let below = Set(descendants(of: task.id, in: tasks).map(\.id))
+            if parents[parentId] == nil || parentId == task.id || below.contains(parentId) {
+                throw CannotEdit("A task can't go under itself")
+            }
+        }
+        let sections = Set(try store.rows("section").values.filter { s in
+            isLive(s) && s["project_id"].string == projectId
+        }.map(\.id))
+        func sectionOf(_ t: Row) -> String? { t["section_id"].string.flatMap { sections.contains($0) ? $0 : nil } }
+
+        let siblings = open.filter { t in
+            guard let shown = parents[t.id] else { return false }
+            return parentId == nil ? shown == nil && sectionOf(t) == sectionId : shown == parentId
+        }
+        let others = siblings.sorted(by: orderLess).map(\.id).filter { $0 != task.id }
+        let anchor = place.before ?? place.after
+        var index = others.count
+        if let anchor {
+            guard let i = others.firstIndex(of: anchor) else { throw CannotEdit("That task is no longer in the list") }
+            index = i + (place.after != nil ? 1 : 0)
+        }
+
+        var patch: [String: JSON] = [:], out: [Change] = []
+        let sameProject = projectId == task["project_id"].string
+        if !sameProject {
+            patch["project_id"] = projectId.json
+            out = carrySubtree(tasks, task.id, to: projectId)
+        }
+        // In its own project the parent is the one the tree shows; a stale reference stays unwritten.
+        let currentParent = sameProject ? parents[task.id] ?? nil : task["parent_id"].string
+        if parentId != currentParent { patch["parent_id"] = parentId.json }
+        if parentId == nil && sectionId != (sameProject ? sectionOf(task) : task["section_id"].string) {
+            patch["section_id"] = sectionId.json
+        } else if parentId != nil && !sameProject && task["section_id"].isTruthy {
+            patch["section_id"] = .null  // that section belongs to the old project
+        }
+        // A task from another list isn't among siblings, so it always gets a position here.
+        let moves = planOrder(siblings.map { (id: $0.id, position: $0["position"].number ?? 0) }, moving: task.id,
+                              to: index, fallback: Double(now()))
+        return moves.map { move in
+            Change("task", move.id, (move.id == task.id ? patch : [:]).merging(["position": position(move.position)]) { $1 })
+        } + out
+    }
+}
+
+// MARK: - Quick add (spec/quickadd.md)
+
+extension Writer {
+    /// What a quick-add line sets, read with the user's preferences.
+    public func parseLine(_ line: String) throws -> QuickAddResult {
+        let projects = try store.rows("project").values.filter(isLive)
+        return parseQuickAdd(line, quickAddContext(prefs: try store.rows("user_prefs")["me"]?.values ?? [:],
+                                              projects: Array(projects), today: try today(), now: clockNow()))
+    }
+
+    /// HH:MM on this device now.
+    private func clockNow() -> String {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: Date(ms: now()))
+        return clockText(c.hour ?? 0, c.minute ?? 0)
+    }
+
+    /// Add a task from a quick-add line, in one batch with its new labels, reminders and time spent.
+    ///
+    /// The page's project and section, or due date, apply unless the line sets its own. labels: the page's label ids,
+    /// added to any the line names. A subtask (parentId) always takes its parent's project. Returns its id.
+    @discardableResult
+    public func quickAdd(_ line: String, projectId: String? = nil, sectionId: String? = nil, due: JSON = nil,
+                         parentId: String? = nil, labels: [String] = []) throws -> String {
+        let taskId = newId()
+        try commit {
+            let parsed = try parseLine(line)
+            let live = Set(try liveLabels().map(\.id))
+            let (ids, created) = try resolveLabels(labels.filter(live.contains) + parsed.labels)
+            let ownPlace = parsed.projectId != nil
+            var task = try newTask(parsed.title, projectId: ownPlace ? parsed.projectId : projectId,
+                                   sectionId: ownPlace ? nil : sectionId, parentId: parentId,
+                                   due: parsed.due.isNull && !parsed.someday && parsed.sector == nil ? due : parsed.due)
+            task["labels"] = .array(ids.map(JSON.string))
+            if let priority = parsed.priority { task["priority"] = .int(Int64(priority)) }
+            if let minutes = parsed.estimateMinutes { task["estimate_minutes"] = .int(Int64(minutes)) }
+            // Optional fields are written only when set.
+            let extras: [String: JSON?] = [
+                "deadline": parsed.deadline.map { .string($0.description) },
+                "start": parsed.someday ? "someday" : nil,
+                "evening": parsed.evening ? true : nil,
+                "day_part": parsed.evening ? nil : parsed.dayPart.map(JSON.string),
+                "energy": parsed.energy.map(JSON.string),
+                "sector": parsed.sector.map(JSON.string),
+                "recurrence": parsed.recurrence.map(JSON.string),
+            ]
+            for case let (name, value?) in extras { task[name] = value }
+            var changes = created + [Change("task", taskId, task)]
+            let today = try today(), now = clockNow()
+            for typed in parsed.reminders {
+                changes.append(Change("reminder", newId(), typedReminder(taskId, due: task["due"] ?? nil, typed,
+                                                                          today: today, now: now)))
+            }
+            if let spent = parsed.spentMinutes, let me = try store.meta("user_id").string {
+                let end = self.now()
+                changes.append(Change("time_entry", newId(), [
+                    "task_id": .string(taskId), "user_id": .string(me), "started_at": .int(end - Int64(spent) * 60_000),
+                    "ended_at": .int(end), "device_id": .string(try store.device()), "note": "", "created_at": .int(end),
+                    "deleted_at": nil,
+                ]))
+            }
+            return changes
+        }
+        return taskId
+    }
+
+    /// A reminder typed in quick add, resolved against the task's due.
+    private func typedReminder(_ taskId: String, due: JSON, _ typed: TypedReminder, today: Day,
+                               now: String) -> [String: JSON] {
+        var fields: [String: JSON] = [
+            "task_id": .string(taskId), "delivered_at": nil, "dismissed_at": nil, "created_at": .int(self.now()),
+            "deleted_at": nil,
+        ]
+        switch resolveReminder(typed, due: due, today: today, now: now) {
+        case .relative(let minutes):
+            (fields["kind"], fields["offset_minutes"]) = ("relative", .int(Int64(minutes)))
+            fields["fire_at"] = relativeFireAt(due, .int(Int64(minutes)))
+        case .absolute(let day, let time):
+            (fields["kind"], fields["offset_minutes"]) = ("absolute", nil)
+            fields["fire_at"] = dueInstant(["date": .string(day.description), "time": .string(time)]).map(JSON.int) ?? nil
+        }
+        return fields
     }
 }

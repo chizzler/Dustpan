@@ -315,7 +315,7 @@ struct LabelEditor: View {
     }
 }
 
-private struct Swatch: ButtonStyle {
+struct Swatch: ButtonStyle {
     let hex: String
     let name: String
     let chosen: Bool

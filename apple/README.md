@@ -37,18 +37,38 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `DustpanCore/Sources/DustpanCore/Model.swift` | Display rules: trees, sections, the Inbox, counts |
 | `DustpanCore/Sources/DustpanCore/Dates.swift` | Due date display, the instant a due denotes, and the editor's due |
 | `DustpanCore/Sources/DustpanCore/Writes.swift` | Local edits: one batch per action, applied and queued, with Undo. Labels too |
+| `DustpanCore/Sources/DustpanCore/Markdown.swift` | Notes: the web app's Markdown subset, parsed to blocks, inline text as `AttributedString`, and a note's first line |
 | `DustpanCore/Sources/DustpanCore/Labels.swift` | Finding labels as you type, the picker's order, duplicates, the chips a row shows |
 | `DustpanCore/Sources/DustpanCore/Ordering.swift` | Manual order: the positions a move writes |
+| `DustpanCore/Sources/DustpanCore/DragDrop.swift` | Where a drop lands (zone, level, placement, or an outline view's proposal) and the toast after it. `Writer.drop` writes it. `placeItem`: a project dropped on a sidebar row |
+| `DustpanCore/Sources/DustpanCore/QuickAdd.swift` | Quick add: the parser, its context from the user's preferences, and the result. `Writer.quickAdd` writes it |
+| `DustpanCore/Sources/DustpanCore/QuickAddWords.swift` | Quick add's vocabularies, tokens and phrase matching |
+| `DustpanCore/Sources/DustpanCore/QuickAddAttributes.swift` | `#project`, `@label`, `p1`, `~energy`, `+30m`, `30m/2h` |
+| `DustpanCore/Sources/DustpanCore/QuickAddDates.swift` | Date and time phrases |
+| `DustpanCore/Sources/DustpanCore/QuickAddRepeats.swift` | Repeat-rule and reminder phrases, and how a typed reminder is stored |
+| `DustpanCore/Sources/DustpanCore/Resources/vocab.json` | OpenTodo's quick-add vocabulary, copied unchanged; a test checks it against the clone |
 | `DustpanCore/Sources/DustpanCore/Recurrence.swift` | Repeat rules: parser, canonical form, next occurrence, on floating days |
 | `DustpanCore/Sources/DustpanCore/Recurring.swift` | What completing, skipping and splitting off a repeating task write |
 | `DustpanCore/Sources/DustpanCore/Filter.swift` | The filter language: parser, error messages, evaluation, blocked tasks |
-| `DustpanCore/Sources/DustpanCore/Views.swift` | Today, Upcoming, and saved views: sorting and grouping |
+| `DustpanCore/Sources/DustpanCore/Views.swift` | Today, Upcoming, Anytime, Completed, the Filter page's results, and saved views: sorting and grouping |
+| `DustpanCore/Sources/DustpanCore/QueryTools.swift` | Help writing a query: suggestions for the word being typed, and the builder's conditions |
+| `DustpanCore/Sources/DustpanCore/Folding.swift` | Folding subtasks away: the stored list after a fold, and unfolding the way down to a new parent |
 | `DustpanCore/Sources/DustpanCore/Sectors.swift` | The part of time sectors the filter language needs |
 | `DustpanCore/Sources/DustpanCore/Reminders.swift` | Reminders that follow their dates, default reminders, and which are due to show |
 | `DustpanCore/Sources/DustpanCore/Ids.swift` | Deterministic ids |
 | `DustpanCore/Sources/DustpanCore/Events.swift` | The live update stream |
 | `DustpanCore/Sources/dustpan-cli/` | `sync` and `tree`, for checking against the desktop client |
 | `Dustpan/` | The Mac app: window, sidebar, task list, editor, notifications |
+| `Dustpan/Dragging.swift` | Drag sources, drop delegates, the drop line, the drag pill, the flash |
+| `Dustpan/NoteView.swift` | A note's blocks, formatted. `NotesEditor.swift`: the editor's Write and Preview |
+| `Dustpan/ProjectEditor.swift` | A project's name, colour and parent, with Archive and Delete |
+| `Dustpan/SectionEditor.swift` | Names a new section, or renames one |
+| `Dustpan/QueryField.swift` | A filter query with suggestions, Not and + Condition: the Filter page's and the view editor's |
+| `Dustpan/FilterBar.swift` | The Filter page's query, its match count or error, and Save as View |
+| `Dustpan/ArchivedPage.swift` | An archived project's page: Unarchive or Delete |
+| `Dustpan/MoveCommands.swift` | Edit ▸ Move Up to Outdent, for whichever list has the focus (`ListMoves` in `Moves.swift`) |
+| `Dustpan/FoldCommand.swift` | View ▸ Fold Subtasks (⌘←) and Unfold Subtasks (⌘→), for the selected task (`TaskFold` in `TaskFold.swift`) |
+| `Dustpan/OutlineTaskList.swift` | Spike: project and Inbox lists on AppKit's `NSOutlineView` (View ▸ Outline Task List) |
 
 The tests read OpenTodo's vectors from the clone beside this repo (`../opentodo`, or `OPENTODO_SRC`), and skip them without it.
 
@@ -83,6 +103,23 @@ Before 1.0 the minor number follows the Mac client's own slices.
 
 | Version | Date | What |
 | --- | --- | --- |
+| 0.12.1 | 2026-11-12 | Folding subtasks, as on the desktop: a chevron before a parent's check, ⌘← and ⌘→ (View ▸ Fold Subtasks, Unfold Subtasks), the row menu, and "3 subtasks" on a folded row. Kept on this Mac only. Fixed: typing L or C in an Add field or the Filter query opened the selected task's labels or completed it. |
+| 0.12.0 | 2026-11-11 | Slice 10, Anytime, Completed and Filter: Anytime lists undated tasks by project; Completed lists what was finished by day, newest first, 100 at a time with Show More. Filter (⇧⌘F) shows a query's matches as you type, suggests labels, projects and keywords, adds conditions from a menu, and saves the query as a view. Each can be hidden from the sidebar and brought back from the View menu. |
+| 0.11.0 | 2026-11-11 | Slice 8, task notes in Markdown: Notes in the task editor, with Write and Preview, and the note's first line under the task on every list. Smart quotes and dashes are off by default; Edit ▸ Substitutions turns them on. |
+| 0.10.0 | 2026-11-11 | Slice 7, projects and sections: Edit Project (the pencil on its page, or its menu) renames, recolours and moves it under another; Archive, Unarchive and Delete, each with Undo. Archived projects are listed at the foot of the sidebar, with a page that offers Unarchive. A section heading's menu renames, moves and deletes it; Add Section at the end of a project. |
+| 0.9.1 | 2026-11-11 | Clicking a task or a sidebar row gives that list the focus. A row's drag took the click, so the focus stayed put: the moves, C, L and Delete went nowhere. |
+| 0.9.0 | 2026-11-11 | Slice 6b, moves without a pointer: ⌥↑ ⌥↓, ⇧⌥↑ ⇧⌥↓, ⌘] and ⌘[ on the selected task, from Edit ▸ Move Up to Outdent and the row menu, which also gains Due Today, Due Tomorrow and Move To. C completes. The sidebar's ⌥↑ ⌥↓ now move the selected project, view or label instead of the selection. |
+| 0.8.8 | 2026-11-11 | Sidebar drags: no sticky blue highlight after a drop, and no refused drop sliding back (a drop no longer races the drag's end). Leaf projects line up with their siblings, and a moved project keeps its selection. |
+| 0.8.7 | 2026-11-09 | Dragging: one line per gap in the sidebar, at the level the project lands on; no List highlight over the disclosure arrows or the left margin; and no indicator where a drop would leave the item where it is. Refused spots clear the line. The sidebar draws its project tree itself; ← and → no longer fold it. |
+| 0.8.6 | 2026-11-09 | New Project: the + on the sidebar's Projects heading, File ▸ New Project… (⌥⌘N), and New Sub-project… in a project's menu. Sidebar drags get the task list's fixes: no flicker to "after" at the top of a row, and no List highlight in the row's inset. |
+| 0.8.5 | 2026-11-09 | Dragging: the nest ring starts at the task's own indent, the same distance from its check circle at every level. |
+| 0.8.4 | 2026-11-09 | Dragging: the nest ring shows without a drop line, including the stray one at the end of the list, and the drop line is no longer half hidden by the row below. |
+| 0.8.3 | 2026-11-09 | Dragging in task lists: one indicator at a time. The list's own drop highlight no longer shows at a row's top and bottom edges, where drops also landed a slot off. The drop line sits between rows instead of across the text above, and the nest ring isn't clipped. |
+| 0.8.2 | 2026-11-09 | Selection after a drag: rows no longer swallow every other click, a press-and-drag no longer selects a range, and double-click opens the editor reliably, in task lists and the sidebar. Rows drag with `draggable`; see "On the Mac" in the drag and drop spec. |
+| 0.8.1 | 2026-11-09 | Redirects are refused with an error that names the target, as on the desktop. URLSession already dropped the token on a cross-origin redirect, but then failed with a puzzling answer. |
+| 0.8.0 | 2026-11-07 | The sidebar's order, from desktop slice 6c: drag a project before, after or into another (the middle of its row), and drag views to reorder them. Move Up and Move Down in project and view menus, and ⌥↑ ⌥↓ on the selected project, view or label. One Undo each. |
+| 0.7.0 | 2026-11-07 | Slice 4b, quick add: every Add field and the editor's subtask line read the line like the desktop, in six languages, with a preview of what it sets. Also: a press-and-drag on a row no longer selects rows, Esc clears a selection, and the `NSOutlineView` list spike. |
+| 0.6.0 | 2026-11-06 | Slice 6a, drag and drop: drag a task within a list to reorder, nest (middle of a row) or outdent (drag left); onto a section heading or the end of a section; onto the Inbox, a project, Today or a label in the sidebar; onto Today's and Upcoming's day headings. One Undo per drop, a toast, and the moved task flashes. Holding a drag over a project opens it. |
 | 0.5.0 | 2026-11-06 | Slice 5, everyday editing and labels: delete with Undo, subtasks, labels, estimate and deadline in the editor, deadline reminders; a label picker (L), labels in the sidebar with their own pages, and rename, recolour, reorder, merge and delete. |
 | 0.4.1 | 2026-11-06 | The due date picks its day from an inline month calendar across the editor, as on the desktop. |
 | 0.4.0 | 2026-11-06 | Slice 4a, filters and views: Today and Upcoming, and saved views in the sidebar with counts, created, edited and deleted with Undo. The whole filter language parses. |

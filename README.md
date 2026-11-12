@@ -27,7 +27,8 @@ Linux AUR release preparation is in [packaging/](packaging/README.md). It builds
 archive and Arch package locally; no release has been submitted or uploaded.
 
 The Omarchy client reports 0.12.4; its latest release tag is v0.12.3 (see [versions](desktop/README.md#versions)).
-The Mac client is at 0.1.0, read-only and tried and approved (see [Mac versions](apple/README.md#versions)). The server is pinned to OpenTodo v0.22.0.
+The Mac client is at 0.11.0: slices 1 to 8, with labels in 5 and the sidebar's order from 6c, are built. 0.9.1 is the one installed (see [Mac versions](apple/README.md#versions)).
+The server is pinned to OpenTodo v0.22.0.
 
 ## Development
 

@@ -31,6 +31,13 @@ and `sections.ts` (v0.18.0). Every action is one batch, as in [writes.md](writes
 - **Undo** puts back every field the action wrote, as a new batch. Undo of a delete clears the tombstone and puts the
   sub-projects back under it.
 
+On the Mac (0.10.0), all of it. Create from the + on the sidebar's Projects heading, File ▸ New Project… (⌥⌘N), or
+New Sub-project… in a project's menu. Edit Project… (its menu, or the pencil on its page) holds name, colour, parent,
+Archive and Delete. Delete asks first when the project has open tasks, since the Mac has no Trash yet; Undo works
+either way. A section heading's menu renames, moves and deletes it; Add Section is at the end of a project.
+The page follows its project: archiving it shows the archived page, deleting it shows Today.
+The writes are in `Writes.swift`, tests in `ProjectsTests.swift`, all ported from the desktop's.
+
 Archived projects are hidden from the sidebar, Move to, quick add's `#project`, and every task list.
 The sidebar lists them under "Archived", flat, with their path. Their page offers Unarchive.
 

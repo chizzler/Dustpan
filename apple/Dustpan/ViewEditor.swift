@@ -29,9 +29,7 @@ struct ViewEditor: View {
         Form {
             Section {
                 TextField("Name", text: $name)
-                TextField("Query", text: $query, prompt: Text("p1 & due <= today"), axis: .vertical)
-                    .font(.body.monospaced())
-                    .lineLimit(1...4)
+                QueryField(query: $query)
                 queryHint
             }
             Section {

@@ -1,12 +1,14 @@
 import DustpanCore
 import SwiftUI
 
-/// Today, Upcoming or a saved view: tasks under headings, each named with its place.
+/// Today, Upcoming, Anytime, Completed, Filter, a label or a saved view: tasks under headings, each named with its place.
 struct GroupedTaskList: View {
     @Environment(AppModel.self) private var model
     let page: Page
     @State private var selection: Set<String> = []
     @FocusState private var adding: Place?
+    /// How much of the Completed page is shown.
+    @State private var completedLimit = logbookPage
 
     private struct Content {
         var title: String
@@ -19,44 +21,68 @@ struct GroupedTaskList: View {
         /// The labels the Add field gives new tasks.
         var addLabels: [String] = []
         var empty: String
+        /// The Filter page's line under the query: what it finds, or why it can't run.
+        var status: String?
+        var failed = false
+        /// Completed's Show More, when there's more.
+        var more: String?
     }
 
     var body: some View {
         let content = self.content
-        List(selection: $selection) {
-            if let query = content.query {
-                Text(query)
-                    .font(.callout.monospaced())
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .selectionDisabled()
-            }
-            if let error = content.error {
-                Label("This query can't run here: \(error)", systemImage: "exclamationmark.octagon")
-                    .foregroundStyle(.red)
-                    .selectionDisabled()
-            }
-            ForEach(content.warnings, id: \.self) { warning in
-                Label(warning, systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.orange)
-                    .selectionDisabled()
-            }
-            if content.groups.isEmpty && content.error == nil {
-                Text(content.empty).foregroundStyle(.secondary).selectionDisabled()
-            }
-            ForEach(content.groups) { group in
-                if group.heading.isEmpty {
-                    rows(group.tasks)
-                } else {
-                    Section(group.heading) { rows(group.tasks) }
+        ScrollViewReader { proxy in
+            List(selection: $selection) {
+                if let query = content.query {
+                    Text(query)
+                        .font(.callout.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .selectionDisabled()
+                }
+                if let error = content.error {
+                    Label("This query can't run here: \(error)", systemImage: "exclamationmark.octagon")
+                        .foregroundStyle(.red)
+                        .selectionDisabled()
+                }
+                ForEach(content.warnings, id: \.self) { warning in
+                    Label(warning, systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                        .selectionDisabled()
+                }
+                if content.groups.isEmpty && content.error == nil && !content.empty.isEmpty {
+                    Text(content.empty).foregroundStyle(.secondary).selectionDisabled()
+                }
+                ForEach(content.groups) { group in
+                    if group.heading.isEmpty {
+                        rows(group.tasks)
+                    } else {
+                        Section {
+                            rows(group.tasks)
+                        } header: {
+                            heading(group)
+                        }
+                    }
+                }
+                if let more = content.more {
+                    Button(more, action: showMore)
+                        .frame(maxWidth: .infinity)
+                        .selectionDisabled()
+                }
+                if let due = content.addDue {
+                    AddTaskField(place: Place(projectId: nil), due: due, labels: content.addLabels, focus: $adding)
+                        .selectionDisabled()
                 }
             }
-            if let due = content.addDue {
-                AddTaskField(place: Place(projectId: nil), due: due, labels: content.addLabels, focus: $adding)
-                    .selectionDisabled()
+            .onChange(of: model.flash) { _, id in
+                guard let id, content.groups.contains(where: { $0.tasks.contains { $0.id == id } }) else { return }
+                selection = [id]
+                withAnimation { proxy.scrollTo(id) }
             }
         }
-        .taskMenus(selection: selection)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if let status = content.status { FilterBar(status: status, failed: content.failed) }
+        }
+        .taskMenus(selection: $selection)
         .navigationTitle(content.title)
         .toolbar {
             if content.addDue != nil {
@@ -105,10 +131,34 @@ struct GroupedTaskList: View {
                                                projects: snap.projectPaths),
                            addDue: .null, addLabels: [id],
                            empty: "No open tasks have this label. Add one below, or press L on any task.")
-        case .inbox, .project:
+        case .anytime:
+            return Content(title: "Anytime",
+                           groups: anytimeGroups(snap.tasks, today: today, labels: snap.labelsInOrder,
+                                                 projects: snap.projectPaths),
+                           addDue: .null, empty: "Nothing undated. Tasks with no date, deadline or start show here.")
+        case .completed:
+            let found = logbook(snap.tasks, limit: completedLimit, today: today,
+                                dayStart: snap.filterContext(today: today).dayStart)
+            let older = found.total - found.groups.reduce(0) { $0 + $1.tasks.count }
+            return Content(title: "Completed", groups: found.groups, empty: "Nothing completed yet.",
+                           more: older > 0 ? "Show \(min(logbookPage, older)) More (\(older) older)" : nil)
+        case .filter:
+            let query = model.filterQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !query.isEmpty else {
+                return Content(title: "Filter", empty: "",
+                               status: "Type a query, or add conditions. @ suggests labels, # projects.")
+            }
+            let result = filterResults(query, snap.filterContext(today: today), snap.tasks, labels: snap.labelsInOrder,
+                                       projects: snap.projectPaths)
+            if let error = result.error { return Content(title: "Filter", empty: "", status: error, failed: true) }
+            return Content(title: "Filter", groups: result.groups, warnings: result.warnings, empty: "No tasks match.",
+                           status: "\(result.count) open task\(result.count == 1 ? "" : "s") match")
+        case .inbox, .project, .archived:
             return Content(title: "", empty: "")
         }
     }
+
+    private func showMore() { completedLimit += logbookPage }
 
     private var labelPage: String? {
         if case .label(let id) = page { id } else { nil }
@@ -120,7 +170,24 @@ struct GroupedTaskList: View {
                     labelPage: labelPage) {
                 withAnimation { model.toggle(task) }
             }
+            .taskDrag(task)
+            .flashes(task.id)
             .labelPicker(for: task)
+        }
+    }
+
+    /// A day's heading on Today and Upcoming takes drops: the task becomes due that day.
+    @ViewBuilder
+    private func heading(_ group: ViewGroup) -> some View {
+        let day: Day? = switch page {
+        case .today: group.key == "today" ? model.today : nil
+        case .upcoming: Day(group.key)
+        default: nil
+        }
+        if let day {
+            Text(group.heading).taskDrop("day:\(day)", .day(day))
+        } else {
+            Text(group.heading)
         }
     }
 }
