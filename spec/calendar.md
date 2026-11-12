@@ -141,7 +141,7 @@ Mac slice 12a: the window and Month. Built 2026-11-12, tried and approved the sa
 
 ## On the Mac (0.15.0)
 
-Mac slice 12b: Week and Day. Built 2026-11-12, checked by script, owner trial pending.
+Mac slice 12b: Week and Day. Built 2026-11-12, tried and approved 2026-11-13.
 
 - `CalendarRules.swift` gains `blockFor` and `layoutDay` with the desktop's LayoutTest and BlockTest; `TimeGridPage.swift`
   gathers a week's or a day's columns. The drop target `.slot(day, minutes:)` is the desktop's `ToSlot`, with its write test.
