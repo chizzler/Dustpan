@@ -5,7 +5,7 @@ from dustpan import trash
 from dustpan.api import Api, ApiError, Offline
 from dustpan.model import snapshot
 from dustpan.store import Row, Store
-from dustpan.sync import Syncer
+from dustpan.sync import Syncer, migrate_account
 from dustpan.writes import CannotEdit, Writer
 from tests.test_sync import FakeApi
 from tests.test_writes import WriterCase
@@ -328,3 +328,21 @@ class LocalPurgeTest(WriterCase):
         self.assertEqual(trash.purge_local(self.store, [("task", live_task), ("task", "missing")]), 0)
         self.assertIn(live_task, self.store.rows("task"))
         self.assertEqual(trash.pending(self.store), set())
+
+
+class PendingPurgeAccountSwitchTest(WriterCase):
+    def test_switching_account_deletes_items_waiting_for_purge_instead_of_uploading_them(self):
+        keep = self.writer.add_task("Keep")
+        gone = self.writer.add_task("Delete for good")
+        self.writer.add_task("Deleted subtask", parent_id=gone)
+        self.writer.delete_task(gone)
+        trash.queue(self.store, [("task", gone)])
+
+        migrate_account(self.store, "u2")
+
+        titles = {t.get("title") for t in self.store.rows("task").values()}
+        self.assertEqual(titles, {"Keep"})
+        uploading = {o["value"] for o in self.outbox() if o["field"] == "title"}
+        self.assertEqual(uploading, {"Keep"})
+        self.assertEqual(trash.pending(self.store), set())
+        self.assertNotIn(keep, self.store.rows("task"))  # re-keyed as usual

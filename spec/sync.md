@@ -63,23 +63,31 @@ When OpenTodo sync is enabled later:
    Settings offers either re-keying local entities with fresh UUIDs to upload into the new account, or replacing local
    data with the new account.
 
-## Standalone release blockers (reviewed 2026-11-12)
+## Account switching and disconnected deletion
 
-These two issues are reproduced and remain unfixed:
+Two bugs were found in review on 2026-11-12 and fixed on 2026-11-13.
 
-- **P1 — Account switching races an active sync.** Settings can migrate or replace the local database while
-  a sync worker still uses the previous account's connection. That worker can apply the old account's response
-  to the new account's local data, then upload new-account tasks to the old account. Account transitions must
-  stop and wait for active sync before changing account identity or data; stale responses must not be applied.
-  Until fixed, avoid switching an existing OpenTodo account in the running app.
-- **P2 — Permanent deletion after disconnect loses the server deletion.** Disconnecting and deleting a
-  previously synced task for good removes its local fields and queued tombstone without retaining a server
-  purge request. Reconnecting leaves the server copy intact, and later pulls can bring it back. Previously
-  synced entities need a durable deletion record until the server acknowledges deletion. Until fixed, keep
-  sync configured and let permanent deletion reach the server.
+- **P1 — Account switching raced an active sync.** Settings could migrate or replace local data while a sync
+  worker still used the old account's connection. The old response could be applied to the new data, and
+  new-account tasks could be uploaded to the old account.
+  - **Fix, in the app:** every account change in Settings goes through `Window.begin_account_change`. It stops
+    the live stream and pending sync timers, blocks new syncs, waits for any running sync to finish, then
+    changes the data and reconnects.
+  - **Fix, in the sync engine:** `adopt_standalone`, `migrate_account` and `reset_for_account` bump the
+    `account_epoch` meta value. A `Syncer` run pins the epoch at its start. It checks the epoch in the same
+    transaction that reads each batch and applies each response. If the epoch has changed, it raises
+    `AccountChanged` and keeps nothing. This also covers the command-line `sync`, which runs in its own process.
+- **P2 — Permanent deletion after disconnect lost the server deletion.** Deleting a previously synced task for
+  good while disconnected removed it locally and recorded nothing for the server. Reconnecting left the server
+  copy, and later pulls brought it back.
+  - **Fix:** only data never connected to an account (`user_id` unset or `"local"`, and no server configured)
+    is deleted locally at once. Otherwise permanent deletion is queued in `pending_purges`, even while
+    disconnected, and sent on the next sync. See [trash.md](trash.md#permanent-deletion).
+  - Switching to a different account deletes items still waiting for a purge, with their cascades, instead of
+    uploading them to the new account.
 
-Both were reproduced with temporary databases and fake connections. The automated suite ran 331 tests with
-no failures and one GTK display test skipped; it does not currently cover these two failure cases.
+Regression tests cover each case: switching during a request, replacing during a request, switching during a
+purge, deleting after disconnect then reconnecting, and switching with purges pending.
 
 ## Re-seed after a restore
 

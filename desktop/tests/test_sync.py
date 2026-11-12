@@ -5,7 +5,7 @@ from dustpan.clock import HybridClock
 from dustpan.ids import default_reminder_id, occurrence_id
 from dustpan.model import CLEARED_SUBTASKS, FOLDED_TASKS
 from dustpan.store import Store
-from dustpan.sync import (AccountMismatch, ClockSkew, Syncer, UnsupportedAccount, is_reserved_device,
+from dustpan.sync import (AccountChanged, AccountMismatch, ClockSkew, Syncer, UnsupportedAccount, is_reserved_device,
                           migrate_account, reset_for_account)
 from dustpan.api import Offline
 from dustpan.writes import Writer
@@ -394,6 +394,66 @@ class StandaloneConnectTest(unittest.TestCase):
         self.assertEqual(self.store.device(), device)
         self.assertEqual(list(self.store.all_fields()), [])
         self.assertEqual(self.store.get_meta("user_id"), "u3")
+
+
+class AccountChangeDuringSyncTest(unittest.TestCase):
+    """P1: an account switch while a sync waits on the network must not mix the two accounts."""
+
+    def setUp(self):
+        self.store = Store(":memory:")
+        self.addCleanup(self.store.close)
+        self.writer = Writer(self.store, now=lambda: 1_000)
+        self.writer.add_task("Old account task")
+        Syncer(self.store, self.api("u1", [{"cursor": 5}])).run()
+        self.assertEqual(self.store.outbox_count(), 0)
+
+    def api(self, user_id, responses):
+        return FakeApi(responses, user_id=user_id, base_url="https://todo.example.com", token=f"tok_{user_id}")
+
+    def test_migration_during_the_request_discards_the_response_and_uploads_nothing_to_the_old_account(self):
+        def switch(_body):
+            migrate_account(self.store, "u2", ["https://todo.example.com", "k2"])
+            return {"ops": [op("stale", "title", "From u1", 2)], "cursor": 9, "hasMore": True}
+
+        # An unsent edit, so the old sync has a reason to come back for a second batch.
+        self.writer.add_task("Edit before switch")
+        old = self.api("u1", [switch, {"cursor": 10}])
+        with self.assertRaises(AccountChanged):
+            Syncer(self.store, old).run()
+        self.assertEqual(len(old.requests), 1)  # no second request carried new-account data
+        self.assertNotIn("stale", self.store.rows("task"))
+        self.assertEqual(self.store.get_meta("cursor"), 0)
+        self.assertEqual(self.store.get_meta("user_id"), "u2")
+        titles = {o["value"] for _, o in self.store.outbox_batch(1000) if o["field"] == "title"}
+        self.assertEqual(titles, {"Old account task", "Edit before switch"})
+
+        # The next sync uploads the migrated data to the new account.
+        new = self.api("u2", [{"cursor": 1}])
+        Syncer(self.store, new).run()
+        sent = {o["value"] for o in new.requests[0]["ops"] if o["field"] == "title"}
+        self.assertEqual(sent, {"Old account task", "Edit before switch"})
+        self.assertEqual(self.store.outbox_count(), 0)
+
+    def test_replacing_data_during_the_request_discards_the_response(self):
+        def replace(_body):
+            reset_for_account(self.store, "u2", ["https://todo.example.com", "k2"])
+            return {"ops": [op("stale", "title", "From u1", 2)], "cursor": 9}
+
+        with self.assertRaises(AccountChanged):
+            Syncer(self.store, self.api("u1", [replace])).run()
+        self.assertEqual(self.store.rows("task"), {})
+        self.assertEqual(self.store.get_meta("cursor"), 0)
+
+    def test_migration_during_a_purge_stops_before_the_second_exchange(self):
+        tid = next(iter(self.store.rows("task")))
+        self.writer.delete_task(tid)
+        trash.queue(self.store, [("task", tid)])
+        old = self.api("u1", [{}, {"cursor": 10}])
+        old.purge = lambda *_a: migrate_account(self.store, "u2", ["https://todo.example.com", "k2"])
+        with self.assertRaises(AccountChanged):
+            Syncer(self.store, old).run()
+        self.assertEqual(len(old.requests), 1)
+        self.assertEqual(self.store.get_meta("user_id"), "u2")
 
 
 if __name__ == "__main__":

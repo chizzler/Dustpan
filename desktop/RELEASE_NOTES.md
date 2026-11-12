@@ -26,8 +26,9 @@ so it works standalone out of the box, with optional sync to your own OpenTodo s
 - Fixed recovery pulls to include old writes from the same device when a restore brings back data it had purged.
 - Standalone support: open and use Dustpan without server configuration, configure preferences locally
   (including default reminders), permanently delete items from Trash locally, and connect to OpenTodo later
-  to upload local tasks and merge server data. The account-switching and disconnected-deletion issues below
-  remain release blockers.
+  to upload local tasks and merge server data.
+- Switching OpenTodo accounts now waits for any running sync to finish, and a sync interrupted by a switch
+  keeps nothing. Deleting previously synced items for good while disconnected now reaches the server on reconnect.
 
 ## Install
 
@@ -38,10 +39,6 @@ Autostart is opt-in. The checkout-based installer remains available for developm
 
 ## Known limits
 
-- Release blocker: switching accounts during active sync can send new-account data to the previous account
-  and apply its response to local data. Avoid switching OpenTodo accounts in the running app until fixed.
-- Release blocker: deleting previously synced items for good after disconnect discards their server deletion.
-  The server copy remains and can return in later pulls. Keep sync configured and let deletion reach the server.
 - Personal accounts; encrypted accounts and complete shared-project membership handling are not supported.
 - Future repeating-task occurrences and multi-day bars are not yet shown on the calendar.
 - Saved-view drag targets and manual ordering within saved views remain unfinished.
@@ -52,8 +49,8 @@ This is a pre-1.0 release.
 
 ## Validation
 
-The current suite ran 331 Python tests with no failures and one GTK display test skipped. The two standalone
-release blockers above were reproduced separately with temporary databases and fake connections.
+The current suite ran 338 Python tests with no failures, including GTK window tests. Regression tests cover
+both standalone fixes: account switching during sync, and permanent deletion after disconnect.
 The earlier 314-test recovery and package validation predates standalone support; release artifacts need
 rebuilding and revalidation. Calendar row key handlers have also been
 exercised in a separate GTK window using a temporary database with sync disabled.

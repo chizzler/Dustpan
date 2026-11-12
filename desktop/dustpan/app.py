@@ -33,14 +33,14 @@ from .model import (CLEARED_SUBTASKS, FOLDED_TASKS, count_open, folded_after, is
 from .reminders import describe, is_due, snooze_until  # noqa: E402
 from .rowactions import RowActions, TaskRow  # noqa: E402
 from .store import Store  # noqa: E402
-from .sync import ClockSkew, Syncer, UnsupportedAccount  # noqa: E402
+from .sync import AccountChanged, ClockSkew, Syncer, UnsupportedAccount  # noqa: E402
 from .views import (LOGBOOK_PAGE, WEEK_START, compare_tasks, group_tasks, in_anytime, in_today,  # noqa: E402
                     logbook, manual_order, open_count, run_query, run_view, sorted_tasks, today_groups,
                     upcoming_groups, view_options)
 from .widgets import (CSS, FOLD_PX, INDENT_PX, BrandDust, BrandMark, Dot, Pie, ThemeFollower,  # noqa: E402
                       broom_button, escape, flash, label_chip, on_right_click, popup_menu, save_screenshot,
                       scroll_into_view)
-from .writes import CannotEdit, Writer, descendants, live, project_descendants  # noqa: E402
+from .writes import LOCAL_USER, CannotEdit, Writer, descendants, live, project_descendants  # noqa: E402
 
 SYNC_INTERVAL_S = 30
 LIVE_SYNC_INTERVAL_S = 5 * 60  # polling relaxes while the live stream is connected
@@ -75,6 +75,7 @@ class Window(Adw.ApplicationWindow):
         self.syncing = False
         self.sync_again = False
         self.sync_timer = 0
+        self.account_change = None  # waiting to run once the current sync ends; no sync starts meanwhile
         self.last_sync = 0.0
         self.live = False
         self.rebuilding = False
@@ -276,6 +277,30 @@ class Window(Adw.ApplicationWindow):
         self.title.set_subtitle("")
         self.refresh_view()
 
+    def begin_account_change(self, then):
+        """Run then(), which changes the local account or its data, once no sync is running.
+
+        No sync starts while it waits. then() is expected to reconnect, which restarts sync.
+        """
+        self._stop_events()
+        if self.sync_timer:
+            GLib.source_remove(self.sync_timer)
+            self.sync_timer = 0
+        self.sync_again = False
+        self.account_change = then
+        if not self.syncing:
+            self._run_account_change()
+
+    def _run_account_change(self):
+        then, self.account_change = self.account_change, None
+        try:
+            then()
+        except Exception as err:
+            print(f"account change failed: {err!r}", file=sys.stderr)
+            self.toast(f"Couldn't change account: {err}")
+            if self.cfg is not None:
+                self.connect_sync(self.cfg)
+
     def toast(self, text, undo=None):
         """A new toast replaces the shown one, so Undo always means the latest action."""
         if self.last_toast is not None:
@@ -336,7 +361,7 @@ class Window(Adw.ApplicationWindow):
         return GLib.SOURCE_REMOVE
 
     def sync(self):
-        if self.cfg is None:
+        if self.cfg is None or self.account_change is not None:
             return
         if self.syncing:
             self.sync_again = True
@@ -354,6 +379,8 @@ class Window(Adw.ApplicationWindow):
             message = f"Synced {datetime.now():%H:%M}"
         except Offline:
             message = "Offline"
+        except AccountChanged:
+            message = None  # the next sync runs under the new account
         except UnsupportedAccount as err:
             message = f"Can't sync: {err}"
         except (ApiError, ClockSkew) as err:
@@ -368,6 +395,15 @@ class Window(Adw.ApplicationWindow):
     def on_sync_done(self, cfg, result, message):
         self.syncing = False
         self.last_sync = time.monotonic()
+        if self.account_change is not None:
+            self._run_account_change()
+            return GLib.SOURCE_REMOVE
+        if message is None:
+            self.sync_again = False
+            self.title.set_subtitle("")
+            self.refresh_view()
+            self.sync()
+            return GLib.SOURCE_REMOVE
         if self.cfg is None:
             self.sync_again = False
             self.title.set_subtitle("")
@@ -804,7 +840,7 @@ class Window(Adw.ApplicationWindow):
         if not self.trash:
             self.note(column, "The Trash is empty.")
             return
-        waiting = trash.pending(self.store) if self.cfg is not None else set()
+        waiting = trash.pending(self.store)
         now = wall_ms()
         rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE, css_classes=["boxed-list"])
         for item in self.trash:
@@ -1738,7 +1774,13 @@ class Window(Adw.ApplicationWindow):
             self.toast(text, undo=lambda: self.revert_to(done.undo, TRASH))
 
     def purge_items(self, items):
-        """Ask, then delete permanently locally when standalone, or queue for the server when connected."""
+        """Ask, then delete permanently.
+
+        Data that has never been connected to an account is deleted locally at once. Otherwise
+        the request is queued for the server, even while disconnected: the server may hold a
+        copy, and a local delete alone would let it come back on the next pull.
+        """
+        local_only = self.cfg is None and self.store.get_meta("user_id") in (None, LOCAL_USER)
         if len(items) == 1:
             item = items[0]
             heading = f"Delete “{item.title}” for good?"
@@ -1747,11 +1789,15 @@ class Window(Adw.ApplicationWindow):
         else:
             heading = f"Delete all {len(items)} items for good?"
             body = ""
-        body += ("It's removed from every device and the server, and can't be undone." if self.cfg is not None
-                 else "It's deleted permanently and can't be undone.")
+        if local_only:
+            body += "It's deleted permanently and can't be undone."
+        elif self.cfg is not None:
+            body += "It's removed from every device and the server, and can't be undone."
+        else:
+            body += "It's removed from every device and the server when you reconnect, and can't be undone."
 
         def go():
-            if self.cfg is None:
+            if local_only:
                 trash.purge_local(self.store, [(i.entity, i.id) for i in items])
                 self.refresh_view()
                 return

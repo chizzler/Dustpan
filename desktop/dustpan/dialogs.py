@@ -1032,13 +1032,11 @@ class SettingsDialog(Adw.PreferencesDialog):
         has_data = any(True for _ in store.all_fields())
         if stored_user in (None, LOCAL_USER) or stored_user == remote_user_id or not has_data:
             if not has_data and stored_user not in (None, LOCAL_USER, remote_user_id):
-                reset_for_account(store, remote_user_id, account_key)
+                self._change_account(cfg, lambda: reset_for_account(store, remote_user_id, account_key))
             elif stored_user in (None, LOCAL_USER):
-                adopt_standalone(store, remote_user_id, account_key)
+                self._change_account(cfg, lambda: adopt_standalone(store, remote_user_id, account_key))
             else:
-                with store.transaction():
-                    store.set_meta("account_key", account_key)
-            self._finish_connect(cfg)
+                self._change_account(cfg, lambda: self._remember_key(store, account_key))
             return GLib.SOURCE_REMOVE
 
         dialog = Adw.AlertDialog(
@@ -1056,15 +1054,33 @@ class SettingsDialog(Adw.PreferencesDialog):
 
         def decide(_d, response):
             if response == "upload":
-                migrate_account(store, remote_user_id, account_key)
-                self._finish_connect(cfg)
+                self._change_account(cfg, lambda: migrate_account(store, remote_user_id, account_key))
             elif response == "replace":
-                reset_for_account(store, remote_user_id, account_key)
-                self._finish_connect(cfg)
+                self._change_account(cfg, lambda: reset_for_account(store, remote_user_id, account_key))
 
         dialog.connect("response", decide)
         dialog.present(self)
         return GLib.SOURCE_REMOVE
+
+    @staticmethod
+    def _remember_key(store, account_key):
+        with store.transaction():
+            store.set_meta("account_key", account_key)
+
+    def _change_account(self, cfg, change):
+        """Wait for any running sync to end, then change local data for the account and connect."""
+        self._set_busy(True)
+        if self.window.syncing:
+            self.connect_button.set_label("Waiting for sync…")
+
+        def then():
+            try:
+                change()
+            finally:
+                self._set_busy(False)
+            self._finish_connect(cfg)
+
+        self.window.begin_account_change(then)
 
     def _finish_connect(self, cfg):
         config.save(cfg)

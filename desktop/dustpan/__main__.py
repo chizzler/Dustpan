@@ -14,7 +14,7 @@ from . import config
 from .api import Api, ApiError, Offline
 from .model import project_sections, snapshot
 from .store import Store
-from .sync import ClockSkew, Syncer, UnsupportedAccount
+from .sync import AccountChanged, ClockSkew, Syncer, UnsupportedAccount
 
 
 def cmd_sync():
@@ -28,7 +28,7 @@ def cmd_sync():
     try:
         result = Syncer(store, Api(cfg.url, cfg.token)).run()
         cursor = store.get_meta("cursor")
-    except (Offline, ApiError, ClockSkew, UnsupportedAccount) as err:
+    except (Offline, ApiError, ClockSkew, UnsupportedAccount, AccountChanged) as err:
         print(f"sync failed: {err}", file=sys.stderr)
         return 1
     finally:

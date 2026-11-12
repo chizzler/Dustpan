@@ -48,10 +48,6 @@ Your configuration and database stay in place.
 
 ### Current limits
 
-- Release blocker: switching OpenTodo accounts during an active sync can upload new-account data to the
-  previous account and mix its response into local data. Avoid switching accounts in the running app until fixed.
-- Release blocker: permanently deleting previously synced items after disconnect loses their server deletion.
-  Keep sync configured and let permanent deletion reach the server. See [the review](../spec/sync.md#standalone-release-blockers-reviewed-2026-11-12).
 - End-to-end encrypted OpenTodo accounts are not supported.
 - Shared-project membership changes are not fully handled; this release is intended for personal use.
 - The calendar shows the current scheduled occurrence of a repeating task; future occurrences and multi-day

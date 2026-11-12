@@ -29,6 +29,10 @@ LEAD_FIELDS = ("project_id", "task_id", "user_id", "author_id", "series_id", "re
 FIELD_RANK = {name: i for i, name in enumerate(LEAD_FIELDS)}
 BATCH_WHOLE = frozenset(("reminder", "comment", "attachment", "time_entry"))
 
+# Store meta: bumped whenever local data is adopted, migrated or replaced for an account.
+# A sync started before the bump must not send or apply anything after it.
+ACCOUNT_EPOCH = "account_epoch"
+
 
 class UnsupportedAccount(Exception):
     pass
@@ -36,6 +40,10 @@ class UnsupportedAccount(Exception):
 
 class AccountMismatch(UnsupportedAccount):
     """The server token belongs to a different OpenTodo user than the stored synced data."""
+
+
+class AccountChanged(Exception):
+    """The local account changed while a sync was running. Its work was discarded."""
 
 
 class ClockSkew(Exception):
@@ -95,9 +103,16 @@ def _rewrite_local_op(op, user_id, reminder_map):
     return out
 
 
+def _bump_epoch(store):
+    store.set_meta(ACCOUNT_EPOCH, store.get_meta(ACCOUNT_EPOCH, 0) + 1)
+
+
 def adopt_standalone(store, user_id, account_key=None):
     """Adopt standalone local data under user_id in one transaction before first sync."""
     with store.transaction():
+        if store.get_meta("user_id") not in (None, LOCAL_USER):
+            raise AccountChanged("this device was connected to an account in the meantime")
+        _bump_epoch(store)
         device = store.device()
         stored_fields = list(store.all_fields())
         queued = [op for _, op in store.outbox_batch(store.outbox_count())]
@@ -172,6 +187,11 @@ def migrate_account(store, user_id, account_key=None):
     between two accounts on the same OpenTodo server.
     """
     with store.transaction():
+        _bump_epoch(store)
+        # Items waiting for a server purge belong to the old account. Delete them here
+        # rather than upload them to the new account.
+        for entity, entity_id in trash.expand_purge(store, store.get_meta(trash.PENDING) or []):
+            store.purge(entity, entity_id)
         old_uid = store.get_meta("user_id") or LOCAL_USER
         device = store.device()
         stored_fields = list(store.all_fields())
@@ -347,6 +367,7 @@ def migrate_account(store, user_id, account_key=None):
 def reset_for_account(store, user_id, account_key=None):
     """Clear local synced entities and prepare to pull fresh from user_id's OpenTodo account."""
     with store.transaction():
+        _bump_epoch(store)
         store.clear_fields()
         store.clear_outbox()
         for key, val in (("cursor", 0), ("backfill_ack", 0), ("generation", None), ("reseed_device", None),
@@ -362,6 +383,8 @@ class Syncer:
         self.store = store
         self.api = api
         self.clock = clock or HybridClock(store)
+        self.user_id = None
+        self.epoch = None
 
     @property
     def device(self):
@@ -374,8 +397,10 @@ class Syncer:
         key = _account_key(self.api)
         if stored_user is not None and stored_user != LOCAL_USER:
             if key is None or self.store.get_meta("account_key") == key:
+                self.user_id = stored_user
                 return
         user_id, key = verify_account(self.api)
+        self.user_id = user_id
         if stored_user in (None, LOCAL_USER):
             adopt_standalone(self.store, user_id, account_key=key)
             return
@@ -404,6 +429,12 @@ class Syncer:
 
     def run(self):
         """Push edits, pull changes, then send queued purges and pull their markers."""
+        self.check_account()
+        with self.store.transaction():
+            # Pin the account this sync belongs to. A switch after this point is caught by _check_account_same.
+            self.epoch = self.store.get_meta(ACCOUNT_EPOCH, 0)
+            if self.store.get_meta("user_id") != self.user_id:
+                raise AccountChanged("the account changed before sync started")
         result = self._exchange()
         if trash.send(self.store, self.api):
             again = self._exchange()
@@ -416,26 +447,28 @@ class Syncer:
     def _exchange(self):
         """Exchange until the outbox is empty and nothing remains to pull.
 
-        Returns a Result. Raises api.Offline, api.ApiError or ClockSkew.
+        Returns a Result. Raises api.Offline, api.ApiError, ClockSkew or AccountChanged.
         """
-        self.check_account()
         device = self.device
         result = Result()
         skew_counts = {}
         with self.store.transaction():
+            self._check_account_same()
             self._requeue_held()
         while True:
-            batch = self._next_batch()
-            body = {
-                # A restore can bring back fields we no longer hold, including our own
-                # old writes. Pull under a temporary identity so the server echoes them.
-                "device": self.store.get_meta("reseed_device") or device,
-                "cursor": self.store.get_meta("cursor", 0),
-                "ops": [op for _, op in batch],
-                "features": FEATURES,
-                "backfillAck": self.store.get_meta("backfill_ack", 0),
-                "tzOffset": tz_offset_minutes(),
-            }
+            with self.store.transaction():
+                self._check_account_same()
+                batch = self._next_batch()
+                body = {
+                    # A restore can bring back fields we no longer hold, including our own
+                    # old writes. Pull under a temporary identity so the server echoes them.
+                    "device": self.store.get_meta("reseed_device") or device,
+                    "cursor": self.store.get_meta("cursor", 0),
+                    "ops": [op for _, op in batch],
+                    "features": FEATURES,
+                    "backfillAck": self.store.get_meta("backfill_ack", 0),
+                    "tzOffset": tz_offset_minutes(),
+                }
             res = self.api.sync(body)
             rejected = res.get("rejected") or []
             skewed = [r for r in rejected if r.get("reason") == "clock_skew"]
@@ -448,6 +481,7 @@ class Syncer:
                     raise ClockSkew("this device's clock is far off and the server keeps refusing its changes")
             sent = {op["id"]: op for _, op in batch}
             with self.store.transaction():
+                self._check_account_same()
                 self.store.outbox_remove(seq for seq, _ in batch)
                 self.clock.follow_server(res["serverTime"])
                 self._restamp(sent, skewed, res["serverTime"])
@@ -475,6 +509,11 @@ class Syncer:
             result.purged += len(res.get("purged", []))
             if not res.get("hasMore") and self.store.outbox_count() == 0:
                 return result
+
+    def _check_account_same(self):
+        """Call inside a transaction. Raises AccountChanged if the account was switched since this exchange began."""
+        if self.store.get_meta(ACCOUNT_EPOCH, 0) != self.epoch:
+            raise AccountChanged("the account changed during sync; nothing from that sync was kept")
 
     def _restamp(self, sent, skewed, server_time):
         """Stamp ops refused for clock skew again and queue them. Ops that shared a stamp share the new one."""

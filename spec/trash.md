@@ -22,10 +22,15 @@ Deleted tasks and projects, newest deletion first. Based on OpenTodo v0.18.0's
 
 - Delete for good and Empty Trash ask first. Empty Trash acts on the items currently listed on this device,
   not unseen items on the server. Neither operation has Undo.
-- **Standalone (no server configured):** targets and their cascades are deleted immediately from `fields`,
-  `outbox`, `held_ops` and `pending_purges` in one transaction, following OpenTodo's `expandPurge` rules.
-- **Connected to OpenTodo:** requests are stored in device-local `pending_purges` metadata as `[entity, id]` pairs.
+- **Never connected (no server configured, and no account ever adopted):** targets and their cascades are deleted
+  immediately from `fields`, `outbox`, `held_ops` and `pending_purges` in one transaction, following OpenTodo's
+  `expandPurge` rules.
+- **Connected, or disconnected after being connected:** requests are stored in device-local `pending_purges`
+  metadata as `[entity, id]` pairs. The server may hold a copy, so a local delete alone would let it return.
   Queuing is atomic and deduplicated. Pending rows stay visible with their Restore and Delete buttons disabled.
+  While disconnected, they wait for the next sync after reconnecting.
+- Switching to a different account deletes pending items and their cascades locally. They belong to the old
+  account and are not uploaded to the new one.
 - After a successful sync exchange, send `DELETE /api/v1/tasks/{id}/purge` or
   `/api/v1/projects/{id}/purge`. Targets with unsent or server-limit-held edits wait for a later sync.
   This also works with the command-line `sync` command.
@@ -37,13 +42,6 @@ Deleted tasks and projects, newest deletion first. Based on OpenTodo v0.18.0's
 - Acknowledging a request cannot overwrite other requests queued while the network call was in flight.
 - Purging a project also removes its tasks and sections. Purging a task removes its deleted descendants,
   including ones deleted separately, and associated data such as reminders.
-
-## Known standalone release blocker
-
-**P2 — Permanent deletion after disconnect:** for previously synced items, local purge also discards the
-queued tombstone and leaves no server purge request. Reconnecting does not delete the server copy, which can
-return in later pulls. Retain a durable deletion record until the server acknowledges deletion. Until fixed,
-keep sync configured and let permanent deletion reach the server. See [the sync review](sync.md#standalone-release-blockers-reviewed-2026-11-12).
 
 ## Retention
 
