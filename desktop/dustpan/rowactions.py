@@ -150,9 +150,10 @@ class RowActions:
     def run(self, action, task_id):
         if action in ("complete", "delete"):
             self.window.leaving(task_id)
-        method = {"open": self.window.edit, "complete": self.window.complete, "reopen": self.window.reopen,
-                  "delete": self.window.delete_task, "labels": self.window.pick_labels}[action]
-        self.later(method, task_id)
+        # Resolve only this action: the calendar has no label picker.
+        method = {"open": "edit", "complete": "complete", "reopen": "reopen",
+                  "delete": "delete_task", "labels": "pick_labels"}[action]
+        self.later(getattr(self.window, method), task_id)
 
     def later(self, method, *args):
         """After the key or menu signal: the action rebuilds the page that sent it."""

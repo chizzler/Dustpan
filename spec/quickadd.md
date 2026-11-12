@@ -79,4 +79,3 @@ Mac slice 4b, 2026-11-07. `QuickAdd*.swift` in DustpanCore port these modules fi
 vectors. `vocab.json` is a package resource, checked against the clone like the desktop's copy.
 `Writer.quickAdd` ports `Writer.quick_add`. The Add fields and the editor's subtask line use it, with the same
 preview line. The languages come from `user_prefs.language` and the Mac's first preferred language.
-

@@ -10,6 +10,7 @@ A self-hosted Todoist replacement. One OpenTodo server, with my own clients for 
 | [desktop/](desktop/README.md) | The Omarchy client: how to run and test it, and its versions |
 | [apple/](apple/README.md) | The Mac client, and the Swift core the iPhone app will share |
 | [deploy/](deploy/README.md) | The server: install, update, backups, restore |
+| [Recovery rehearsal](dev/RECOVERY.md) | Isolated Linux restore/re-sync tests, actual-backup replay, evidence and limits |
 
 ## Real use
 
@@ -21,6 +22,9 @@ deploy/pull-backups.sh --install  # daily copies of the server's archives and th
 ```
 
 Both clients read their URL and token from `~/.config/dustpan/config`.
+
+Linux AUR release preparation is in [packaging/](packaging/README.md). It builds a Linux-only source
+archive and Arch package locally; no release has been submitted or uploaded.
 
 The Omarchy client reports 0.12.4; its latest release tag is v0.12.3 (see [versions](desktop/README.md#versions)).
 The Mac client is at 0.11.0: slices 1 to 8, with labels in 5 and the sidebar's order from 6c, are built. 0.9.1 is the one installed (see [Mac versions](apple/README.md#versions)).

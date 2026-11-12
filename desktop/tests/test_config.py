@@ -47,3 +47,43 @@ class LoadTest(unittest.TestCase):
         self.path.write_text("OPENTODO_URL=http://todo.example.com\nOPENTODO_TOKEN=ot_abc\n")
         with self.assertRaisesRegex(config.ConfigMissing, "https"):
             config.load()
+
+    def test_load_optional_supports_standalone_when_missing_or_blank(self):
+        self.assertEqual(config.load_optional(), (None, None))
+        self.path.write_text("# standalone\nOPENTODO_URL=\nOPENTODO_TOKEN=\n")
+        self.assertEqual(config.load_optional(), (None, None))
+
+    def test_load_optional_reports_warning_without_blocking_startup_when_malformed(self):
+        self.path.write_text("OPENTODO_URL=https://todo.example.com\n")
+        cfg, warning = config.load_optional()
+        self.assertIsNone(cfg)
+        self.assertIn("OPENTODO_TOKEN", warning)
+        self.path.write_text("OPENTODO_URL=http://todo.example.com\nOPENTODO_TOKEN=ot_abc\n")
+        cfg, warning = config.load_optional()
+        self.assertIsNone(cfg)
+        self.assertIn("https", warning)
+
+    def test_save_and_clear_keep_private_permissions_and_comments(self):
+        self.path.write_text("# my comment\nOTHER_KEY=keep\n")
+        config.save(config.Config("https://todo.example.com", "ot_secret"))
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+        cfg, warning = config.load_optional()
+        self.assertIsNone(warning)
+        self.assertEqual(cfg, config.Config("https://todo.example.com", "ot_secret"))
+        self.assertIn("# my comment", self.path.read_text())
+        self.assertIn("OTHER_KEY=keep", self.path.read_text())
+
+        config.clear()
+        self.assertEqual(config.load_optional(), (None, None))
+        self.assertIn("OTHER_KEY=keep", self.path.read_text())
+
+        self.path.unlink()
+        config.save(config.Config("http://localhost:8080", "ot_dev"))
+        config.clear()
+        self.assertFalse(self.path.exists())
+        self.assertEqual(config.load_optional(), (None, None))
+
+    def test_validate_refuses_multiline_or_empty_values(self):
+        for url, token in [("", "ot"), ("https://todo.example.com", ""), ("https://a.com\nx", "ot"), ("https://a.com", "ot\nx")]:
+            with self.assertRaises(config.ConfigMissing):
+                config.validate(url, token)

@@ -11,21 +11,34 @@
 import sys
 
 from . import config
-from .api import Api
+from .api import Api, ApiError, Offline
 from .model import project_sections, snapshot
 from .store import Store
-from .sync import Syncer
+from .sync import AccountChanged, ClockSkew, Syncer, UnsupportedAccount
 
 
 def cmd_sync():
-    cfg = config.load()
+    try:
+        cfg = config.load()
+    except config.ConfigMissing as err:
+        print(f"OpenTodo sync is not configured ({err}). Connect in Settings or set OPENTODO_URL and OPENTODO_TOKEN.",
+              file=sys.stderr)
+        return 1
     store = Store(config.database_path())
-    result = Syncer(store, Api(cfg.url, cfg.token)).run()
-    print(f"received {result.received} ops, cursor {store.get_meta('cursor')}")
+    try:
+        result = Syncer(store, Api(cfg.url, cfg.token)).run()
+        cursor = store.get_meta("cursor")
+    except (Offline, ApiError, ClockSkew, UnsupportedAccount, AccountChanged) as err:
+        print(f"sync failed: {err}", file=sys.stderr)
+        return 1
+    finally:
+        store.close()
+    print(f"received {result.received} ops, cursor {cursor}")
     if result.refused:
         print(f"{result.refused} local changes were not accepted")
     if result.held:
         print(f"{result.held} changes held back by a server limit")
+    return 0
 
 
 def print_tasks(nodes, depth):
@@ -44,7 +57,11 @@ def print_project(snap, project_id, name, depth):
 
 
 def cmd_tree():
-    snap = snapshot(Store(config.database_path()))
+    store = Store(config.database_path())
+    try:
+        snap = snapshot(store)
+    finally:
+        store.close()
     print_project(snap, None, "Inbox", 0)
 
     def walk(nodes, depth):
@@ -53,6 +70,7 @@ def cmd_tree():
             walk(node.children, depth + 1)
 
     walk(snap.projects, 0)
+    return 0
 
 
 def main():
@@ -65,11 +83,10 @@ def main():
         print(f"Dustpan {__version__}")
         return 0
     commands = {"sync": cmd_sync, "tree": cmd_tree}
-    if args[0] not in commands:
+    if args[0] not in commands or len(args) > 1:
         print(__doc__.strip(), file=sys.stderr)
         return 2
-    commands[args[0]]()
-    return 0
+    return commands[args[0]]() or 0
 
 
 sys.exit(main())

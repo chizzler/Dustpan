@@ -2,7 +2,58 @@
 
 The Omarchy client. Python, GTK 4 and libadwaita. No packages from PyPI.
 
-Needs `python`, `python-gobject`, `gtk4` and `libadwaita` from the official Arch repos.
+Needs `python`, `python-gobject`, `python-cairo`, `gtk4` and `libadwaita` from the official Arch repos.
+
+The [AUR preparation guide](../packaging/README.md) builds a package with a system launcher and managed
+dependencies. It is prepared locally and has not been submitted. The checkout-based install below is
+still available for development.
+
+## Install on Arch Linux / Omarchy
+
+Install the dependencies from the Arch repositories:
+
+```sh
+sudo pacman -S --needed python python-gobject python-cairo gtk4 libadwaita
+```
+
+From the source checkout or extracted release, run `desktop/install.sh`. Keep that folder: the launcher
+runs the code from it. The installer adds the launcher, icon and a background autostart entry for your user.
+Open Dustpan from the app launcher and start adding tasks — no server configuration is required.
+Local data lives in `~/.local/share/dustpan/dustpan.db` (or under `XDG_DATA_HOME`).
+Settings (`Ctrl+,` or the gear icon) configures default reminders, date/time formats, week and day start,
+and quick-add options locally.
+
+### Optional OpenTodo sync
+
+Whenever you want to sync across devices, connect an OpenTodo server running **v0.22.0** (the version this
+release is tested against). In the server's web app, create a device-specific token in
+Settings → Integrations → API tokens, then enter the URL and token in Dustpan's **Settings → OpenTodo sync**
+(which saves `~/.config/dustpan/config` with mode `600`), or create `~/.config/dustpan/config` directly:
+
+```ini
+OPENTODO_URL=https://todo.example.com
+OPENTODO_TOKEN=your-api-token
+```
+
+The URL must use https; plain http is allowed only for localhost. Existing local tasks, projects, labels,
+views and preferences upload automatically when you connect and merge with any data already on the server.
+For a server of your own, see the [deployment guide](../deploy/README.md).
+
+Once connected, edits work offline and upload when the server is reachable again. Closing the window keeps
+reminders (and sync, when connected) running; Ctrl+Q quits. After updating the source, quit and reopen to
+load the new version.
+
+To uninstall the launcher and autostart entry, run `desktop/install.sh --remove` from the same folder.
+Your configuration and database stay in place.
+
+### Current limits
+
+- End-to-end encrypted OpenTodo accounts are not supported.
+- Shared-project membership changes are not fully handled; this release is intended for personal use.
+- The calendar shows the current scheduled occurrence of a repeating task; future occurrences and multi-day
+  bars are not implemented yet.
+- Time sectors can be shown, filtered and used in quick add, but cannot be set in the task editor.
+- Filters using tracked time, workspaces or custom fields cannot be evaluated by this client.
 
 ## Develop
 
@@ -15,7 +66,11 @@ dev/client.sh          # the app, against the dev server
 dev/client.sh sync     # sync once, no window
 dev/client.sh tree     # print the local copy as a tree
 python3 -m unittest discover -s desktop/tests -t desktop
+bash dev/recovery.sh   # real-server recovery rehearsal, in a private network/filesystem sandbox
 ```
+
+See [the recovery guide](../dev/RECOVERY.md) for actual-backup replay, optional GUI smoke,
+the retained evidence, and the limits around permanent and accidental deletion.
 
 `dev/credentials` holds the dev account and token. It's created once and ignored by git.
 The client keeps its dev data in `dev/data/client`.
@@ -79,9 +134,9 @@ or run it on its own bus: `dbus-run-session -- dev/client.sh`.
 `desktop/install.sh` adds `~/.local/bin/dustpan`, a launcher entry, the icon, and an autostart entry.
 They run this checkout, so a `git pull` updates the app. `desktop/install.sh --remove` takes them out again.
 
-Put `OPENTODO_URL=…` and `OPENTODO_TOKEN=…` in `~/.config/dustpan/config` (mode 600).
-The URL must be https. Plain http works only for this machine (`localhost`, `127.0.0.1`, `::1`).
-Data goes in `~/.local/share/dustpan/`.
+Data goes in `~/.local/share/dustpan/`. Dustpan works standalone out of the box; OpenTodo sync is optional
+and can be enabled or disconnected at any time in Settings (`Ctrl+,`), which manages `~/.config/dustpan/config`
+(mode 600; https required, plain http only for `localhost`, `127.0.0.1`, `::1`).
 
 **Projects and sections.** The + beside Projects makes a project. Right-click a project for its menu,
 or use the pencil on its page to rename it, recolour it, move it under another, archive or delete it.
@@ -108,8 +163,9 @@ right-click or `.` opens its menu. The gear sets the grid's hours and the day le
 **Closing the window hides it.** Sync and reminders carry on. Ctrl+Q quits.
 
 **Trash.** Deleted tasks and projects appear in Trash, including a Restore action with Undo.
-Delete for good and Empty Trash ask first, then wait for sync when offline. The server's retention
-period is shown above the list. Hide Trash from its sidebar menu; bring it back from ⋯ above the sidebar.
+Delete for good and Empty Trash ask first: in standalone mode they delete permanently on the spot; when
+connected to OpenTodo they coordinate through the server (waiting for sync when offline) and show the
+server's retention period above the list. Hide Trash from its sidebar menu; bring it back from ⋯ above the sidebar.
 At login the autostart entry runs `dustpan --background`: no window until you open Dustpan.
 Hidden, it uses about 115 MB (most of it GTK) and about 10 ms of CPU a minute. It skips page rebuilds until shown.
 

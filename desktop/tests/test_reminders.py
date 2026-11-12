@@ -2,7 +2,8 @@ import unittest
 from datetime import timezone
 
 from dustpan.ids import default_reminder_id
-from dustpan.reminders import offset_label, parse_default, plan_default_reminder, read_defaults, relative_fire_at
+from dustpan.reminders import (format_default, offset_label, parse_custom_offset, parse_default,
+                               plan_default_reminder, read_defaults, relative_fire_at)
 
 from .vectors import load
 
@@ -41,6 +42,19 @@ class LabelTest(unittest.TestCase):
         self.assertEqual([offset_label(m) for m in (0, -30, -60, 120, -1440, -2880)],
                          ["At due time", "30 minutes before", "1 hour before", "2 hours after",
                           "1 day before", "2 days before"])
+
+    def test_custom_offsets_and_format(self):
+        self.assertEqual(format_default(None), "")
+        self.assertEqual(format_default(-30), "-30")
+        self.assertEqual(parse_custom_offset("15m"), -15)
+        self.assertEqual(parse_custom_offset("2h"), -120)
+        self.assertEqual(parse_custom_offset("3 days before"), -4320)
+        self.assertEqual(parse_custom_offset("1w"), -10080)
+        self.assertEqual(parse_custom_offset("30m after"), 30)
+        self.assertEqual(parse_custom_offset("+45m"), 45)
+        self.assertEqual(parse_custom_offset("0"), 0)
+        for bad in ("", "nope", "999d", "+10m before"):
+            self.assertIsNone(parse_custom_offset(bad), bad)
 
 
 if __name__ == "__main__":

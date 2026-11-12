@@ -1,0 +1,2 @@
+#!/bin/bash
+PYTHONPATH=/usr/lib/dustpan exec /usr/bin/python -m dustpan "$@"

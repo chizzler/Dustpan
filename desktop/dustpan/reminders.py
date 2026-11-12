@@ -17,6 +17,10 @@ RELATIVE_PRESETS = [(0, "At due time"), (-10, "10 minutes before"), (-30, "30 mi
                     (-60, "1 hour before"), (-1440, "1 day before")]
 # (minutes from 09:00 on the deadline, label).
 DEADLINE_PRESETS = [(0, "On the deadline"), (-1440, "1 day before the deadline")]
+# Presets for Settings → Default reminders (matching OpenTodo's DefaultRemindersSettings.tsx).
+DEFAULT_TIMED_PRESETS = list(RELATIVE_PRESETS)
+DEFAULT_DATED_PRESETS = [(0, "On the day at 09:00"), (-1440, "1 day before"), (-2880, "2 days before"),
+                         (-4320, "3 days before"), (-10080, "1 week before")]
 
 
 def relative_fire_at(due, offset, local_zone=None):
@@ -100,6 +104,44 @@ def read_defaults(prefs):
     """(timed, dated) defaults from a user_prefs row's values."""
     prefs = prefs or {}
     return parse_default(prefs.get("reminder_default_timed")), parse_default(prefs.get("reminder_default_dated"))
+
+
+def format_default(minutes):
+    """The user_prefs string for a default reminder offset, or '' for none."""
+    if minutes is None:
+        return ""
+    if isinstance(minutes, bool) or not isinstance(minutes, int) or abs(minutes) > MAX_OFFSET:
+        raise ValueError(f"reminder offset out of range: {minutes!r}")
+    return str(minutes)
+
+
+def parse_custom_offset(text):
+    """Parse a custom offset like '15m', '2h', '3d before', '30 min after', or '-45' into signed minutes.
+
+    Without 'after' or '+', a positive duration means before the due time (e.g. '15m' -> -15).
+    Returns int within MAX_OFFSET, or None when invalid.
+    """
+    raw = (text or "").strip().lower()
+    if not raw:
+        return None
+    if raw in ("0", "at due time"):
+        return 0
+    match = re.fullmatch(r"([+-])?\s*(\d{1,7})\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|wk|wks|week|weeks)?(?:\s*(before|after))?", raw)
+    if not match:
+        return None
+    sign, amount, unit, direction = match.groups()
+    if sign and direction:
+        return None
+    scale = {"h": 60, "hr": 60, "hrs": 60, "hour": 60, "hours": 60,
+             "d": 1440, "day": 1440, "days": 1440,
+             "w": 10080, "wk": 10080, "wks": 10080, "week": 10080, "weeks": 10080}.get(unit, 1)
+    minutes = int(amount) * scale
+    if minutes > MAX_OFFSET:
+        return None
+    if minutes == 0:
+        return 0
+    after = direction == "after" or sign == "+"
+    return minutes if after else -minutes
 
 
 def _due(value):

@@ -133,6 +133,12 @@ class Store:
         self.db.execute("DELETE FROM fields WHERE entity = ? AND entity_id = ?", (entity, entity_id))
         self.db.execute("DELETE FROM outbox WHERE entity = ? AND entity_id = ?", (entity, entity_id))
 
+    def clear_fields(self):
+        self.db.execute("DELETE FROM fields")
+
+    def clear_outbox(self):
+        self.db.execute("DELETE FROM outbox")
+
     def all_fields(self):
         """Yield (entity, entity_id, field, value, ts, device) for every stored field."""
         for entity, entity_id, name, value, ts, device in self.db.execute(

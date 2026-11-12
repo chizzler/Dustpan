@@ -18,7 +18,7 @@ from .api import Api, ApiError, Offline  # noqa: E402
 from .calendarwindow import CSS as CALENDAR_CSS, CalendarWindow  # noqa: E402
 from .clock import wall_ms  # noqa: E402
 from .dates import day_heading, day_start_minutes, format_due, format_minutes, format_time, uses_12h  # noqa: E402
-from .dialogs import LabelDialog, ProjectDialog, TaskDialog, ViewDialog, ask_name  # noqa: E402
+from .dialogs import LabelDialog, ProjectDialog, SettingsDialog, TaskDialog, ViewDialog, ask_name  # noqa: E402
 from .dragdrop import (AFTER, BEFORE, INSIDE, MOVES, Place, Slot, ToDay, ToLabel, ToProject,  # noqa: E402
                        describe as describe_drop, nudge, place_item, zone)
 from .dragging import Autoscroll, Drag, ItemDrag, PageDrop, SidebarDrop  # noqa: E402
@@ -33,14 +33,14 @@ from .model import (CLEARED_SUBTASKS, FOLDED_TASKS, count_open, folded_after, is
 from .reminders import describe, is_due, snooze_until  # noqa: E402
 from .rowactions import RowActions, TaskRow  # noqa: E402
 from .store import Store  # noqa: E402
-from .sync import ClockSkew, Syncer, UnsupportedAccount  # noqa: E402
+from .sync import AccountChanged, ClockSkew, Syncer, UnsupportedAccount  # noqa: E402
 from .views import (LOGBOOK_PAGE, WEEK_START, compare_tasks, group_tasks, in_anytime, in_today,  # noqa: E402
                     logbook, manual_order, open_count, run_query, run_view, sorted_tasks, today_groups,
                     upcoming_groups, view_options)
 from .widgets import (CSS, FOLD_PX, INDENT_PX, BrandDust, BrandMark, Dot, Pie, ThemeFollower,  # noqa: E402
                       broom_button, escape, flash, label_chip, on_right_click, popup_menu, save_screenshot,
                       scroll_into_view)
-from .writes import CannotEdit, Writer, descendants, live, project_descendants  # noqa: E402
+from .writes import LOCAL_USER, CannotEdit, Writer, descendants, live, project_descendants  # noqa: E402
 
 SYNC_INTERVAL_S = 30
 LIVE_SYNC_INTERVAL_S = 5 * 60  # polling relaxes while the live stream is connected
@@ -63,10 +63,11 @@ STALE_REMINDER_MS = 24 * 60 * 60_000
 
 
 class Window(Adw.ApplicationWindow):
-    def __init__(self, app, cfg):
+    def __init__(self, app, cfg=None):
         # Closing only hides the window, so sync and reminders carry on. Ctrl+Q quits.
         super().__init__(application=app, title="Dustpan", default_width=1000, default_height=700, hide_on_close=True)
         self.cfg = cfg
+        self.events = None
         self.store = Store(config.database_path())
         self.writer = Writer(self.store)
         self.selected = TODAY
@@ -74,6 +75,7 @@ class Window(Adw.ApplicationWindow):
         self.syncing = False
         self.sync_again = False
         self.sync_timer = 0
+        self.account_change = None  # waiting to run once the current sync ends; no sync starts meanwhile
         self.last_sync = 0.0
         self.live = False
         self.rebuilding = False
@@ -157,8 +159,11 @@ class Window(Adw.ApplicationWindow):
         sidebar_view.add_top_bar(sidebar_header)
 
         self.title = Adw.WindowTitle(title="Today", css_classes=["page-window-title"])
-        refresh = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Sync now")
-        refresh.connect("clicked", lambda _b: self.sync())
+        self.settings_button = Gtk.Button(icon_name="preferences-system-symbolic", tooltip_text="Settings (Ctrl+,)")
+        self.settings_button.connect("clicked", lambda _b: self.open_settings())
+        self.refresh_button = Gtk.Button(icon_name="view-refresh-symbolic", tooltip_text="Sync now",
+                                         visible=cfg is not None)
+        self.refresh_button.connect("clicked", lambda _b: self.sync())
         self.add_button = Gtk.Button(icon_name="list-add-symbolic", tooltip_text="Add task (Ctrl+N)")
         self.add_button.connect("clicked", lambda _b: self.start_adding(None))
         self.edit_button = Gtk.Button(icon_name="document-edit-symbolic")
@@ -166,7 +171,8 @@ class Window(Adw.ApplicationWindow):
         header = Adw.HeaderBar(title_widget=self.title, margin_top=4)
         header.pack_start(self.add_button)
         header.pack_start(self.edit_button)
-        header.pack_end(refresh)
+        header.pack_end(self.settings_button)
+        header.pack_end(self.refresh_button)
         self.calendar_button = Gtk.ToggleButton(icon_name="x-office-calendar-symbolic", tooltip_text="Calendar")
         self.calendar_button.connect("toggled", lambda b: self.show_calendar(b.get_active()))
         header.pack_end(self.calendar_button)
@@ -207,6 +213,9 @@ class Window(Adw.ApplicationWindow):
             trigger=Gtk.ShortcutTrigger.parse_string("<Control>f"),
             action=Gtk.CallbackAction.new(lambda *_a: self.open_filter() or True)))
         shortcuts.add_shortcut(Gtk.Shortcut(
+            trigger=Gtk.ShortcutTrigger.parse_string("<Control>comma"),
+            action=Gtk.CallbackAction.new(lambda *_a: self.open_settings() or True)))
+        shortcuts.add_shortcut(Gtk.Shortcut(
             trigger=Gtk.ShortcutTrigger.parse_string("<Control>z"),
             action=Gtk.CallbackAction.new(lambda *_a: self.undo_last())))
         for key, end in (("j", 0), ("k", -1)):
@@ -216,20 +225,81 @@ class Window(Adw.ApplicationWindow):
         self.add_controller(shortcuts)
 
         self.refresh_view()
-        self.sync()
         GLib.timeout_add_seconds(SYNC_INTERVAL_S, self.on_timer)
-        with self.store.transaction():
-            device = self.store.device()
-        self.events = EventStream(
-            Api(cfg.url, cfg.token), device,
-            on_wake=lambda cursor: GLib.idle_add(self.on_wake, cursor),
-            on_live=lambda live: GLib.idle_add(self.on_live, live))
-        self.events.start()
-        self.connect("destroy", lambda _w: self.events.stop())
+        if cfg is not None:
+            self._start_events()
+            self.sync()
+        self.connect("destroy", lambda _w: self._stop_events())
         self.connect("map", lambda _w: self.page_stale and self.refresh_view())
         # The calendar comes and goes with this window, and reopens if it was open.
         self.connect("map", lambda _w: self.store.get_meta("calendar_open", False) and self.show_calendar(True))
         self.connect("unmap", lambda _w: self.calendar and self.calendar.set_visible(False))
+
+    def open_settings(self):
+        SettingsDialog(self).present(self)
+        return True
+
+    def _start_events(self):
+        self._stop_events()
+        if self.cfg is None:
+            return
+        with self.store.transaction():
+            device = self.store.device()
+        self.events = EventStream(
+            Api(self.cfg.url, self.cfg.token), device,
+            on_wake=lambda cursor: GLib.idle_add(self.on_wake, cursor),
+            on_live=lambda live: GLib.idle_add(self.on_live, live))
+        self.events.start()
+
+    def _stop_events(self):
+        if self.events is not None:
+            self.events.stop()
+            self.events = None
+        self.live = False
+
+    def connect_sync(self, cfg):
+        """Enable or update OpenTodo sync live without restarting."""
+        self.cfg = cfg
+        self.refresh_button.set_visible(True)
+        self._start_events()
+        self.refresh_view()
+        self.sync()
+
+    def disconnect_sync(self):
+        """Switch to standalone local mode live, keeping all local data."""
+        self._stop_events()
+        if self.sync_timer:
+            GLib.source_remove(self.sync_timer)
+            self.sync_timer = 0
+        self.cfg = None
+        self.sync_again = False
+        self.refresh_button.set_visible(False)
+        self.title.set_subtitle("")
+        self.refresh_view()
+
+    def begin_account_change(self, then):
+        """Run then(), which changes the local account or its data, once no sync is running.
+
+        No sync starts while it waits. then() is expected to reconnect, which restarts sync.
+        """
+        self._stop_events()
+        if self.sync_timer:
+            GLib.source_remove(self.sync_timer)
+            self.sync_timer = 0
+        self.sync_again = False
+        self.account_change = then
+        if not self.syncing:
+            self._run_account_change()
+
+    def _run_account_change(self):
+        then, self.account_change = self.account_change, None
+        try:
+            then()
+        except Exception as err:
+            print(f"account change failed: {err!r}", file=sys.stderr)
+            self.toast(f"Couldn't change account: {err}")
+            if self.cfg is not None:
+                self.connect_sync(self.cfg)
 
     def toast(self, text, undo=None):
         """A new toast replaces the shown one, so Undo always means the latest action."""
@@ -262,26 +332,27 @@ class Window(Adw.ApplicationWindow):
 
     def on_timer(self):
         self.check_reminders()
-        interval = LIVE_SYNC_INTERVAL_S if self.live else SYNC_INTERVAL_S
-        if time.monotonic() - self.last_sync >= interval - 1:
-            self.sync()
+        if self.cfg is not None:
+            interval = LIVE_SYNC_INTERVAL_S if self.live else SYNC_INTERVAL_S
+            if time.monotonic() - self.last_sync >= interval - 1:
+                self.sync()
         # Today and Upcoming move at midnight (or the user's day start).
         if self.writer.today() != self.today:
             self.refresh_view()
         return GLib.SOURCE_CONTINUE
 
     def on_wake(self, cursor):
-        if cursor is None or cursor > self.store.get_meta("cursor", 0):
+        if self.cfg is not None and (cursor is None or cursor > self.store.get_meta("cursor", 0)):
             self.sync()
         return GLib.SOURCE_REMOVE
 
     def on_live(self, live):
-        self.live = live
+        self.live = live if self.cfg is not None else False
         return GLib.SOURCE_REMOVE
 
     def schedule_sync(self):
         """Sync shortly after a local edit. Several quick edits share one exchange."""
-        if not self.sync_timer:
+        if self.cfg is not None and not self.sync_timer:
             self.sync_timer = GLib.timeout_add(EDIT_SYNC_DELAY_MS, self.on_edit_timer)
 
     def on_edit_timer(self):
@@ -290,22 +361,26 @@ class Window(Adw.ApplicationWindow):
         return GLib.SOURCE_REMOVE
 
     def sync(self):
+        if self.cfg is None or self.account_change is not None:
+            return
         if self.syncing:
             self.sync_again = True
             return
         self.syncing = True
         self.title.set_subtitle("Syncing…")
-        threading.Thread(target=self.sync_worker, daemon=True).start()
+        threading.Thread(target=self.sync_worker, args=(self.cfg,), daemon=True).start()
 
-    def sync_worker(self):
+    def sync_worker(self, cfg):
         # SQLite connections stay on their own thread, so the worker opens its own.
         store = Store(config.database_path())
         result = None
         try:
-            result = Syncer(store, Api(self.cfg.url, self.cfg.token)).run()
+            result = Syncer(store, Api(cfg.url, cfg.token)).run()
             message = f"Synced {datetime.now():%H:%M}"
         except Offline:
             message = "Offline"
+        except AccountChanged:
+            message = None  # the next sync runs under the new account
         except UnsupportedAccount as err:
             message = f"Can't sync: {err}"
         except (ApiError, ClockSkew) as err:
@@ -315,11 +390,31 @@ class Window(Adw.ApplicationWindow):
             message = "Sync error (see terminal)"
         finally:
             store.close()
-        GLib.idle_add(self.on_sync_done, result, message)
+        GLib.idle_add(self.on_sync_done, cfg, result, message)
 
-    def on_sync_done(self, result, message):
+    def on_sync_done(self, cfg, result, message):
         self.syncing = False
         self.last_sync = time.monotonic()
+        if self.account_change is not None:
+            self._run_account_change()
+            return GLib.SOURCE_REMOVE
+        if message is None:
+            self.sync_again = False
+            self.title.set_subtitle("")
+            self.refresh_view()
+            self.sync()
+            return GLib.SOURCE_REMOVE
+        if self.cfg is None:
+            self.sync_again = False
+            self.title.set_subtitle("")
+            if result and (result.received or result.refused or result.purged):
+                self.refresh_view()
+            return GLib.SOURCE_REMOVE
+        if self.cfg != cfg:
+            self.sync_again = False
+            self.refresh_view()
+            self.sync()
+            return GLib.SOURCE_REMOVE
         waiting = self.store.outbox_count()
         if result and result.held:
             message += f" · {result.held} held by a server limit"
@@ -341,6 +436,11 @@ class Window(Adw.ApplicationWindow):
         if self.drag.active or self.item_drag.active:
             self.refresh_waiting = True
             return
+        prefs = self.store.rows("user_prefs").get("me")
+        prefs = prefs.values if prefs else {}
+        self.time_format = prefs.get("time_format", "system")
+        self.week_start = WEEK_START.get(prefs.get("week_start"), 1)
+        self.today = self.writer.today()
         if not self.get_mapped() and hasattr(self, "snap"):
             # Hidden: reminders still matter, the page doesn't. Skip the rebuild until it's shown.
             self.page_stale = True
@@ -355,11 +455,6 @@ class Window(Adw.ApplicationWindow):
                 self.reminders_by_task.setdefault(reminder.get("task_id"), []).append(reminder)
         self.check_reminders()
         self.progress = progress_map(self.snap.all_tasks.values(), self.store.get_meta(CLEARED_SUBTASKS) or {})
-        prefs = self.store.rows("user_prefs").get("me")
-        prefs = prefs.values if prefs else {}
-        self.time_format = prefs.get("time_format", "system")
-        self.week_start = WEEK_START.get(prefs.get("week_start"), 1)
-        self.today = self.writer.today()
         self.filter_context = Context(self.today, list(self.snap.all_tasks.values()), list(self.snap.labels.values()),
                                       self.snap.live_projects, self.week_start,
                                       day_start_minutes(prefs.get("day_start")))
@@ -731,10 +826,10 @@ class Window(Adw.ApplicationWindow):
         self.show_page(COMPLETED)
 
     def fill_trash(self, column):
-        """Deleted tasks and projects, newest first. Restore works offline; deleting for good waits for the server."""
-        retention = self.store.get_meta(trash.RETENTION, trash.DEFAULT_RETENTION_DAYS)
+        """Deleted tasks and projects, newest first. Restore and local permanent deletion work offline."""
+        retention = self.store.get_meta(trash.RETENTION, trash.DEFAULT_RETENTION_DAYS) if self.cfg is not None else 0
         line = Gtk.Box(spacing=12, margin_bottom=8)
-        line.append(Gtk.Label(label=f"Deleted for good after {retention} days." if retention > 0
+        line.append(Gtk.Label(label=f"Deleted for good after {retention} days." if retention and retention > 0
                               else "Kept until you delete them for good.",
                               xalign=0, hexpand=True, wrap=True, css_classes=["dim-label"]))
         if self.trash:
@@ -846,9 +941,12 @@ class Window(Adw.ApplicationWindow):
 
     def pages_menu(self):
         hidden = self.store.get_meta(HIDDEN_PAGES) or []
-        return [[(("Show " if key in hidden else "Hide ") + name,
-                   lambda k=key: (self.show_hidden_page if k in hidden else self.hide_page)(k), True)
-                  for key, name, _ in OPTIONAL_PAGES]]
+        return [
+            [(("Show " if key in hidden else "Hide ") + name,
+              lambda k=key: (self.show_hidden_page if k in hidden else self.hide_page)(k), True)
+             for key, name, _ in OPTIONAL_PAGES],
+            [("Settings…", self.open_settings, True)],
+        ]
 
     def hide_page(self, key):
         """Hide a built-in page from the sidebar on this device. It can't be deleted."""
@@ -1439,8 +1537,8 @@ class Window(Adw.ApplicationWindow):
                 return
             self.view_deleted(view_id)
 
-        confirm(self, f"Delete “{name}”?", "The view goes from every device. Your tasks stay.", "Delete view",
-                delete, destructive=True)
+        body = "The view goes from every device. Your tasks stay." if self.cfg is not None else "Your tasks stay."
+        confirm(self, f"Delete “{name}”?", body, "Delete view", delete, destructive=True)
 
     def show_view(self, view_id):
         self.selected = VIEW + view_id
@@ -1676,7 +1774,13 @@ class Window(Adw.ApplicationWindow):
             self.toast(text, undo=lambda: self.revert_to(done.undo, TRASH))
 
     def purge_items(self, items):
-        """Ask, then queue a permanent delete for each item. The next sync sends them."""
+        """Ask, then delete permanently.
+
+        Data that has never been connected to an account is deleted locally at once. Otherwise
+        the request is queued for the server, even while disconnected: the server may hold a
+        copy, and a local delete alone would let it come back on the next pull.
+        """
+        local_only = self.cfg is None and self.store.get_meta("user_id") in (None, LOCAL_USER)
         if len(items) == 1:
             item = items[0]
             heading = f"Delete “{item.title}” for good?"
@@ -1685,9 +1789,18 @@ class Window(Adw.ApplicationWindow):
         else:
             heading = f"Delete all {len(items)} items for good?"
             body = ""
-        body += "It's removed from every device and the server, and can't be undone."
+        if local_only:
+            body += "It's deleted permanently and can't be undone."
+        elif self.cfg is not None:
+            body += "It's removed from every device and the server, and can't be undone."
+        else:
+            body += "It's removed from every device and the server when you reconnect, and can't be undone."
 
         def go():
+            if local_only:
+                trash.purge_local(self.store, [(i.entity, i.id) for i in items])
+                self.refresh_view()
+                return
             trash.queue(self.store, [(i.entity, i.id) for i in items])
             self.show_page(TRASH)
             self.sync()
@@ -1873,19 +1986,15 @@ class App(Adw.Application):
         if window := self.main_window():
             window.present()
             return
-        try:
-            window = Window(self, config.load())
-        except config.ConfigMissing as err:
-            window = Adw.ApplicationWindow(application=self, title="Dustpan", default_width=600, default_height=400)
-            window.set_content(Adw.StatusPage(
-                icon_name="dialog-information-symbolic", title="Not connected",
-                description=f"{err}.\nAdd your server URL and API token there, then restart."))
+        cfg, warning = config.load_optional()
+        window = Window(self, cfg)
         if self.background:
             # Only the first activation. Opening the app later presents the window above.
             self.background = False
-            if isinstance(window, Window):
-                return
+            return
         window.present()
+        if warning:
+            window.toast(warning)
         if folder := os.environ.get("DUSTPAN_SCREENSHOT"):
             GLib.timeout_add(2500, self.screenshot_pages, window, folder)
 

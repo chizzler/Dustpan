@@ -1,0 +1,7 @@
+[Desktop Entry]
+Type=Application
+Name=Dustpan
+Comment=Keep task sync and reminders running
+Exec=/usr/bin/dustpan --background
+Icon=io.github.chizzler.Dustpan
+Terminal=false

@@ -39,13 +39,67 @@ Device ids compare as byte strings.
 - **Refused ops.** `clock_skew`, `limit_…` and the rest are handled as in [writes.md](writes.md#refused-ops).
   The client announces `clock_skew`.
 - **Errors.** 30 s timeout. Network failure or timeout shows "offline". Anything else shows "error".
-- **Triggers.** At start, 250 ms after a local edit, on a live wake-up, on demand,
-  and every 30 s (5 minutes while the live stream is connected). See [writes.md](writes.md#live-updates).
+- **Triggers.** When OpenTodo sync is configured: at start, 250 ms after a local edit, on a live wake-up, on demand,
+  and every 30 s (5 minutes while the live stream is connected). In standalone mode no connection attempts or sync
+  subtitles run. See [writes.md](writes.md#live-updates).
+
+## Standalone use and connecting later
+
+Without `OPENTODO_URL` and `OPENTODO_TOKEN`, Dustpan opens directly in standalone mode using the same SQLite store.
+Local completions, default reminders and quick-add time entries use the placeholder actor `"local"`, and preference
+controls write changed fields on `("user_prefs", "me")`.
+
+When OpenTodo sync is enabled later:
+
+1. `GET /api/v1/me` verifies the server and learns `user_id` (refusing encrypted accounts).
+2. In one transaction before the first exchange, `"local"` is rewritten to `user_id` on `task.completed_by` and
+   authored entities (`time_entry.user_id`, etc.), default reminder ids derived from `"local"` are renamed to
+   `default_reminder_id(user_id, task_id)`, and stored fields are queued once per `(entity, entityId, field)` in
+   dependency order (`project` and `task` before `reminder` and `time_entry`), without splitting an entity across
+   500-op batches.
+3. The exchange uploads local ops from `cursor = 0` and pulls any existing server data, merging both sides by
+   per-field last-writer-wins.
+4. If the local store already synced with a different OpenTodo `user_id`, automatic sync refuses with `AccountMismatch`;
+   Settings offers either re-keying local entities with fresh UUIDs to upload into the new account, or replacing local
+   data with the new account.
+
+## Account switching and disconnected deletion
+
+Two bugs were found in review on 2026-11-12 and fixed on 2026-11-13.
+
+- **P1 — Account switching raced an active sync.** Settings could migrate or replace local data while a sync
+  worker still used the old account's connection. The old response could be applied to the new data, and
+  new-account tasks could be uploaded to the old account.
+  - **Fix, in the app:** every account change in Settings goes through `Window.begin_account_change`. It stops
+    the live stream and pending sync timers, blocks new syncs, waits for any running sync to finish, then
+    changes the data and reconnects.
+  - **Fix, in the sync engine:** `adopt_standalone`, `migrate_account` and `reset_for_account` bump the
+    `account_epoch` meta value. A `Syncer` run pins the epoch at its start. It checks the epoch in the same
+    transaction that reads each batch and applies each response. If the epoch has changed, it raises
+    `AccountChanged` and keeps nothing. This also covers the command-line `sync`, which runs in its own process.
+- **P2 — Permanent deletion after disconnect lost the server deletion.** Deleting a previously synced task for
+  good while disconnected removed it locally and recorded nothing for the server. Reconnecting left the server
+  copy, and later pulls brought it back.
+  - **Fix:** only data never connected to an account (`user_id` unset or `"local"`, and no server configured)
+    is deleted locally at once. Otherwise permanent deletion is queued in `pending_purges`, even while
+    disconnected, and sent on the next sync. See [trash.md](trash.md#permanent-deletion).
+  - Switching to a different account deletes items still waiting for a purge, with their cascades, instead of
+    uploading them to the new account.
+
+Regression tests cover each case: switching during a request, replacing during a request, switching during a
+purge, deleting after disconnect then reconnecting, and switching with purges pending.
 
 ## Re-seed after a restore
 
 In one transaction: every stored field becomes a new op `{id: new uuid, entity, entityId, field, value, ts, device}`
 with the field's stored clock. Add them to the outbox, set `cursor = 0`, store the new generation.
+
+**Full recovery pull (2026-11-12).** The server normally omits ops authored by the requesting
+device. After a restore it may hold old fields this device has since purged, including fields
+the device originally wrote itself. During re-seeding the request therefore uses a temporary
+`reseed_device` UUID, persisted in meta until the final page and an empty outbox. The real device
+identity and field clocks are unchanged. An interrupted exchange resumes with the same temporary
+request identity. Once the recovery pull completes, ordinary requests use the real device again.
 
 Skipped, as in the web app: comments, attachments and time entries by other authors, and `attachment.uploaded_at`.
 
@@ -55,6 +109,17 @@ Fields written through REST carry `server:<boot id>`.
 The web app re-sends them unchanged, so its re-seed would fail with 400 `invalid_op` (checked on v0.18.0 with a direct request).
 This client keeps the stored `ts` and replaces a reserved device with its own.
 Only the tie-break between equal timestamps changes. **Report upstream.**
+
+**Rehearsed 2026-11-12.** The real pinned server's archive restore, generation change, client re-seed,
+both reconnect orders, interrupted batches and lost upload responses pass in an isolated sandbox.
+A copied production archive and client backup recover all 949 expected fields. See
+[the recovery harness](../dev/RECOVERY.md) for the checks, evidence and repeatable command.
+
+**Recovery limits.** A purge after the archive can be lost on rollback: the archive predates the
+marker and clients have discarded the entity without retaining a durable purge ledger. The old
+task can return. Conversely, unwanted soft deletions still held by clients are replayed after
+restore; archive rollback alone does not undo a mistaken mass deletion. Both behaviors have
+dedicated end-to-end scenarios and are reported as known limitations, not successful repairs.
 
 ## Not implemented yet
 

@@ -38,6 +38,7 @@ When the pin moves, re-read the sync doc's schema table and diff the vectors.
 | — | Fold a task's subtasks away in project and Inbox lists | [folding.md](folding.md) | done 2026-11-04, tried and approved (0.12.3) |
 | — | Subtask progress: a pie in the parent's circle, and the offer to complete the parent | [progress.md](progress.md) | built 2026-11-05 (0.12.4); pie tried and approved, prompt trial pending |
 | — | Clickable project label on grouped rows; completed subtasks settle below open siblings | [dev diary](../dev-diary.md) | built 2026-11-06 (0.12.4); project link tried and approved, settling trial pending |
+| Recovery | Real-server restore/re-seed, interrupted uploads, purge boundaries, copied actual backups, GTK smoke | [recovery guide](../dev/RECOVERY.md) | passed 2026-11-12; permanent-deletion rollback and accidental-deletion limits confirmed |
 
 ## Behind the server
 

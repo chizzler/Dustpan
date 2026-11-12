@@ -50,15 +50,21 @@ systemctl stop opentodo
 systemctl start opentodo   # systemd hands the files back to the service's user
 ```
 
-The desktop client's sync is designed to re-seed the server with data newer than the archive.
-A full restore followed by a real client sync has not yet been rehearsed.
+The desktop client re-seeds the server with newer fields held by surviving clients. This was
+rehearsed end to end on 2026-11-12 using the real v0.22.0 server, isolated test profiles, and
+copies of an actual server archive and client backup. See [the recovery harness](../dev/RECOVERY.md).
 
-To rehearse without touching the server, restore a pulled archive into a scratch folder and serve it on another port:
+This recovers the archive plus the winning fields surviving clients still hold. A permanent
+deletion after the archive can be lost, allowing an old task to return. An unwanted soft deletion
+still held by clients is sent back, so restoring the server alone does not undo accidental mass
+deletion. Data absent from both the archive and all clients cannot be reconstructed.
+
+Run the isolated rehearsal from the repository root:
 
 ```sh
-BIN=dev/bin/v0.22.0/opentodo-linux-amd64
-$BIN restore --data-dir /tmp/rehearsal ~/.local/share/dustpan/backups/server/<archive>
-OPENTODO_ADDR=127.0.0.1:8099 OPENTODO_DATA_DIR=/tmp/rehearsal OPENTODO_PUSH=off $BIN
+bash dev/recovery.sh
 ```
 
-Rehearsed on 2026-11-05: a v0.18.0 archive restored, migrated and served under v0.22.0.
+The recovery guide also covers replaying copied actual backups and an optional GTK smoke test.
+Earlier, on 2026-11-05, a v0.18.0 archive was restored, migrated and served under v0.22.0;
+that earlier check did not reconnect a client.
