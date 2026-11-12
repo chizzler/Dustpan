@@ -1,0 +1,41 @@
+# Maintainer: @MAINTAINER@
+pkgname=dustpan
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc='Offline-first GTK task manager for your own OpenTodo server'
+arch=('any')
+url='@HOMEPAGE@'
+license=('AGPL-3.0-only')
+# Pycairo is used by Gtk.Snapshot.append_cairo; namcap cannot infer that GI conversion.
+depends=('python>=3.11' 'python-gobject' 'python-cairo' 'gtk4' 'libadwaita>=1.7'
+         'glib2' 'pango' 'graphene' 'bash' 'hicolor-icon-theme')
+checkdepends=('desktop-file-utils')
+source=('@SOURCE@')
+sha256sums=('@SHA256@')
+
+check() {
+  cd "$srcdir/$pkgname-$pkgver"
+  OPENTODO_SRC="$PWD/desktop/tests/upstream" python -m unittest discover -s desktop/tests -t desktop
+  desktop-file-validate packaging/aur/io.github.chizzler.Dustpan.desktop
+}
+
+package() {
+  cd "$srcdir/$pkgname-$pkgver"
+  install -d "$pkgdir/usr/lib/dustpan" "$pkgdir/usr/lib/dustpan/data"
+  cp -r desktop/dustpan "$pkgdir/usr/lib/dustpan/"
+  install -Dm755 packaging/aur/dustpan "$pkgdir/usr/bin/dustpan"
+  install -Dm644 packaging/aur/io.github.chizzler.Dustpan.desktop \
+    "$pkgdir/usr/share/applications/io.github.chizzler.Dustpan.desktop"
+  install -Dm644 desktop/data/io.github.chizzler.Dustpan.svg \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.chizzler.Dustpan.svg"
+  ln -s ../../../share/icons/hicolor/scalable/apps/io.github.chizzler.Dustpan.svg \
+    "$pkgdir/usr/lib/dustpan/data/io.github.chizzler.Dustpan.svg"
+  install -Dm644 README.md "$pkgdir/usr/share/doc/dustpan/README.md"
+  install -Dm644 RELEASE_NOTES.md "$pkgdir/usr/share/doc/dustpan/RELEASE_NOTES.md"
+  install -Dm644 packaging/aur/dustpan-autostart.desktop \
+    "$pkgdir/usr/share/doc/dustpan/dustpan-autostart.desktop"
+  install -Dm644 NOTICE.md "$pkgdir/usr/share/licenses/dustpan/NOTICE.md"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/dustpan/LICENSE"
+  python -m compileall -q -s "$pkgdir" -p / "$pkgdir/usr/lib/dustpan/dustpan"
+  python -O -m compileall -q -s "$pkgdir" -p / "$pkgdir/usr/lib/dustpan/dustpan"
+}

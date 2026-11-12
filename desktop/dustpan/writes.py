@@ -19,16 +19,28 @@ from .ordering import GAP, plan_move
 from .recurrence import RuleError, canonical, first_occurrence, parse
 from .recurring import plan_completion, plan_detach, plan_skip, series_rule
 from .quickadd.settings import context_for
-from .reminders import MAX_OFFSET, deadline_fire_at, plan_default_reminder, read_defaults, relative_fire_at
+from .reminders import (MAX_OFFSET, deadline_fire_at, format_default, parse_default, plan_default_reminder,
+                        read_defaults, relative_fire_at)
 from .store import Row
 from .trash import deleted_with
 from .views import DEFAULTS as VIEW_DEFAULTS, GROUP_BY, SORT_BY, SORT_DIR, is_list_view, view_order
 
+LOCAL_USER = "local"  # standalone actor until connected to an OpenTodo account
 EDITABLE = ("title", "description", "priority", "due", "recurrence", "project_id", "section_id", "labels",
             "estimate_minutes", "deadline", "sector")
 MAX_ESTIMATE = 10080  # minutes: the server's bound
 MAX_VALUE_BYTES = 64 * 1024  # the server's bound on one value, as the JSON we send
 VIEW_EDITABLE = ("name", "query", "group_by", "sort_by", "sort_dir", "show_completed")
+DATE_FORMATS = ("system", "day-month", "month-day", "iso")
+TIME_FORMATS = ("system", "24h", "12h")
+WEEK_STARTS = ("system", "mon", "sun", "sat")
+LANGUAGES = ("system", "en", "de", "fr", "es", "it", "pt")
+DAY_STARTS = ("00:00", "01:00", "02:00", "03:00", "04:00", "05:00", "06:00")
+PREF_DEFAULTS = {
+    "date_format": "system", "time_format": "system", "week_start": "system", "day_start": "",
+    "language": "system", "reminder_default_timed": "", "reminder_default_dated": "",
+    "time_sectors": "", "day_parts": "", "energy": "",
+}
 # The web app's label colours (web/src/ui/tokens/palette.ts). A new label takes the first one no label uses.
 LABEL_COLOURS = (("#ef4444", "Red"), ("#f97316", "Orange"), ("#eab308", "Yellow"), ("#84cc16", "Lime"),
                  ("#22c55e", "Green"), ("#14b8a6", "Teal"), ("#06b6d4", "Cyan"), ("#3b82f6", "Blue"),
@@ -186,9 +198,13 @@ class Writer:
         ]
         return max(positions) + GAP if positions else self.now()
 
+    def user_id(self):
+        """The signed-in OpenTodo user id, or LOCAL_USER when running standalone."""
+        return self.store.get_meta("user_id") or LOCAL_USER
+
     def _completed_by(self, changes):
         """A write of completed_at carries completed_by: us when completing, null when reopening."""
-        me = self.store.get_meta("user_id")
+        me = self.user_id()
         return [
             (entity, eid, {**patch, "completed_by": me if patch["completed_at"] is not None else None})
             if entity == "task" and "completed_at" in patch and "completed_by" not in patch else (entity, eid, patch)
@@ -219,10 +235,10 @@ class Writer:
             if entity == "task":
                 patches[eid] = {**patches.get(eid, {}), **patch}
         scheduled = {eid: p for eid, p in patches.items() if isinstance(p.get("due"), dict)}
-        user_id = self.store.get_meta("user_id")
+        user_id = self.user_id()
         prefs = self.store.rows("user_prefs").get("me")
         defaults = read_defaults(prefs.values if prefs else None)
-        if not scheduled or not user_id or defaults == (None, None):
+        if not scheduled or defaults == (None, None):
             return []
         tasks = self.store.rows("task")
         reminders = list(self.store.rows("reminder").values())
@@ -315,7 +331,8 @@ class Writer:
             changes = created + [("task", task_id, task)]
             changes += [("reminder", str(uuid.uuid4()), self._typed_reminder(task_id, task["due"], r, now))
                         for r in parsed.reminders]
-            if parsed.spent_minutes and (me := self.store.get_meta("user_id")):
+            if parsed.spent_minutes:
+                me = self.user_id()
                 end = self.now()
                 changes.append(("time_entry", str(uuid.uuid4()), {
                     "task_id": task_id, "user_id": me, "started_at": end - parsed.spent_minutes * 60_000,
@@ -1221,6 +1238,73 @@ class Writer:
             return created + [("task", task_id, {"labels": wanted})]
 
         return self.commit(self._undoable(plan))
+
+    # ---- preferences (user_prefs "me") ----
+
+    def set_prefs(self, changes):
+        """Write changed fields on user_prefs 'me', working both standalone and synced."""
+        unknown = set(changes) - set(PREF_DEFAULTS)
+        if unknown:
+            raise ValueError(f"not editable: {sorted(unknown)}")
+        enums = {"date_format": DATE_FORMATS, "time_format": TIME_FORMATS,
+                 "week_start": WEEK_STARTS, "language": LANGUAGES}
+
+        def normalize(name, value):
+            if name in enums:
+                if value not in enums[name]:
+                    raise CannotEdit(f"Unsupported {name}: {value!r}")
+                return value
+            if name == "day_start":
+                if value == "":
+                    return ""
+                if not isinstance(value, str) or not re.fullmatch(r"\d{2}:[0-5]\d", value):
+                    raise CannotEdit("Write the day start as HH:MM from 00:00 to 06:00")
+                minutes = int(value[:2]) * 60 + int(value[3:])
+                if minutes > 6 * 60:
+                    raise CannotEdit("Day start can be at most 06:00")
+                return value
+            if name in ("reminder_default_timed", "reminder_default_dated"):
+                if value in (None, ""):
+                    return ""
+                if isinstance(value, int) and not isinstance(value, bool):
+                    if abs(value) > MAX_OFFSET:
+                        raise CannotEdit("A reminder can be at most a year from the due time")
+                    return format_default(value)
+                parsed = parse_default(value)
+                if parsed is None:
+                    raise CannotEdit("A reminder can be at most a year from the due time")
+                return format_default(parsed)
+            if isinstance(value, bool):
+                return "on" if value else "off"
+            if value not in ("on", "off", ""):
+                raise CannotEdit(f"Unsupported {name}: {value!r}")
+            return value
+
+        normalized = {k: normalize(k, v) for k, v in changes.items()}
+
+        def plan():
+            row = self.store.rows("user_prefs").get("me")
+            cur_vals = row.values if row else {}
+            patch = {}
+            for name, want in normalized.items():
+                cur = cur_vals.get(name)
+                if name in enums:
+                    if want != (cur if cur in enums[name] else "system"):
+                        patch[name] = want
+                elif name == "day_start":
+                    want_min = day_start_minutes(want)
+                    cur_min = day_start_minutes(cur)
+                    if want_min != cur_min or (want_min == 0 and cur not in (None, "", "00:00")):
+                        patch[name] = want
+                elif name in ("reminder_default_timed", "reminder_default_dated"):
+                    if parse_default(want) != parse_default(cur) or (want == "" and cur not in (None, "")):
+                        patch[name] = want
+                else:
+                    if (want == "on") != (cur == "on"):
+                        patch[name] = want
+            return [("user_prefs", "me", patch)] if patch else []
+
+        self.commit(plan)
 
 
 def project_descendants(project_id, projects):

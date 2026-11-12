@@ -273,3 +273,58 @@ class SyncTrashTest(unittest.TestCase):
         self.assertEqual(result.purged, 5)
         self.assertEqual(list(self.store.all_fields()), [])
         self.assertEqual(self.store.outbox_count(), 0)
+
+
+class LocalPurgeTest(WriterCase):
+    def test_local_task_purge_removes_deleted_descendants_children_and_queued_ops(self):
+        p = self.writer.add_project("Work")
+        parent = self.writer.add_task("Parent", project_id=p, due={"date": "2026-11-05", "time": "09:00"})
+        child = self.writer.add_task("Child", parent_id=parent)
+        separate = self.writer.add_task("Deleted earlier", parent_id=parent)
+        kept = self.writer.add_task("Keep me", project_id=p)
+        rem = self.writer.add_reminder(parent, "relative", offset_minutes=-10)
+        self.seed("time_entry", "te1", task_id=parent, user_id="me", started_at=100, ended_at=200)
+        self.seed("comment", "c1", task_id=child, author_id="me", body="note")
+
+        self.now = 2_000_000
+        self.writer.delete_task(separate)
+        self.now = 3_000_000
+        self.writer.delete_task(parent)
+        trash.queue(self.store, [("task", parent)])
+        self.store.set_meta("held_ops", [{"id": "h1", "entity": "task", "entityId": parent,
+                                          "field": "title", "value": "x", "ts": 1, "device": "d"}])
+
+        removed = trash.purge_local(self.store, [("task", parent)])
+        self.assertEqual(removed, 6)  # parent, child, separate, rem, te1, c1
+        self.assertEqual(set(self.store.rows("task")), {kept})
+        self.assertEqual(self.store.rows("reminder"), {})
+        self.assertEqual(self.store.rows("time_entry"), {})
+        self.assertEqual(self.store.rows("comment"), {})
+        self.assertEqual(trash.pending(self.store), set())
+        self.assertEqual(self.store.get_meta("held_ops"), [])
+        self.assertFalse(any(o["entityId"] in {parent, child, separate, rem} for o in self.outbox()))
+
+    def test_local_project_purge_removes_sections_tasks_and_cascades(self):
+        p = self.writer.add_project("Drop")
+        sec = self.writer.add_section(p, "Todo")
+        live_task = self.writer.add_task("Live inside deleted project", project_id=p, section_id=sec)
+        rem = self.writer.add_reminder(live_task, "absolute", fire_at=5_000_000)
+        self.seed("project_prefs", p, feed_seen_at=100)
+        other = self.writer.add_task("Inbox stays")
+        self.writer.delete_project(p)
+
+        removed = trash.purge_local(self.store, [("project", p)])
+        self.assertGreaterEqual(removed, 5)
+        self.assertEqual(self.store.rows("project"), {})
+        self.assertEqual(self.store.rows("section"), {})
+        self.assertEqual(set(self.store.rows("task")), {other})
+        self.assertNotIn(rem, self.store.rows("reminder"))
+        self.assertEqual(self.store.rows("project_prefs"), {})
+        self.assertTrue(all(o["entityId"] == other for o in self.outbox()))
+
+    def test_local_purge_skips_live_or_missing_targets_and_cleans_pending(self):
+        live_task = self.writer.add_task("Still open")
+        trash.queue(self.store, [("task", live_task), ("task", "missing")])
+        self.assertEqual(trash.purge_local(self.store, [("task", live_task), ("task", "missing")]), 0)
+        self.assertIn(live_task, self.store.rows("task"))
+        self.assertEqual(trash.pending(self.store), set())

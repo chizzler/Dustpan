@@ -1,8 +1,9 @@
-"""The Trash: deleted tasks and projects, and permanent deletes waiting for the server.
+"""The Trash: deleted tasks and projects, with local or server-synced permanent deletion.
 
-Restoring is an ordinary write (writes.py). A permanent delete is not: the server removes the data,
-and every device, this one included, drops it when the next sync names it in `purged`.
-So a request is only queued here, and sent after a sync has pushed the outbox.
+Restoring is an ordinary write (writes.py). In standalone mode, permanent deletion
+removes the entity, its cascaded children and any queued ops locally at once.
+When connected to OpenTodo, permanent deletion is queued here and sent after a sync
+has pushed the outbox, then every device drops the entities when sync names them in `purged`.
 """
 
 from dataclasses import dataclass
@@ -14,6 +15,8 @@ DAY_MS = 86_400_000
 DEFAULT_RETENTION_DAYS = 30
 RETENTION = "trash_retention_days"  # store meta: days an item stays in the Trash, as the server last said; 0 = never
 PENDING = "pending_purges"  # store meta: [[entity, id]] to delete permanently once the server can be reached
+PROJECT_CHILDREN = ("section", "field", "note", "rule")
+TASK_CHILDREN = ("reminder", "comment", "attachment", "time_entry")
 
 
 @dataclass
@@ -127,3 +130,87 @@ def send(store, api):
         if refused is not None:
             raise refused
     return sent
+
+
+def expand_purge(store, targets):
+    """Expand trashed (entity, id) targets with the cascades of OpenTodo's expandPurge.
+
+    Missing or live (restored) targets are skipped. Purging a project removes all of
+    its tasks, sections and project-scoped rows; purging a task removes its deleted
+    descendants (even ones deleted separately) and its reminders, comments, attachments
+    and time entries.
+    """
+    rows_cache = {}
+
+    def rows_of(entity):
+        if entity not in rows_cache:
+            rows_cache[entity] = store.rows(entity)
+        return rows_cache[entity]
+
+    seen = set()
+    out = []
+    purged_tasks = []
+
+    def add(entity, entity_id):
+        key = (entity, entity_id)
+        if key in seen:
+            return False
+        seen.add(key)
+        out.append(key)
+        return True
+
+    for entity, entity_id in targets:
+        if entity not in ("task", "project", "note"):
+            continue
+        row = rows_of(entity).get(entity_id)
+        if row is None or row.get("deleted_at") is None:
+            continue
+        if not add(entity, entity_id):
+            continue
+        if entity == "task":
+            purged_tasks.append(entity_id)
+        elif entity == "project":
+            for tid, task in rows_of("task").items():
+                if task.get("project_id") == entity_id and add("task", tid):
+                    purged_tasks.append(tid)
+            for child in PROJECT_CHILDREN:
+                for cid, crow in rows_of(child).items():
+                    if crow.get("project_id") == entity_id:
+                        add(child, cid)
+            if entity_id in rows_of("project_prefs"):
+                add("project_prefs", entity_id)
+
+    deleted_children = {}
+    for tid, task in rows_of("task").items():
+        if task.get("parent_id") and task.get("deleted_at") is not None:
+            deleted_children.setdefault(task.get("parent_id"), []).append(tid)
+    i = 0
+    while i < len(purged_tasks):
+        for cid in deleted_children.get(purged_tasks[i], ()):
+            if add("task", cid):
+                purged_tasks.append(cid)
+        i += 1
+
+    task_set = set(purged_tasks)
+    if task_set:
+        for child in TASK_CHILDREN:
+            for cid, crow in rows_of(child).items():
+                if crow.get("task_id") in task_set:
+                    add(child, cid)
+    return out
+
+
+def purge_local(store, targets):
+    """Permanently delete trashed targets and their cascaded data locally in one transaction."""
+    target_set = {(entity, entity_id) for entity, entity_id in targets}
+    with store.transaction():
+        expanded = expand_purge(store, targets)
+        gone = set(expanded)
+        for entity, entity_id in expanded:
+            store.purge(entity, entity_id)
+        if held := store.get_meta("held_ops"):
+            store.set_meta("held_ops", [op for op in held if (op["entity"], op["entityId"]) not in gone])
+        if have := store.get_meta(PENDING):
+            drop = target_set | gone
+            store.set_meta(PENDING, [p for p in have if tuple(p) not in drop])
+        return len(expanded)

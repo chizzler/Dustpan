@@ -1,6 +1,8 @@
-"""The task, view and project editors."""
+"""The task, view, project, label and settings dialogs."""
 
 import re
+import threading
+from datetime import time
 
 import gi
 
@@ -8,6 +10,9 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
+from . import config  # noqa: E402
+from .api import Api, ApiError, Offline  # noqa: E402
+from .dates import day_start_minutes, format_time, uses_12h  # noqa: E402
 from .filters import FilterError  # noqa: E402
 from .labelpicker import NEW_LABEL_COLOUR, LabelPicker  # noqa: E402
 from .model import CLEARED_SUBTASKS, completed_subtask_visible  # noqa: E402
@@ -15,10 +20,13 @@ from .querybar import QueryBar  # noqa: E402
 from .noteview import NotesEditor  # noqa: E402
 from .quickadd.attributes import match_duration  # noqa: E402
 from .recurrence import RuleError, parse, preview_occurrences  # noqa: E402
-from .reminders import DEADLINE_PRESETS, RELATIVE_PRESETS, describe  # noqa: E402
+from .reminders import (DEADLINE_PRESETS, DEFAULT_DATED_PRESETS, DEFAULT_TIMED_PRESETS, RELATIVE_PRESETS,
+                        describe, offset_label, parse_custom_offset, read_defaults)  # noqa: E402
+from .sync import UnsupportedAccount, adopt_standalone, migrate_account, reset_for_account, verify_account  # noqa: E402
 from .views import run_query, view_options  # noqa: E402
 from .widgets import Dot, broom_button, escape, label_chip  # noqa: E402
-from .writes import LABEL_COLOURS, PROJECT_COLOURS, CannotEdit, live, project_descendants  # noqa: E402
+from .writes import (DAY_STARTS, LABEL_COLOURS, LOCAL_USER, PROJECT_COLOURS, CannotEdit, live,
+                     project_descendants)  # noqa: E402
 
 PRIORITIES = ["Priority 1", "Priority 2", "Priority 3", "No priority"]
 
@@ -755,3 +763,333 @@ def ask_name(window, heading, text, on_name):
     dialog.connect("response", lambda _d, response: response == "ok" and on_name(entry.get_text()))
     dialog.present(window)
     entry.grab_focus()
+
+
+class SettingsDialog(Adw.PreferencesDialog):
+    """Preferences (stored in user_prefs 'me' so they work locally and sync when connected) and optional OpenTodo sync."""
+
+    TIME_CHOICES = [("system", "System"), ("24h", "24-hour"), ("12h", "12-hour")]
+    DATE_CHOICES = [("system", "System"), ("day-month", "Day–month"), ("month-day", "Month–day"), ("iso", "ISO (YYYY-MM-DD)")]
+    WEEK_CHOICES = [("system", "System"), ("mon", "Monday"), ("sun", "Sunday"), ("sat", "Saturday")]
+    LANGUAGE_CHOICES = [("system", "System"), ("en", "English"), ("de", "Deutsch"), ("fr", "Français"),
+                        ("es", "Español"), ("it", "Italiano"), ("pt", "Português")]
+
+    def __init__(self, window):
+        super().__init__(title="Settings", content_width=480, content_height=580)
+        self.window = window
+        self._updating = False
+        self._connecting = False
+        self.sync_group = None
+        self.sync_rows = []
+
+        prefs_row = window.store.rows("user_prefs").get("me")
+        prefs = prefs_row.values if prefs_row else {}
+        timed_default, dated_default = read_defaults(prefs)
+
+        self.page = page = Adw.PreferencesPage()
+
+        reminders = Adw.PreferencesGroup(
+            title="Default reminders",
+            description="Added automatically when a task first gets a due date.",
+        )
+        self.timed_row = Adw.ComboRow(title="Tasks with a time")
+        self.dated_row = Adw.ComboRow(title="Tasks with no time", subtitle="Counted from 09:00 on the due date")
+        self._fill_reminder_combo(self.timed_row, "timed", DEFAULT_TIMED_PRESETS, timed_default)
+        self._fill_reminder_combo(self.dated_row, "dated", DEFAULT_DATED_PRESETS, dated_default)
+        self.timed_row.connect("notify::selected", lambda *_a: self._on_reminder_selected("timed"))
+        self.dated_row.connect("notify::selected", lambda *_a: self._on_reminder_selected("dated"))
+        reminders.add(self.timed_row)
+        reminders.add(self.dated_row)
+        page.add(reminders)
+
+        dt = Adw.PreferencesGroup(title="Date and time")
+        dt.add(self._enum_row("time_format", "Time format", None, self.TIME_CHOICES, prefs.get("time_format")))
+        dt.add(self._enum_row("date_format", "Date order", "For dates like 06/11 in quick add",
+                              self.DATE_CHOICES, prefs.get("date_format")))
+        dt.add(self._enum_row("week_start", "Week starts on", None, self.WEEK_CHOICES, prefs.get("week_start")))
+        dt.add(self._day_start_row(prefs.get("day_start"), prefs.get("time_format", "system")))
+        page.add(dt)
+
+        qa = Adw.PreferencesGroup(title="Quick add")
+        qa.add(self._enum_row("language", "Language", None, self.LANGUAGE_CHOICES, prefs.get("language")))
+        qa.add(self._switch_row("time_sectors", "Time sectors",
+                                "Understand phrases like “this week” or “next month”", prefs.get("time_sectors") == "on"))
+        qa.add(self._switch_row("day_parts", "Parts of the day",
+                                "Understand “morning” and “afternoon”", prefs.get("day_parts") == "on"))
+        qa.add(self._switch_row("energy", "Energy levels",
+                                "Understand “deep”, “medium” and “low energy”", prefs.get("energy") == "on"))
+        page.add(qa)
+
+        self.sync_group = Adw.PreferencesGroup(title="OpenTodo sync")
+        page.add(self.sync_group)
+        self._rebuild_sync_group()
+        self.add(page)
+
+    def _notice(self, text):
+        self.add_toast(Adw.Toast(title=escape(text), timeout=5))
+
+    def _set_pref(self, field, value):
+        if self._updating:
+            return
+        try:
+            self.window.writer.set_prefs({field: value})
+        except CannotEdit as err:
+            self._notice(str(err))
+            return
+        self.window.after_edit()
+
+    def _enum_row(self, field, title, subtitle, choices, current):
+        keys = [k for k, _ in choices]
+        row = Adw.ComboRow(title=title, subtitle=subtitle or "", model=Gtk.StringList.new([label for _, label in choices]))
+        row.set_selected(keys.index(current) if current in keys else 0)
+        row.connect("notify::selected", lambda r, _p: self._set_pref(field, keys[r.get_selected()]))
+        return row
+
+    def _day_start_row(self, current, time_format):
+        minutes = day_start_minutes(current)
+        hhmm = f"{minutes // 60:02d}:{minutes % 60:02d}"
+        twelve = uses_12h(time_format)
+        values = list(DAY_STARTS)
+        if hhmm not in values:
+            values = sorted([*values, hhmm])
+        labels = ["Midnight" if v == "00:00" else format_time(time.fromisoformat(v), twelve) for v in values]
+        row = Adw.ComboRow(
+            title="Day starts at",
+            subtitle="Work before this hour still counts as the day before",
+            model=Gtk.StringList.new(labels),
+            selected=values.index(hhmm),
+        )
+        row.connect("notify::selected", lambda r, _p: self._set_pref("day_start", values[r.get_selected()]))
+        return row
+
+    def _switch_row(self, field, title, subtitle, active):
+        row = Adw.SwitchRow(title=title, subtitle=subtitle, active=active)
+        row.connect("notify::active", lambda r, _p: self._set_pref(field, "on" if r.get_active() else "off"))
+        return row
+
+    def _fill_reminder_combo(self, row, kind, presets, current):
+        self._updating = True
+        try:
+            items = [(None, "None"), *presets]
+            known = {m for m, _ in items}
+            if current not in known:
+                label = "On the day at 09:00" if kind == "dated" and current == 0 else offset_label(current)
+                items.append((current, label))
+            items.append(("custom", "Custom…"))
+            setattr(self, f"_{kind}_items", items)
+            setattr(self, f"_{kind}_current", current)
+            row.set_model(Gtk.StringList.new([label for _, label in items]))
+            row.set_selected([m for m, _ in items].index(current))
+        finally:
+            self._updating = False
+
+    def _on_reminder_selected(self, kind):
+        if self._updating:
+            return
+        row = self.timed_row if kind == "timed" else self.dated_row
+        presets = DEFAULT_TIMED_PRESETS if kind == "timed" else DEFAULT_DATED_PRESETS
+        items = getattr(self, f"_{kind}_items")
+        current = getattr(self, f"_{kind}_current")
+        choice = items[row.get_selected()][0]
+        field = f"reminder_default_{kind}"
+        if choice != "custom":
+            setattr(self, f"_{kind}_current", choice)
+            self._set_pref(field, choice)
+            return
+        self._ask_custom_reminder(kind, presets, current)
+
+    def _ask_custom_reminder(self, kind, presets, previous):
+        row = self.timed_row if kind == "timed" else self.dated_row
+        field = f"reminder_default_{kind}"
+        dialog = Adw.AlertDialog(
+            heading="Custom default reminder",
+            body="Enter an offset like 15m, 2h, 3d, or 30m after.",
+        )
+        entry = Gtk.Entry(placeholder_text="15m")
+        applied = False
+
+        def apply_text():
+            nonlocal applied
+            minutes = parse_custom_offset(entry.get_text())
+            if minutes is None:
+                self._notice("Write an offset up to 1 year, like 15m, 2h or 3d")
+                self._fill_reminder_combo(row, kind, presets, previous)
+                return
+            applied = True
+            self._fill_reminder_combo(row, kind, presets, minutes)
+            self._set_pref(field, minutes)
+
+        def on_activate(_entry):
+            dialog.close()
+            apply_text()
+
+        def on_response(_dialog, response):
+            if response == "ok":
+                apply_text()
+            elif not applied:
+                self._fill_reminder_combo(row, kind, presets, previous)
+
+        entry.connect("activate", on_activate)
+        dialog.set_extra_child(entry)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("ok", "Set")
+        dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("ok")
+        dialog.set_close_response("cancel")
+        dialog.connect("response", on_response)
+        dialog.present(self)
+        entry.grab_focus()
+
+    # ---- OpenTodo sync ----
+
+    def _rebuild_sync_group(self):
+        for r in self.sync_rows:
+            self.sync_group.remove(r)
+        self.sync_rows = []
+        cfg = self.window.cfg
+        if cfg is None:
+            self.sync_group.set_description(
+                "Optional. Tasks live locally on this device. Connect an OpenTodo server whenever you want "
+                "to sync across devices — your existing local tasks will be uploaded."
+            )
+        else:
+            self.sync_group.set_description(
+                f"Connected to {cfg.url}. Edits work offline and sync when reachable."
+            )
+        self.url_row = Adw.EntryRow(title="Server URL (https://…)" if cfg is None else "Server URL",
+                                    text=cfg.url if cfg else "")
+        self.token_row = Adw.PasswordEntryRow(title="API token", text=cfg.token if cfg else "")
+        self.url_row.connect("entry-activated", lambda _r: self.token_row.grab_focus())
+        self.token_row.connect("entry-activated", lambda _r: self._on_connect_clicked())
+        buttons = Gtk.Box(spacing=12, margin_top=8, margin_bottom=4)
+        self.connect_button = Gtk.Button(
+            label="Connect to OpenTodo" if cfg is None else "Save & reconnect",
+            css_classes=["pill", "suggested-action"],
+        )
+        self.connect_button.connect("clicked", lambda _b: self._on_connect_clicked())
+        buttons.append(self.connect_button)
+        self.disconnect_button = None
+        if cfg is not None:
+            disconnect = Gtk.Button(label="Disconnect…", css_classes=["pill", "destructive-action"])
+            disconnect.connect("clicked", lambda _b: self._on_disconnect_clicked())
+            buttons.append(disconnect)
+            self.disconnect_button = disconnect
+        button_row = Gtk.ListBoxRow(child=buttons, activatable=False, selectable=False)
+        for r in (self.url_row, self.token_row, button_row):
+            self.sync_group.add(r)
+            self.sync_rows.append(r)
+
+    def _set_busy(self, busy):
+        self._connecting = busy
+        self.url_row.set_sensitive(not busy)
+        self.token_row.set_sensitive(not busy)
+        self.connect_button.set_sensitive(not busy)
+        self.connect_button.set_label(
+            "Connecting…" if busy else ("Connect to OpenTodo" if self.window.cfg is None else "Save & reconnect")
+        )
+        if self.disconnect_button is not None:
+            self.disconnect_button.set_sensitive(not busy)
+
+    def _on_connect_clicked(self):
+        if self._connecting:
+            return
+        try:
+            cfg = config.validate(self.url_row.get_text(), self.token_row.get_text())
+        except config.ConfigMissing as err:
+            self._notice(str(err))
+            return
+        self._set_busy(True)
+
+        def check():
+            try:
+                info = verify_account(Api(cfg.url, cfg.token))
+                err = None
+            except Offline:
+                info, err = None, "Could not reach server. Check the URL and your connection."
+            except ApiError as api_err:
+                if api_err.status in (401, 403):
+                    info, err = None, "Authentication failed. Check your API token."
+                else:
+                    info, err = None, f"Server error: {api_err}"
+            except UnsupportedAccount as unsup:
+                info, err = None, f"Can't connect: {unsup}"
+            except Exception as exc:
+                info, err = None, f"Connection failed: {exc}"
+            GLib.idle_add(self._on_verified, cfg, info, err)
+
+        threading.Thread(target=check, daemon=True).start()
+
+    def _on_verified(self, cfg, info, err):
+        self._set_busy(False)
+        if not self.get_mapped():
+            return GLib.SOURCE_REMOVE
+        if err is not None:
+            self._notice(err)
+            return GLib.SOURCE_REMOVE
+        remote_user_id, account_key = info
+        store = self.window.store
+        stored_user = store.get_meta("user_id")
+        has_data = any(True for _ in store.all_fields())
+        if stored_user in (None, LOCAL_USER) or stored_user == remote_user_id or not has_data:
+            if not has_data and stored_user not in (None, LOCAL_USER, remote_user_id):
+                reset_for_account(store, remote_user_id, account_key)
+            elif stored_user in (None, LOCAL_USER):
+                adopt_standalone(store, remote_user_id, account_key)
+            else:
+                with store.transaction():
+                    store.set_meta("account_key", account_key)
+            self._finish_connect(cfg)
+            return GLib.SOURCE_REMOVE
+
+        dialog = Adw.AlertDialog(
+            heading="Switch OpenTodo account?",
+            body="This device holds tasks synced with another OpenTodo account. "
+                 "Upload these tasks into the new account, or replace local data with the new account?",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("upload", "Upload local tasks")
+        dialog.add_response("replace", "Replace local data")
+        dialog.set_response_appearance("upload", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_response_appearance("replace", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+
+        def decide(_d, response):
+            if response == "upload":
+                migrate_account(store, remote_user_id, account_key)
+                self._finish_connect(cfg)
+            elif response == "replace":
+                reset_for_account(store, remote_user_id, account_key)
+                self._finish_connect(cfg)
+
+        dialog.connect("response", decide)
+        dialog.present(self)
+        return GLib.SOURCE_REMOVE
+
+    def _finish_connect(self, cfg):
+        config.save(cfg)
+        self.window.connect_sync(cfg)
+        self._rebuild_sync_group()
+        self._notice("Connected to OpenTodo — syncing…")
+
+    def _on_disconnect_clicked(self):
+        dialog = Adw.AlertDialog(
+            heading="Disconnect from OpenTodo?",
+            body="Sync will stop. Your tasks, projects and settings stay on this device.",
+        )
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("disconnect", "Disconnect")
+        dialog.set_response_appearance("disconnect", Adw.ResponseAppearance.DESTRUCTIVE)
+        dialog.set_default_response("cancel")
+        dialog.set_close_response("cancel")
+
+        def disconnect(_d, response):
+            if response != "disconnect":
+                return
+            config.clear()
+            self.window.disconnect_sync()
+            self._rebuild_sync_group()
+            self._notice("Disconnected — working locally")
+
+        dialog.connect("response", disconnect)
+        dialog.present(self)

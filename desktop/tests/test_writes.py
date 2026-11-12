@@ -492,3 +492,46 @@ class SlotDropTest(WriterCase):
         self.writer.revert(done.undo)
         self.assertEqual((self.task("t1").get("due"), self.task("t1").get("estimate_minutes")),
                          ({"date": "2026-11-05", "time": "09:00"}, None))
+
+
+class StandalonePrefsAndIdentityTest(unittest.TestCase):
+    def setUp(self):
+        self.store = Store(":memory:")
+        self.addCleanup(self.store.close)
+        self.now = 1_000_000
+        clock = HybridClock(self.store, now=lambda: self.now)
+        self.writer = Writer(self.store, clock=clock, now=lambda: self.now, today=lambda: "2026-11-02")
+
+    def test_standalone_default_reminders_completions_and_time_entries_work_without_server_user(self):
+        self.assertIsNone(self.store.get_meta("user_id"))
+        self.writer.set_prefs({"reminder_default_timed": -15, "reminder_default_dated": -1440})
+        tid = self.writer.quick_add("Call Alex 2026-11-06 10:00 25m/1h")
+        rid = default_reminder_id("local", tid)
+        self.assertIn(rid, self.store.rows("reminder"))
+        self.assertEqual(self.store.rows("reminder")[rid].get("offset_minutes"), -15)
+        entries = list(self.store.rows("time_entry").values())
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].get("user_id"), "local")
+
+        self.writer.complete(tid)
+        self.assertEqual(self.store.rows("task")[tid].get("completed_by"), "local")
+
+    def test_set_prefs_writes_only_changed_fields_and_validates(self):
+        # Choosing defaults on an empty store writes no ops, keeping untouched fields clean for a later sync.
+        self.writer.set_prefs({"time_format": "system", "date_format": "system", "week_start": "system",
+                               "day_start": "00:00", "reminder_default_timed": None, "time_sectors": False})
+        self.assertEqual(self.store.outbox_count(), 0)
+
+        self.writer.set_prefs({"time_format": "24h", "week_start": "sun", "day_start": "04:00",
+                               "time_sectors": True, "language": "de"})
+        prefs = self.store.rows("user_prefs")["me"]
+        self.assertEqual(prefs.get("time_format"), "24h")
+        self.assertEqual(prefs.get("week_start"), "sun")
+        self.assertEqual(prefs.get("day_start"), "04:00")
+        self.assertEqual(prefs.get("time_sectors"), "on")
+        self.assertEqual(prefs.get("language"), "de")
+        self.assertNotIn("date_format", prefs.values)
+
+        for bad in ({"time_format": "ampm"}, {"day_start": "07:00"}, {"reminder_default_timed": 9999999}):
+            with self.assertRaises(CannotEdit):
+                self.writer.set_prefs(bad)

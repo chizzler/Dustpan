@@ -20,10 +20,12 @@ Deleted tasks and projects, newest deletion first. Based on OpenTodo v0.18.0's
 
 ## Permanent deletion
 
-- Delete for good and Empty Trash ask first. Empty Trash queues the items currently listed on this device,
+- Delete for good and Empty Trash ask first. Empty Trash acts on the items currently listed on this device,
   not unseen items on the server. Neither operation has Undo.
-- Requests are stored in device-local `pending_purges` metadata as `[entity, id]` pairs. Queuing is atomic
-  and deduplicated. Pending rows stay visible with their Restore and Delete buttons disabled.
+- **Standalone (no server configured):** targets and their cascades are deleted immediately from `fields`,
+  `outbox`, `held_ops` and `pending_purges` in one transaction, following OpenTodo's `expandPurge` rules.
+- **Connected to OpenTodo:** requests are stored in device-local `pending_purges` metadata as `[entity, id]` pairs.
+  Queuing is atomic and deduplicated. Pending rows stay visible with their Restore and Delete buttons disabled.
 - After a successful sync exchange, send `DELETE /api/v1/tasks/{id}/purge` or
   `/api/v1/projects/{id}/purge`. Targets with unsent or server-limit-held edits wait for a later sync.
   This also works with the command-line `sync` command.
@@ -36,8 +38,15 @@ Deleted tasks and projects, newest deletion first. Based on OpenTodo v0.18.0's
 - Purging a project also removes its tasks and sections. Purging a task removes its deleted descendants,
   including ones deleted separately, and associated data such as reminders.
 
+## Known standalone release blocker
+
+**P2 — Permanent deletion after disconnect:** for previously synced items, local purge also discards the
+queued tombstone and leaves no server purge request. Reconnecting does not delete the server copy, which can
+return in later pulls. Retain a durable deletion record until the server acknowledges deletion. Until fixed,
+keep sync configured and let permanent deletion reach the server. See [the sync review](sync.md#standalone-release-blockers-reviewed-2026-11-12).
+
 ## Retention
 
-Sync's `trashRetentionDays` is remembered locally. Until learned, assume 30 days. Zero means kept until
-manually purged. The page shows days remaining rounded up, never below zero. The server, not this client,
-enforces expiry.
+In standalone mode, trashed items are kept until manually deleted for good. When connected, sync's
+`trashRetentionDays` is remembered locally (assuming 30 days until learned; zero means kept until manually
+purged). The page shows days remaining rounded up, never below zero. The server, not this client, enforces expiry.
