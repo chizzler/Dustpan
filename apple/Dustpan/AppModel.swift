@@ -164,7 +164,7 @@ final class AppModel {
     /// A parent whose last open subtask was just completed here: the list offers to complete it.
     private(set) var offeredParent: String?
     /// Tasks just ticked or reopened, with whether they still sort as done: they keep their place in project lists
-    /// until 3 s after the last tick on the page, then settle together.
+    /// until 2 s after the last tick on the page, then settle together.
     private(set) var settling: [String: Bool] = [:]
     @ObservationIgnored private var settle: Task<Void, Never>?
     /// The Filter page's query, kept while other pages are shown.
@@ -792,12 +792,12 @@ final class AppModel {
 
     func declineOffer() { offeredParent = nil }
 
-    /// A ticked or reopened subtask sorts as it did until the page has been still for 3 s.
+    /// A ticked or reopened subtask sorts as it did until the page has been still for 2 s.
     private func hold(_ task: Row) {
         if settling[task.id] == nil { settling[task.id] = !task["completed_at"].isNull }
         settle?.cancel()
         settle = Task {
-            try? await Task.sleep(for: .seconds(3))
+            try? await Task.sleep(for: .seconds(2))
             guard !Task.isCancelled else { return }
             settling = [:]
         }

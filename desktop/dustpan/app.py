@@ -56,7 +56,7 @@ OPTIONAL_PAGES = ((ANYTIME, "Anytime", "task-due-symbolic"), (COMPLETED, "Comple
                   (FILTER, "Filter", "edit-find-symbolic"), (TRASH, "Trash", "user-trash-symbolic"))
 HIDDEN_PAGES = "hidden_pages"  # store meta: the optional pages hidden on this device
 FILTER_DELAY_MS = 150  # the Filter page's results wait for a pause in typing
-SETTLE_MS = 3000  # a ticked or reopened subtask keeps its place until this long after the last tick
+SETTLE_MS = 2000  # a ticked or reopened subtask keeps its place until this long after the last tick
 RECENT_LABELS = "recent_labels"  # store meta: labels assigned lately on this device, newest first
 # On first start, reminders that fired longer ago than this are not shown.
 STALE_REMINDER_MS = 24 * 60 * 60_000
