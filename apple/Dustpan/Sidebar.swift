@@ -30,6 +30,7 @@ struct Sidebar: View {
                 .listRowInsets(.vertical, 0)
             ForEach(model.sidebarPages, id: \.self) { page in
                 Label(page.name, systemImage: page.symbol)
+                    .badge(page == .trash ? model.trash.count : 0)
                     .tag(page)
                     .contextMenu {
                         Button("Hide from Sidebar") { model.setHidden(page, true) }

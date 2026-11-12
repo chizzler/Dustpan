@@ -4,6 +4,8 @@ import Foundation
 public protocol SyncServer {
     func me() async throws -> JSON
     func sync(_ body: JSON) async throws -> JSON
+    /// Delete a task or project in the Trash for good. 409 not_deleted if it isn't there.
+    func purge(entity: String, id: String) async throws
 }
 
 public enum ApiError: Error, CustomStringConvertible {
@@ -53,11 +55,16 @@ public struct Api: SyncServer, Sendable {
         self.session = session
     }
 
-    public func me() async throws -> JSON { try await send("GET", "/api/v1/me") }
-    public func sync(_ body: JSON) async throws -> JSON { try await send("POST", "/api/v1/sync", body: body) }
+    public func me() async throws -> JSON { try await send("GET", ["api", "v1", "me"]) }
+    public func sync(_ body: JSON) async throws -> JSON { try await send("POST", ["api", "v1", "sync"], body: body) }
 
-    func send(_ method: String, _ path: String, body: JSON? = nil) async throws -> JSON {
-        var request = URLRequest(url: baseURL.appending(path: path), timeoutInterval: Self.timeout)
+    public func purge(entity: String, id: String) async throws {
+        _ = try await send("DELETE", ["api", "v1", entity + "s", id, "purge"])
+    }
+
+    /// Each path component is percent-encoded, a slash in an id too.
+    func send(_ method: String, _ path: [String], body: JSON? = nil) async throws -> JSON {
+        var request = URLRequest(url: path.reduce(baseURL) { $0.appending(component: $1) }, timeoutInterval: Self.timeout)
         request.httpMethod = method
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
         if let body {

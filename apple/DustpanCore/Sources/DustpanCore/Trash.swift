@@ -1,0 +1,137 @@
+import Foundation
+
+// The Trash: deleted tasks and projects, and permanent deletes waiting for the server. See spec/trash.md.
+// Restoring is an ordinary write (Writer.restoreTask). A permanent delete is not: the server removes the data,
+// and every device, this one included, drops it when the next sync names it in `purged`.
+// So a request is only queued here, and sent after a sync has pushed the outbox.
+
+let dayMs: Int64 = 86_400_000
+public let defaultTrashRetention: Int64 = 30
+/// Store meta: days an item stays in the Trash, as the server last said; 0 = never.
+public let trashRetentionKey = "trash_retention_days"
+/// Store meta: [[entity, id]] to delete permanently once the server can be reached.
+public let pendingPurgesKey = "pending_purges"
+
+public struct TrashItem: Identifiable, Hashable, Sendable {
+    public struct Target: Hashable, Sendable {
+        public let entity: String  // "task" or "project"
+        public let id: String
+    }
+
+    public let target: Target
+    public let title: String
+    public let deletedAt: Int64
+    /// For tasks: their project's name, nil for the Inbox.
+    public var projectName: String?
+    /// For projects.
+    public var color: String?
+    /// Deleted with this task, and restored with it.
+    public var subtasks = 0
+
+    public var id: Target { target }
+    public var isProject: Bool { target.entity == "project" }
+}
+
+/// The deleted tasks below task that went with it: same deletion time, all the way down. Safe against cycles.
+func deletedWith(_ task: Row, in tasks: [String: Row]) -> [Row] {
+    var children: [String: [Row]] = [:]
+    for t in tasks.values {
+        if let parent = t["parent_id"].string, t["deleted_at"] == task["deleted_at"] { children[parent, default: []].append(t) }
+    }
+    var found: [Row] = [], stack = [task.id], seen: Set = [task.id]
+    while let next = stack.popLast() {
+        for child in children[next] ?? [] where seen.insert(child.id).inserted {
+            found.append(child)
+            stack.append(child.id)
+        }
+    }
+    return found
+}
+
+/// Deleted projects and tasks, newest deletion first.
+/// A subtask deleted with its parent is folded into the parent's item. The web app lists it on its own too.
+/// Tasks of a deleted project aren't deleted themselves: they come back with the project, so only it is listed.
+public func trashItems(tasks: [String: Row], projects: [String: Row]) -> [TrashItem] {
+    var out = projects.values.compactMap { p -> TrashItem? in
+        guard let deletedAt = p["deleted_at"].int else { return nil }
+        return TrashItem(target: .init(entity: "project", id: p.id), title: p["name"].string ?? "Untitled project",
+                         deletedAt: deletedAt, color: p["color"].string)
+    }
+    let deleted = tasks.values.filter { $0["deleted_at"].int != nil }
+    func parent(of task: Row) -> String? {
+        guard let parent = task["parent_id"].string.flatMap({ tasks[$0] }), parent["deleted_at"] == task["deleted_at"]
+        else { return nil }
+        return parent.id
+    }
+    for node in buildTree(deleted, parentOf: parent) {
+        let t = node.row
+        out.append(TrashItem(target: .init(entity: "task", id: t.id), title: t["title"].string ?? "Untitled",
+                             deletedAt: t["deleted_at"].int!,
+                             projectName: t["project_id"].string.flatMap { projects[$0] }.map { $0["name"].string ?? "" },
+                             subtasks: deletedWith(t, in: tasks).count))
+    }
+    return out.sorted { $0.deletedAt != $1.deletedAt ? $0.deletedAt > $1.deletedAt : bytesLess($0.target.id, $1.target.id) }
+}
+
+/// Whole days until the server deletes an item for good, or nil when it never does.
+public func remainingDays(deletedAt: Int64, retention: Int64, now: Int64) -> Int64? {
+    guard retention > 0 else { return nil }
+    let left = deletedAt + retention * dayMs - now
+    return max(0, left > 0 ? (left + dayMs - 1) / dayMs : 0)
+}
+
+/// The days the server keeps an item in the Trash, as it last said, or 30 until it has.
+public func trashRetention(_ store: Store) throws -> Int64 {
+    try store.meta(trashRetentionKey).int ?? defaultTrashRetention
+}
+
+func pendingList(_ store: Store) throws -> [TrashItem.Target] {
+    try (store.meta(pendingPurgesKey).array ?? []).compactMap { pair in
+        guard let pair = pair.array, pair.count == 2, let entity = pair[0].string, let id = pair[1].string else { return nil }
+        return TrashItem.Target(entity: entity, id: id)
+    }
+}
+
+func setPending(_ store: Store, _ targets: [TrashItem.Target]) throws {
+    try store.setMeta(pendingPurgesKey, .array(targets.map { [.string($0.entity), .string($0.id)] }))
+}
+
+public func pendingPurges(_ store: Store) throws -> Set<TrashItem.Target> { Set(try pendingList(store)) }
+
+/// Ask for a permanent delete of each target. Sent by the next sync.
+public func queuePurges(_ store: Store, _ targets: [TrashItem.Target]) throws {
+    try store.transaction {
+        var have = try pendingList(store)
+        for target in targets where !have.contains(target) { have.append(target) }
+        try setPending(store, have)
+    }
+}
+
+/// Send the queued permanent deletes. Returns how many the server took.
+///
+/// Call it after a sync has pushed the outbox, so the server already has the delete.
+/// A request for something restored since, or already gone, is dropped. Temporary failures keep the request
+/// and throw, so the caller can show the sync error. Acknowledgements remove only that request, never ones
+/// queued during a call.
+func sendPurges(_ store: Store, _ server: any SyncServer) async throws -> Int {
+    var sent = 0
+    for target in try pendingList(store) {
+        var refused: Error?
+        if let row = try store.rows(target.entity)[target.id], !row["deleted_at"].isNull {
+            // A server limit, or an edit made during sync, may leave its delete unsent.
+            let waiting = try store.outboxBatch(limit: try store.outboxCount()).map(\.op)
+                + (try store.meta("held_ops").array ?? []).compactMap(Op.init(json:))
+            if waiting.contains(where: { $0.entity == target.entity && $0.entityId == target.id }) { continue }
+            do {
+                try await server.purge(entity: target.entity, id: target.id)
+                sent += 1
+            } catch ApiError.server(let status, let code, let message) where [403, 404].contains(status) || code == "not_deleted" {
+                if status == 403 { refused = ApiError.server(status: status, code: code, message: message) }
+            }
+            // Offline throws too, leaving this and all later requests queued.
+        }
+        try store.transaction { try setPending(store, try pendingList(store).filter { $0 != target }) }
+        if let refused { throw refused }
+    }
+    return sent
+}

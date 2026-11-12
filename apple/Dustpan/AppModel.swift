@@ -14,11 +14,12 @@ enum Page: Hashable {
     case anytime
     case completed
     case filter
+    case trash
 }
 
 extension Page {
     /// Built-in pages that can be hidden from the sidebar on this device, never deleted.
-    static let optional: [Page] = [.anytime, .completed, .filter]
+    static let optional: [Page] = [.anytime, .completed, .filter, .trash]
 
     /// The key in store meta `hidden_pages`, the desktop client's.
     var key: String? {
@@ -26,6 +27,7 @@ extension Page {
         case .anytime: "anytime"
         case .completed: "completed"
         case .filter: "filter"
+        case .trash: "trash"
         default: nil
         }
     }
@@ -35,6 +37,7 @@ extension Page {
         case .anytime: "Anytime"
         case .completed: "Completed"
         case .filter: "Filter"
+        case .trash: "Trash"
         default: ""
         }
     }
@@ -44,6 +47,7 @@ extension Page {
         case .anytime: "square.stack"
         case .completed: "checkmark.circle"
         case .filter: "magnifyingglass"
+        case .trash: "trash"
         default: "questionmark"
         }
     }
@@ -100,6 +104,12 @@ final class AppModel {
     static let editSyncDelay = Duration.milliseconds(250)
 
     private(set) var snapshot = Snapshot()
+    /// Deleted tasks and projects, newest first.
+    private(set) var trash: [TrashItem] = []
+    /// Trash items whose permanent delete waits for the next sync.
+    private(set) var purging: Set<TrashItem.Target> = []
+    /// Days the server keeps an item in the Trash; 0 is until deleted for good.
+    private(set) var trashRetention = defaultTrashRetention
     private(set) var status = Status.idle
     private(set) var lastSynced: Date?
     /// Local changes not yet accepted by the server.
@@ -252,6 +262,9 @@ final class AppModel {
         guard let store else { return }
         do {
             snapshot = try DustpanCore.snapshot(store)
+            trash = trashItems(tasks: snapshot.allTasks, projects: try store.rows("project"))
+            purging = try pendingPurges(store)
+            trashRetention = try DustpanCore.trashRetention(store)
             waiting = try store.outboxCount()
             hiddenPages = Set(try store.meta(hiddenPagesKey).array?.compactMap(\.string) ?? [])
             foldedTasks = try store.meta(foldedTasksKey).array?.compactMap(\.string) ?? []
@@ -497,6 +510,33 @@ final class AppModel {
     func deleteView(_ view: Row) {
         if page == .view(view.id) { page = .today }
         undoable("Delete View", { try $0.deleteView(view.id) }) { _ in "Deleted view “\(view["name"].string ?? "")”" }
+    }
+
+    // MARK: the Trash
+
+    /// Bring a task or project back, with Undo. A task whose project is gone goes to the Inbox.
+    func restore(_ item: TrashItem) {
+        let title = item.title
+        if item.isProject {
+            undoable("Restore", { try $0.restoreProject(item.target.id) }) { _ in "Restored “\(title)” with its tasks" }
+        } else {
+            undoable("Restore", { try $0.restoreTask(item.target.id) }) { done in
+                done.undo.first?.patch["project_id"] != nil ? "Restored “\(title)” to the Inbox" : "Restored “\(title)”"
+            }
+        }
+    }
+
+    /// Queue a permanent delete for each item, then sync to send them. No Undo.
+    func deleteForGood(_ items: [TrashItem]) {
+        guard let store else { return }
+        do {
+            try queuePurges(store, items.map(\.target))
+        } catch {
+            show(Toast(message: "\(error)"))
+            return
+        }
+        refresh()
+        Task { await sync() }
     }
 
     // MARK: built-in pages

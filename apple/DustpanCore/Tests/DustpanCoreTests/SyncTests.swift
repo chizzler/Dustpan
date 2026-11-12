@@ -12,6 +12,10 @@ final class FakeServer: SyncServer {
     var requests: [JSON] = []
     var encrypted = false
     var generation = "g1"
+    /// Permanent deletes asked for, in order.
+    var purges: [TrashItem.Target] = []
+    /// Runs on each purge: throw to fail it.
+    var onPurge: (TrashItem.Target) throws -> Void = { _ in }
 
     init(_ responses: [JSON], encrypted: Bool = false) {
         self.responses = responses.map { r in { _ in r } }
@@ -24,6 +28,12 @@ final class FakeServer: SyncServer {
 
     func me() async throws -> JSON {
         ["user": ["id": "me"], "encryption": ["enabled": .bool(encrypted)]]
+    }
+
+    func purge(entity: String, id: String) async throws {
+        let target = TrashItem.Target(entity: entity, id: id)
+        purges.append(target)
+        try onPurge(target)
     }
 
     func sync(_ body: JSON) async throws -> JSON {

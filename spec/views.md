@@ -112,7 +112,7 @@ Today, Upcoming and saved views came in 0.4.0.
   The tests are ports of `test_querytools.py`.
 - **Sidebar:** Anytime, Completed and Filter under the Inbox. "Hide from Sidebar" in a row's menu, or View ▸ Hide …,
   writes the same `hidden_pages` meta as the desktop, with Undo. View ▸ Show … brings a page back: the Mac's
-  place for the desktop's ⋯ menu. The desktop's Trash key in that list is kept but not shown yet.
+  place for the desktop's ⋯ menu. Trash joined the list in 0.13.0.
 - **Filter** is View ▸ Filter… (⇧⌘F). ⌘F is Edit ▸ Find and ⌥⌘F Find and Replace, from `TextEditingCommands`.
   Opening the page puts the focus in the query; the sidebar leaves it there. The query lives in the app model,
   so it's kept while other pages are shown, as on the desktop, but not across launches.

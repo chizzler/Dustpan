@@ -5,7 +5,6 @@ public final class Syncer {
     static let batch = 500
     static let features: JSON = ["backfill_ack", "clock_skew"]
     static let maxSkewRounds = 3
-    static let trashRetention = "trash_retention_days"
 
     /// Entities only their author may write; a re-seed sends back only our own.
     static let authored = ["comment": "author_id", "attachment": "author_id", "time_entry": "user_id"]
@@ -53,9 +52,22 @@ public final class Syncer {
         try store.transaction { try store.setMeta("user_id", .string(id)) }
     }
 
-    /// Exchange until the outbox is empty and nothing remains to pull.
+    /// Push edits, pull changes, then send queued purges and pull their markers.
     /// Throws ApiError, Failure or StoreError.
     public func run() async throws -> Result {
+        var result = try await exchange()
+        if try await sendPurges(store, server) > 0 {
+            let again = try await exchange()
+            result.received += again.received
+            result.refused += again.refused
+            result.held = again.held
+            result.purged += again.purged
+        }
+        return result
+    }
+
+    /// Exchange until the outbox is empty and nothing remains to pull.
+    func exchange() async throws -> Result {
         try await checkAccount()
         let device = try store.transaction { try store.device() }
         var result = Result()
@@ -110,7 +122,7 @@ public final class Syncer {
                         try store.purge(entity: entity, id: id)
                     }
                 }
-                if !res["trashRetentionDays"].isNull { try store.setMeta(Self.trashRetention, res["trashRetentionDays"]) }
+                if !res["trashRetentionDays"].isNull { try store.setMeta(trashRetentionKey, res["trashRetentionDays"]) }
                 if !res["backfillSeq"].isNull { try store.setMeta("backfill_ack", res["backfillSeq"]) }
                 try store.setMeta("cursor", res["cursor"])
                 return false

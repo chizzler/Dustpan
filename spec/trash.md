@@ -41,3 +41,18 @@ Deleted tasks and projects, newest deletion first. Based on OpenTodo v0.18.0's
 Sync's `trashRetentionDays` is remembered locally. Until learned, assume 30 days. Zero means kept until
 manually purged. The page shows days remaining rounded up, never below zero. The server, not this client,
 enforces expiry.
+
+## On the Mac (0.13.0)
+
+The desktop's slice 11. Built 2026-11-12, checked by script, owner trial pending.
+
+- `Trash.swift` ports `trash.py`; `Writer.restoreTask` and `restoreProject` port the desktop's writes. The tests are
+  ports of `test_trash.py`, apart from the API's URL quoting, which was checked by hand.
+- `Syncer.run` sends queued purges after the exchange and, when the server took any, exchanges again for the markers.
+  The API builds each path from encoded components, so an id with a slash stays one component.
+- **Sidebar:** Trash after Filter, with its item count. Hideable like the other optional pages (`hidden_pages`, key
+  `trash`), from the row's menu or View ▸ Hide Trash.
+- **The page:** the retention line, then one row per item with Restore and Delete for Good (also in the row's menu).
+  Empty Trash… is in the toolbar. Both deletes ask first; a queued row is greyed and says "deleting for good…".
+- Restore has a toast and Edit ▸ Undo. A task restored to the Inbox says so.
+- Deleting a project with open tasks still asks first on the Mac (from 0.10.0); the desktop doesn't.

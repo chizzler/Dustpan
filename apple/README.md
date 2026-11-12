@@ -52,6 +52,7 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `DustpanCore/Sources/DustpanCore/Filter.swift` | The filter language: parser, error messages, evaluation, blocked tasks |
 | `DustpanCore/Sources/DustpanCore/Views.swift` | Today, Upcoming, Anytime, Completed, the Filter page's results, and saved views: sorting and grouping |
 | `DustpanCore/Sources/DustpanCore/QueryTools.swift` | Help writing a query: suggestions for the word being typed, and the builder's conditions |
+| `DustpanCore/Sources/DustpanCore/Trash.swift` | The Trash's items, days left, and permanent deletes queued for the next sync |
 | `DustpanCore/Sources/DustpanCore/Folding.swift` | Folding subtasks away: the stored list after a fold, and unfolding the way down to a new parent |
 | `DustpanCore/Sources/DustpanCore/Sectors.swift` | The part of time sectors the filter language needs |
 | `DustpanCore/Sources/DustpanCore/Reminders.swift` | Reminders that follow their dates, default reminders, and which are due to show |
@@ -65,6 +66,7 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `Dustpan/SectionEditor.swift` | Names a new section, or renames one |
 | `Dustpan/QueryField.swift` | A filter query with suggestions, Not and + Condition: the Filter page's and the view editor's |
 | `Dustpan/FilterBar.swift` | The Filter page's query, its match count or error, and Save as View |
+| `Dustpan/TrashPage.swift` | The Trash: Restore, Delete for Good and Empty Trash |
 | `Dustpan/ArchivedPage.swift` | An archived project's page: Unarchive or Delete |
 | `Dustpan/MoveCommands.swift` | Edit ▸ Move Up to Outdent, for whichever list has the focus (`ListMoves` in `Moves.swift`) |
 | `Dustpan/FoldCommand.swift` | View ▸ Fold Subtasks (⌘←) and Unfold Subtasks (⌘→), for the selected task (`TaskFold` in `TaskFold.swift`) |
@@ -103,6 +105,7 @@ Before 1.0 the minor number follows the Mac client's own slices.
 
 | Version | Date | What |
 | --- | --- | --- |
+| 0.13.0 | 2026-11-12 | Slice 11, Trash: deleted tasks and projects with their project, subtasks and days left. Restore with Undo (a task whose project is gone goes to the Inbox); Delete for Good and Empty Trash ask first and are sent with the next sync. Hideable like the other built-in pages. |
 | 0.12.1 | 2026-11-12 | Folding subtasks, as on the desktop: a chevron before a parent's check, ⌘← and ⌘→ (View ▸ Fold Subtasks, Unfold Subtasks), the row menu, and "3 subtasks" on a folded row. Kept on this Mac only. Fixed: typing L or C in an Add field or the Filter query opened the selected task's labels or completed it. |
 | 0.12.0 | 2026-11-11 | Slice 10, Anytime, Completed and Filter: Anytime lists undated tasks by project; Completed lists what was finished by day, newest first, 100 at a time with Show More. Filter (⇧⌘F) shows a query's matches as you type, suggests labels, projects and keywords, adds conditions from a menu, and saves the query as a view. Each can be hidden from the sidebar and brought back from the View menu. |
 | 0.11.0 | 2026-11-11 | Slice 8, task notes in Markdown: Notes in the task editor, with Write and Preview, and the note's first line under the task on every list. Smart quotes and dashes are off by default; Edit ▸ Substitutions turns them on. |

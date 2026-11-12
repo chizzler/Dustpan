@@ -27,6 +27,7 @@ struct ContentView: View {
                     case .inbox: TaskList(page: .inbox)
                     case .project(let id): TaskList(page: .project(id))
                     case .archived(let id): ArchivedPage(projectId: id)
+                    case .trash: TrashPage()
                     case let page: GroupedTaskList(page: page)
                     }
                 }

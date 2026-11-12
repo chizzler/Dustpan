@@ -153,7 +153,7 @@ struct GroupedTaskList: View {
             if let error = result.error { return Content(title: "Filter", empty: "", status: error, failed: true) }
             return Content(title: "Filter", groups: result.groups, warnings: result.warnings, empty: "No tasks match.",
                            status: "\(result.count) open task\(result.count == 1 ? "" : "s") match")
-        case .inbox, .project, .archived:
+        case .inbox, .project, .archived, .trash:
             return Content(title: "", empty: "")
         }
     }

@@ -395,6 +395,42 @@ public final class Writer {
         }
     }
 
+    /// Bring a task back from the Trash, with the subtasks deleted with it.
+    /// Its project still in the Trash: it goes to the Inbox. Its parent still there: it goes to the top level.
+    public func restoreTask(_ taskId: String) throws -> Done {
+        try undoable {
+            let tasks = try store.rows("task")
+            guard let task = tasks[taskId], !task["deleted_at"].isNull else { throw CannotEdit("That task isn't in the Trash") }
+            let projectId = task["project_id"].string
+            var projectGone = false
+            if let projectId { projectGone = try store.rows("project")[projectId].map(isLive) != true }
+            var changes = ([task] + deletedWith(task, in: tasks)).map { Change("task", $0.id, ["deleted_at": nil]) }
+            if projectGone {
+                for i in changes.indices { changes[i].patch.merge(["project_id": nil, "section_id": nil]) { _, new in new } }
+                changes[0].patch["parent_id"] = .null
+            } else if let parentId = task["parent_id"].string, tasks[parentId].map(isLive) != true {
+                changes[0].patch["parent_id"] = .null
+            }
+            if let sectionId = task["section_id"].string {
+                let section = try store.rows("section")[sectionId]
+                if section.map(isLive) != true || section?["project_id"].string != projectId {
+                    changes[0].patch["section_id"] = .null
+                }
+            }
+            return changes
+        }
+    }
+
+    /// Bring a project back from the Trash. Its tasks kept project_id, so they come back with it.
+    public func restoreProject(_ projectId: String) throws -> Done {
+        try undoable {
+            guard let project = try store.rows("project")[projectId], !project["deleted_at"].isNull else {
+                throw CannotEdit("That project isn't in the Trash")
+            }
+            return [Change("project", projectId, ["deleted_at": nil])]
+        }
+    }
+
     /// Apply the undo changes of an earlier action, as a new batch.
     public func revert(_ undo: [Change]) throws {
         try commit { undo }
