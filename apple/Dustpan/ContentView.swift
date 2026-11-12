@@ -3,7 +3,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.undoManager) private var undoManager
+    @Environment(\.openWindow) private var openWindow
     @AppStorage("outlineSpike") private var outlineSpike = false
 
     var body: some View {
@@ -34,6 +34,7 @@ struct ContentView: View {
                 .id(model.page)
             }
             .toolbar {
+                ToolbarItem(placement: .primaryAction) { CalendarButton(model: model) }
                 ToolbarItem(placement: .primaryAction) { SyncStatus() }
             }
             .overlay(alignment: .bottom) { ToastView() }
@@ -42,9 +43,15 @@ struct ContentView: View {
             .sheet(item: $model.editingProject, content: ProjectEditor.init)
             .sheet(item: $model.editingSection, content: SectionEditor.init)
             .sheet(item: $model.editingLabel, content: LabelEditor.init)
-            .onChange(of: undoManager, initial: true) { model.undoManager = undoManager }
+            .activeUndo()
+            .task(reopenCalendar)
             .frame(minWidth: 640, minHeight: 400)
         }
+    }
+
+    /// The calendar comes back with the app when it was open.
+    private func reopenCalendar() {
+        if model.calendarOpen { openWindow(id: CalendarWindow.id) }
     }
 }
 
@@ -86,12 +93,15 @@ struct ToastView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.undoManager) private var undoManager
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// With the calendar open, the toast shows in the window that's in front.
+    @Environment(\.appearsActive) private var appearsActive
 
     var body: some View {
         ZStack {
-            if let toast = model.toast { bubble(toast) }
+            if let toast = model.toast, appearsActive { bubble(toast) }
         }
         .animation(.snappy, value: model.toast)
+        .task(id: model.toast?.id, expire)
     }
 
     private func bubble(_ toast: Toast) -> some View {
@@ -106,13 +116,13 @@ struct ToastView: View {
         .glassEffect(.regular, in: .capsule)
         .padding(.bottom, 16)
         .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
-        .task(id: toast.id) { await expire(toast) }
     }
 
     private func undo() { undoManager?.undo() }
 
-    private func expire(_ toast: Toast) async {
+    private func expire() async {
+        guard let id = model.toast?.id else { return }
         try? await Task.sleep(for: .seconds(5))
-        if model.toast?.id == toast.id { model.toast = nil }
+        if model.toast?.id == id { model.toast = nil }
     }
 }

@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct DustpanApp: App {
+    @NSApplicationDelegateAdaptor private var appDelegate: AppDelegate
     @State private var model = AppModel()
     @AppStorage("outlineSpike") private var outlineSpike = false
 
@@ -21,6 +22,11 @@ struct DustpanApp: App {
                 .task { await model.listen() }
                 .task { await model.remind() }
         }
+        Window("Calendar", id: CalendarWindow.id) {
+            CalendarWindow()
+                .environment(model)
+        }
+        .defaultSize(width: 900, height: 700)
         .commands {
             TextEditingCommands()
             CommandGroup(after: .newItem) {
@@ -38,6 +44,8 @@ struct DustpanApp: App {
             CommandGroup(after: .sidebar) {
                 FoldCommand(model: model)
                 Divider()
+                CalendarButton(model: model)
+                    .keyboardShortcut("k")
                 Button("Filter…", action: model.openFilter)
                     .keyboardShortcut("f", modifiers: [.command, .shift])
                     .disabled(model.setupProblem != nil)

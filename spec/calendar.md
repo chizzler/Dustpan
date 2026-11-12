@@ -99,3 +99,25 @@ Ported to `calendar_rules.py` from `calendar.ts` (`resizeEstimate`, `stepEstimat
 - **Settings.** The gear in the header: when the grid starts and ends (6:00 to 22:00) and the day length
   (8 hours; 4 to 12 hours). Per device, in `meta.calendar_grid`, read through `grid_prefs`, which repairs bad values.
   The grid opens at its start hour and shades the hours outside; the day length is what the load is measured against.
+
+## On the Mac (0.14.0)
+
+Mac slice 12a: the window and Month. Built 2026-11-12, checked by script, owner trial pending.
+
+- `CalendarRules.swift` ports the Month part of `calendar_rules.py` and `grid_prefs`, with their tests, and a check that a
+  zoned due lands on the viewer's day. `MonthPage.swift` gathers a month's days for the app.
+- **A window of its own** (`Window` scene "Calendar"), opened by the calendar button in the main window's toolbar,
+  View ▸ Show Calendar (⌘K) or the Window menu. Whether it's open is kept in `meta.calendar_open`; it reopens with
+  the app. Quitting doesn't count as closing (the app delegate's `applicationShouldTerminate` says which).
+- **Month** as on the desktop: six weeks from the week start, today marked, other months shaded, past days dimmed,
+  timed tasks first, deadlines (◆), and the load against the day length from `meta.calendar_grid`. As many lines as
+  the day's height allows, then "+N more" with the rest in a popover.
+- **Completed tasks:** the tick in the toolbar, or h, as on the desktop (`meta.calendar_show_completed`). Faded and
+  struck through, with a tick for a dot. They don't drag.
+- **Keys:** [ and ] a month back and forward, t for today, as single keys on the toolbar's buttons. Typing in the
+  task editor's fields doesn't trigger them.
+- **Tasks:** a click selects, a double-click opens the editor as a sheet on the calendar window. Open tasks drag
+  onto another day, keeping their time (`ToDay`), and from the main window's lists onto a day.
+- **Undo and toasts:** each window keeps its own Undo, as Mac windows do: an action is undone in the window it was
+  made in. The toast shows in the window in front.
+- Week and Day (12b), stretching and the grid keys (12c), and the grid settings are still to come.

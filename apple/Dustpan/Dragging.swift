@@ -216,8 +216,8 @@ extension View {
     /// The whole row, edge to edge, takes the pointer: the list's own vertical row insets become padding inside it.
     /// In an inset, the List shows its own "drop on this row" highlight and the row's drop target sees the pointer
     /// outside itself.
-    func fullRowDropArea() -> some View {
-        padding(.vertical, 4)
+    func fullRowDropArea(_ inset: Double = 4) -> some View {
+        padding(.vertical, inset)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(.rect)
             .listRowInsets(.vertical, 0)
@@ -237,8 +237,9 @@ extension View {
 
     /// Let an open task's row be dragged. Remembers where the pointer holds it.
     /// The whole row width drags, so a press-and-drag never selects the rows it crosses. indent: its nesting.
-    func taskDrag(_ task: Row, subtasks: Int = 0, indent: Double = 0) -> some View {
-        modifier(TaskDragSource(task: task, subtasks: subtasks, indent: indent))
+    /// compact: a calendar line, with no row padding.
+    func taskDrag(_ task: Row, subtasks: Int = 0, indent: Double = 0, compact: Bool = false) -> some View {
+        modifier(TaskDragSource(task: task, subtasks: subtasks, indent: indent, compact: compact))
     }
 
     /// The row of a task just dropped flashes for 700 ms.
@@ -255,11 +256,12 @@ private struct TaskDragSource: ViewModifier {
     let task: Row
     let subtasks: Int
     let indent: Double
+    let compact: Bool
 
     func body(content: Content) -> some View {
         let row = content
             .padding(.leading, indent)
-            .fullRowDropArea()
+            .fullRowDropArea(compact ? 0 : 4)
         if task["completed_at"].isNull {
             row
                 .onContinuousHover { phase in

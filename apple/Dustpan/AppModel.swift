@@ -119,6 +119,14 @@ final class AppModel {
     var toast: Toast?
     /// The task open in the editor.
     var editing: Row?
+    /// The task open in the editor over the calendar window.
+    var calendarEditing: Row?
+    /// The calendar window is open. Kept on this device, so it reopens with the app.
+    private(set) var calendarOpen = false
+    /// The calendar shows completed tasks too. Kept on this device.
+    private(set) var calendarShowsCompleted = false
+    /// The calendar's grid settings on this device: the day length its load is measured against.
+    private(set) var calendarGrid = GridPrefs()
     /// The saved view open in its editor.
     var editingView: ViewDraft?
     /// The project open in its editor.
@@ -268,6 +276,9 @@ final class AppModel {
             waiting = try store.outboxCount()
             hiddenPages = Set(try store.meta(hiddenPagesKey).array?.compactMap(\.string) ?? [])
             foldedTasks = try store.meta(foldedTasksKey).array?.compactMap(\.string) ?? []
+            calendarOpen = try store.meta(calendarOpenKey).bool == true
+            calendarShowsCompleted = try store.meta(calendarShowCompletedKey).bool == true
+            calendarGrid = GridPrefs(try store.meta(calendarGridKey))
             settlePage()
         } catch {
             status = .failed("\(error)")
@@ -537,6 +548,34 @@ final class AppModel {
         }
         refresh()
         Task { await sync() }
+    }
+
+    // MARK: the calendar
+
+    func setCalendarOpen(_ open: Bool) {
+        if open != calendarOpen, saveMeta(calendarOpenKey, .bool(open)) { calendarOpen = open }
+    }
+
+    func setCalendarShowsCompleted(_ on: Bool) {
+        if on != calendarShowsCompleted, saveMeta(calendarShowCompletedKey, .bool(on)) { calendarShowsCompleted = on }
+    }
+
+    /// Show a task in the editor over the calendar.
+    func openFromCalendar(_ taskId: String) {
+        guard let task = snapshot.allTasks[taskId], task["deleted_at"].isNull else { return }
+        calendarEditing = task
+    }
+
+    /// Device-local meta. False, with a toast, when the store refuses.
+    private func saveMeta(_ key: String, _ value: JSON) -> Bool {
+        guard let store else { return false }
+        do {
+            try store.setMeta(key, value)
+            return true
+        } catch {
+            show(Toast(message: "\(error)"))
+            return false
+        }
     }
 
     // MARK: built-in pages

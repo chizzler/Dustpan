@@ -44,7 +44,7 @@ enforces expiry.
 
 ## On the Mac (0.13.0)
 
-The desktop's slice 11. Built 2026-11-12, checked by script, owner trial pending.
+The desktop's slice 11. Built 2026-11-12, tried and approved.
 
 - `Trash.swift` ports `trash.py`; `Writer.restoreTask` and `restoreProject` port the desktop's writes. The tests are
   ports of `test_trash.py`, apart from the API's URL quoting, which was checked by hand.

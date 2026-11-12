@@ -62,6 +62,11 @@ func formatTime(hour: Int, minute: Int, twelveHour: Bool) -> String {
     return minute == 0 ? "\(h)\(suffix)" : String(format: "%d:%02d%@", h, minute, suffix)
 }
 
+/// Minutes from midnight on the user's clock (user_prefs.time_format): "08:30" or "8:30am".
+public func clockText(_ minutes: Int, timeFormat: String = "system", locale: Locale = .current) -> String {
+    formatTime(hour: minutes / 60, minute: minutes % 60, twelveHour: uses12h(timeFormat, locale: locale))
+}
+
 /// An estimate: "15 min", "2h", "1h 30m".
 public func formatMinutes(_ minutes: Int) -> String {
     if minutes < 60 { return "\(minutes) min" }

@@ -233,7 +233,8 @@ extension Rule {
 
 // MARK: - Calendar arithmetic
 
-func addMonths(_ day: Day, _ n: Int) -> Day {
+/// The same day n months away, clamped to that month's last day. Years before 1 aren't needed.
+public func addMonths(_ day: Day, _ n: Int) -> Day {
     let (y, m, d) = day.parts
     let index = y * 12 + (m - 1) + n
     let (ny, nm) = (index / 12, index % 12 + 1)
