@@ -76,8 +76,9 @@ Upstream's prompt, as part of this slice.
 
 ## On the Mac (0.17.0)
 
-Built 2026-11-13, with the broom, the settling and the project label from the desktop's 0.12.4. Checked by script,
-owner trial pending. `Subtasks.swift` ports `progress_map`, `is_ready`, `ready_parent`, `sink_completed` and the broom's
+Built 2026-11-13, with the broom, the settling and the project label from the desktop's 0.12.4. Checked by script.
+The owner tried and approved the pies and the broom with Undo the same day; the offer, settling and the project label
+still need a trial. `Subtasks.swift` ports `progress_map`, `is_ready`, `ready_parent`, `sink_completed` and the broom's
 record, with their tests; `projectSections` takes the swept subtasks and the settling ones.
 
 - **The pie** as on the desktop, drawn as a SwiftUI shape over the check's circle: a faint ring for none done, a wedge,
