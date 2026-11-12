@@ -14,6 +14,23 @@ What the desktop client implements from `docs/calendar-views.md`, `docs/place-ta
 - **Month is the default view.**
 - Both windows read the same store. A sync or an edit refreshes both.
 
+## Apple Calendar (decided 2026-11-12)
+
+**Keep the bespoke calendar; no Apple Calendar integration for now.** The options, for when it comes up again:
+
+- **The server's two-way sync with iCloud** (`docs/calendar-sync.md`). Tasks become events; moving or stretching one in
+  Calendar.app moves the task or changes its estimate. No client code, every device benefits. But the server holds
+  an iCloud app-specific password, it brings iCloud back in, a repeating task shows only its next date, and it's
+  another writer (`calsync:<id>`). Off on the live server.
+- **The server's read-only feed** (`docs/calendar-feeds.md`). Calendar.app subscribes to a private URL. No password,
+  can't change anything, but one-way and slow to refresh. The same feature can pull other calendars in for us to
+  draw (the "other calendars' events" Later item). Off on the live server (`404 feeds_disabled`).
+- **EventKit on the Mac and iPhone**, read-only: meetings shown in Dustpan's Week and Day. Native and offline, but
+  Apple-only and behind a permission prompt. Writing back would duel with the server's sync.
+- **Dragging between Dustpan and Calendar.app** isn't practical: at best an unlinked `.ics` copy.
+
+Turning on either server feature means a config change on the server, only with the owner's say-so.
+
 ## Slices
 
 | Slice | Scope | Status |
@@ -102,7 +119,7 @@ Ported to `calendar_rules.py` from `calendar.ts` (`resizeEstimate`, `stepEstimat
 
 ## On the Mac (0.14.0)
 
-Mac slice 12a: the window and Month. Built 2026-11-12, checked by script, owner trial pending.
+Mac slice 12a: the window and Month. Built 2026-11-12, tried and approved the same day.
 
 - `CalendarRules.swift` ports the Month part of `calendar_rules.py` and `grid_prefs`, with their tests, and a check that a
   zoned due lands on the viewer's day. `MonthPage.swift` gathers a month's days for the app.
@@ -121,3 +138,25 @@ Mac slice 12a: the window and Month. Built 2026-11-12, checked by script, owner 
 - **Undo and toasts:** each window keeps its own Undo, as Mac windows do: an action is undone in the window it was
   made in. The toast shows in the window in front.
 - Week and Day (12b), stretching and the grid keys (12c), and the grid settings are still to come.
+
+## On the Mac (0.15.0)
+
+Mac slice 12b: Week and Day. Built 2026-11-12, checked by script, owner trial pending.
+
+- `CalendarRules.swift` gains `blockFor` and `layoutDay` with the desktop's LayoutTest and BlockTest; `TimeGridPage.swift`
+  gathers a week's or a day's columns. The drop target `.slot(day, minutes:)` is the desktop's `ToSlot`, with its write test.
+- **Switching:** Day, Week and Month in the toolbar's segmented control, or d, w and m (`meta.calendar_view`).
+  [ and ] step by a day, a week or a month. The title says "9–15 Nov", "Week 46, 2026" or "Thu 12 November".
+- **The grid:** 48 points an hour, opened at the grid's start hour, hours outside it and the past shaded, a line each hour.
+  The scroll position holds across refreshes and switching views, Month included.
+- **Headers** are pinned over the grid inside the same scroll view, so they stay over their columns whatever width the
+  scroll bar takes. Each has its weekday, date, load, deadlines and the Unscheduled lane (three tasks in Week, nine in
+  Day, then "+N more").
+- **Blocks** as on the desktop: estimate-tall, at least 25 minutes, project colour with a bar on the left, dashed and
+  30 minutes long without an estimate, side by side where they overlap, the fourth lane "+N more" when crowded.
+  Completed ones (with the tick on) are faded and struck through and go behind the "+N" first. A click selects,
+  a double-click opens the editor, open ones drag.
+- **Now:** a red line at the current minute on today, moved once a minute.
+- **Drops:** on the grid, a ghost at the 15-minute slot under the pointer as long as the task's estimate; the task gets
+  that date and a floating time. On a header: that date, no time. Undo for each.
+- Not yet: stretching, the grid keys and menu, and the grid settings (12c).

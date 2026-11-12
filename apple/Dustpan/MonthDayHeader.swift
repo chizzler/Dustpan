@@ -9,24 +9,9 @@ struct MonthDayHeader: View {
 
     var body: some View {
         HStack {
-            Text(cell.day.parts.day, format: .number)
-                .font(.callout)
-                .monospacedDigit()
-                .bold(cell.isToday)
-                .foregroundStyle(cell.isToday ? Color.white : dimmed ? Color.secondary : Color.primary)
-                .padding(.horizontal, 5)
-                .padding(.vertical, 1)
-                .background(.tint.opacity(cell.isToday ? 1 : 0), in: .capsule)
+            DayNumber(day: cell.day, isToday: cell.isToday, dimmed: !cell.inMonth || cell.isPast)
             Spacer(minLength: 0)
-            if cell.load.planned > 0 {
-                Text("\(formatMinutes(cell.load.planned)) / \(formatMinutes(dayLength))")
-                    .font(.callout)
-                    .foregroundStyle(cell.load.over ? Color.red : Color.secondary)
-                    .lineLimit(1)
-                    .help("Planned against your day length")
-            }
+            DayLoadText(load: cell.load, dayLength: dayLength)
         }
     }
-
-    private var dimmed: Bool { !cell.inMonth || cell.isPast }
 }

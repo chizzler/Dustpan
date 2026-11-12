@@ -1164,6 +1164,12 @@ extension Writer {
                 var fields = due.object ?? [:]
                 fields["date"] = .string(day.description)
                 return try planEdit(taskId, TaskEdit(due: .object(fields)))
+            case .slot(let day, let minutes):
+                // A floating time: where it was dropped on this device's grid. The lane drops the time.
+                var due: [String: JSON] = ["date": .string(day.description)]
+                if let minutes { due["time"] = .string(hhmm(minutes)) }
+                if task["due"] == .object(due) { return [] }
+                return try planEdit(taskId, TaskEdit(due: .object(due)))
             case .label(let labelId):
                 _ = try liveLabel(labelId)
                 let labels = labelIds(task)

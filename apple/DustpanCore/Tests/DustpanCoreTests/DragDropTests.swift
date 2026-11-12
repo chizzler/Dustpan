@@ -148,6 +148,8 @@ private func spot(_ parent: String? = nil, before: String? = nil, after: String?
             describeDrop(target, task: Row(id: "t", values: fields), names: names) { _ in "Thu 5 Nov" }
         }
         #expect(text(.day(Day("2026-11-05")!)) == "Due Thu 5 Nov")
+        #expect(text(.slot(Day("2026-11-05")!, minutes: 8 * 60 + 45)) == "Due Thu 5 Nov at 08:45")
+        #expect(text(.slot(Day("2026-11-05")!, minutes: nil)) == "Due Thu 5 Nov, no time")
         #expect(text(.project(nil), ["project_id": "p1"]) == "Moved to Inbox")
         #expect(text(.project("p2"), ["project_id": "p1"]) == "Moved to Work")
         #expect(text(.label("l1")) == "Added errand")
@@ -287,6 +289,17 @@ private func spot(_ parent: String? = nil, before: String? = nil, after: String?
         #expect(try task("a")["due"] == ["date": "2026-11-05", "time": "14:30", "tz": "Europe/Berlin"])
         _ = try writer.drop("b", on: .day(Day("2026-11-02")!))
         #expect(try task("b")["due"] == ["date": "2026-11-02"] && task("b")["start"] == .null)
+    }
+
+    @Test func aSlotSetsDateAndFloatingTimeAndTheLaneDropsTheTime() throws {
+        try seed("task", "t1", ["title": "Dentist", "due": ["date": "2026-11-05", "time": "09:00", "tz": "Europe/Berlin"]])
+        let done = try writer.drop("t1", on: .slot(Day("2026-11-06")!, minutes: 14 * 60 + 30))
+        #expect(try task("t1")["due"] == ["date": "2026-11-06", "time": "14:30"])
+        _ = try writer.drop("t1", on: .slot(Day("2026-11-06")!, minutes: nil))
+        #expect(try task("t1")["due"] == ["date": "2026-11-06"])
+        #expect(try writer.drop("t1", on: .slot(Day("2026-11-06")!, minutes: nil)).undo.isEmpty)
+        try writer.revert(done.undo)
+        #expect(try task("t1")["due"] == ["date": "2026-11-05", "time": "09:00", "tz": "Europe/Berlin"])
     }
 
     @Test func onADayClearsTheSector() throws {

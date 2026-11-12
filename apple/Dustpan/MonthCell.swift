@@ -9,7 +9,6 @@ struct MonthCell: View {
     let colors: [String: String]
     @Binding var selection: String?
     @State private var height = 0.0
-    @State private var showsMore = false
 
     var body: some View {
         let fit = Int((height - CalendarMetrics.headerHeight) / CalendarMetrics.lineHeight)
@@ -27,13 +26,7 @@ struct MonthCell: View {
                 CalendarTaskLine(task: task, colors: colors, selection: $selection)
             }
             if hidden > 0 {
-                Button("+\(hidden) more", action: showMore)
-                    .buttonStyle(.borderless)
-                    .font(.callout)
-                    .padding(.leading, 3)
-                    .popover(isPresented: $showsMore) {
-                        MoreTasks(tasks: Array(cell.tasks.dropFirst(shown.count)), colors: colors, selection: $selection)
-                    }
+                MoreButton(tasks: Array(cell.tasks.dropFirst(shown.count)), colors: colors, selection: $selection)
             }
         }
         .padding(4)
@@ -44,6 +37,4 @@ struct MonthCell: View {
         .onGeometryChange(for: Double.self) { $0.size.height } action: { height = $0 }
         .taskDrop("calendar:\(cell.day)", .day(cell.day))
     }
-
-    private func showMore() { showsMore = true }
 }

@@ -28,6 +28,9 @@ public enum DropTarget: Hashable, Sendable {
     case project(String?)
     /// Due on that day, keeping any time and zone.
     case day(Day)
+    /// The calendar's grid: due on that day at minutes from midnight, a floating time.
+    /// Nil minutes is the day's Unscheduled lane: the date, no time.
+    case slot(Day, minutes: Int?)
     /// The label added to the task's own. Its place, project and dates stay.
     case label(String)
 }
@@ -219,6 +222,7 @@ public func describeDrop(_ target: DropTarget, task: Row, names: [String: String
                          dayText: (Day) -> String) -> String {
     switch target {
     case .day(let day): return "Due " + dayText(day)
+    case .slot(let day, let minutes): return "Due " + dayText(day) + (minutes.map { " at " + hhmm($0) } ?? ", no time")
     case .project(let id): return "Moved to " + (id.flatMap { names[$0] } ?? "Inbox")
     case .label(let id): return "Added " + (names[id] ?? "the label")
     case .place(let place):

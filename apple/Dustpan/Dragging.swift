@@ -60,6 +60,8 @@ enum DropMark: Equatable {
     case target(String)
     /// A line above or below a sidebar row, or a ring inside it, for a project drag.
     case item(String, Zone)
+    /// The calendar's grid: the 15-minute slot a task would start at, as minutes from midnight.
+    case slot(Day, Int)
 }
 
 /// One project or Inbox list as the pointer sees it.

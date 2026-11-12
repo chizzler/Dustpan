@@ -7,6 +7,8 @@ import Foundation
 public let calendarOpenKey = "calendar_open"
 public let calendarShowCompletedKey = "calendar_show_completed"
 public let calendarGridKey = "calendar_grid"
+/// "day", "week" or "month".
+public let calendarViewKey = "calendar_view"
 
 /// The seven days of the week holding day, from weekStart (0 is Sunday).
 public func weekDates(_ day: Day, weekStart: Int = 1) -> [Day] {
@@ -133,6 +135,115 @@ public func visibleRows<T>(_ cell: [T], most: Int) -> (shown: [T], hidden: Int) 
     if cell.count <= most { return (cell, 0) }
     let keep = max(0, most - 1)
     return (Array(cell.prefix(keep)), cell.count - keep)
+}
+
+// MARK: - Day and Week: blocks on a time grid (calendar.ts, layout.ts)
+
+public let dayMinutes = 24 * 60
+public let slotMinutes = 15
+/// How long an unestimated block is drawn. It counts for nothing.
+public let defaultBlockMinutes = 30
+/// The shortest a block is drawn: room for its title.
+public let minBlockMinutes = 25
+/// The latest a block may start.
+public let lastSlot = dayMinutes - slotMinutes
+public let maxLanes = 4
+
+/// Minutes from midnight as "HH:MM".
+public func hhmm(_ minutes: Int) -> String {
+    let (h, m) = (minutes / 60, minutes % 60)
+    return (h < 10 ? "0" : "") + "\(h):" + (m < 10 ? "0" : "") + "\(m)"
+}
+
+/// A task's block on its day, in minutes from midnight; nil without a time.
+/// An unestimated block is drawn 30 minutes long. A block past midnight stops at the day's end.
+public func blockFor(_ task: Row, zone: TimeZone = .current) -> (start: Int, end: Int, estimated: Bool)? {
+    guard let start = viewedDue(task, zone: zone)?.minutes else { return nil }
+    let estimate = task["estimate_minutes"].int.map(Int.init).flatMap { $0 > 0 ? $0 : nil }
+    return (start, min(dayMinutes, start + (estimate ?? defaultBlockMinutes)), estimate != nil)
+}
+
+/// A block placed side by side with the blocks it overlaps: lane of lanes. Hidden ones are behind a "+N".
+public struct PlacedBlock: Equatable, Sendable {
+    public let id: String
+    public let start: Int
+    public let end: Int
+    public let lane: Int
+    public let lanes: Int
+    public let overlap: Bool
+    public let hidden: Bool
+}
+
+/// The "+N" in a cluster's last lane, from the earliest start to the latest end of the blocks it hides.
+public struct BlockOverflow: Equatable, Sendable {
+    public let lane: Int
+    public let lanes: Int
+    public let start: Int
+    public let end: Int
+    public let ids: [String]
+}
+
+/// Side by side layout of overlapping blocks. A port of layout.ts's layoutDay.
+/// Placed come in time order. Blocks that overlap, as drawn at least minLength tall, form a cluster split into
+/// equal lanes. A cluster needing more than maxLanes shows maxLanes − 1 lanes and a "+N" in the last.
+/// spare: ids hidden first when a cluster overflows (completed tasks), so they never push others out.
+public func layoutDay(_ blocks: [(id: String, start: Int, end: Int)], maxLanes: Int = maxLanes, minLength: Int = 0,
+                      spare: Set<String> = []) -> (placed: [PlacedBlock], overflow: [BlockOverflow]) {
+    typealias Block = (id: String, start: Int, end: Int)
+    let cap = max(2, maxLanes)
+    let ordered = blocks.map { b in (id: b.id, start: b.start, end: b.end > b.start ? b.end : b.start + 1) }
+        .sorted { ($0.start, -$0.end, $0.id) < ($1.start, -$1.end, $1.id) }
+    var placed: [PlacedBlock] = [], overflow: [BlockOverflow] = []
+    var cluster: [(block: Block, lane: Int)] = [], laneEnds: [Int] = [], clusterEnd = Int.min
+
+    func flush() {
+        guard !cluster.isEmpty else { return }
+        func overlaps(_ x: Block) -> Bool {
+            cluster.contains { $0.block.id != x.id && $0.block.start < x.end && x.start < $0.block.end }
+        }
+        if laneEnds.count <= cap {
+            placed += cluster.map { b, lane in
+                PlacedBlock(id: b.id, start: b.start, end: b.end, lane: lane, lanes: laneEnds.count,
+                            overlap: overlaps(b), hidden: false)
+            }
+            return
+        }
+        // Too many lanes: fill the first cap − 1, the other blocks before the spare ones, each in the first lane
+        // it fits; what doesn't fit goes behind the "+N" in the last. Without spare blocks this is the web app's.
+        let marker = cap - 1
+        var lanes = Array(repeating: [(start: Int, end: Int)](), count: marker)
+        var laneOf: [String: Int] = [:]
+        let others = cluster.filter { !spare.contains($0.block.id) } + cluster.filter { spare.contains($0.block.id) }
+        for (b, _) in others {
+            let drawn = (start: b.start, end: max(b.end, b.start + minLength))
+            if let free = lanes.firstIndex(where: { $0.allSatisfy { $0.end <= drawn.start || drawn.end <= $0.start } }) {
+                lanes[free].append(drawn)
+                laneOf[b.id] = free
+            }
+        }
+        // Never empty: more than cap lanes means more than cap blocks overlap at one minute.
+        let hidden = cluster.map(\.block).filter { laneOf[$0.id] == nil }
+        placed += cluster.map { b, _ in
+            PlacedBlock(id: b.id, start: b.start, end: b.end, lane: laneOf[b.id] ?? marker, lanes: cap,
+                        overlap: overlaps(b), hidden: laneOf[b.id] == nil)
+        }
+        overflow.append(BlockOverflow(lane: marker, lanes: cap, start: hidden.map(\.start).min()!,
+                                      end: hidden.map(\.end).max()!, ids: hidden.map(\.id)))
+    }
+
+    for b in ordered {
+        if b.start >= clusterEnd {
+            flush()
+            (cluster, laneEnds, clusterEnd) = ([], [], Int.min)
+        }
+        let end = max(b.end, b.start + minLength)
+        let lane = laneEnds.firstIndex { $0 <= b.start } ?? laneEnds.count
+        if lane == laneEnds.count { laneEnds.append(end) } else { laneEnds[lane] = end }
+        cluster.append((b, lane))
+        clusterEnd = max(clusterEnd, end)
+    }
+    flush()
+    return (placed, overflow)
 }
 
 /// This device's grid settings (meta calendar_grid), each invalid or missing one at its default.

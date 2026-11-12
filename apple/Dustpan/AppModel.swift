@@ -125,6 +125,8 @@ final class AppModel {
     private(set) var calendarOpen = false
     /// The calendar shows completed tasks too. Kept on this device.
     private(set) var calendarShowsCompleted = false
+    /// Day, Week or Month. Kept on this device.
+    private(set) var calendarMode = CalendarMode.month
     /// The calendar's grid settings on this device: the day length its load is measured against.
     private(set) var calendarGrid = GridPrefs()
     /// The saved view open in its editor.
@@ -279,6 +281,7 @@ final class AppModel {
             calendarOpen = try store.meta(calendarOpenKey).bool == true
             calendarShowsCompleted = try store.meta(calendarShowCompletedKey).bool == true
             calendarGrid = GridPrefs(try store.meta(calendarGridKey))
+            calendarMode = try store.meta(calendarViewKey).string.flatMap(CalendarMode.init) ?? .month
             settlePage()
         } catch {
             status = .failed("\(error)")
@@ -558,6 +561,10 @@ final class AppModel {
 
     func setCalendarShowsCompleted(_ on: Bool) {
         if on != calendarShowsCompleted, saveMeta(calendarShowCompletedKey, .bool(on)) { calendarShowsCompleted = on }
+    }
+
+    func setCalendarMode(_ mode: CalendarMode) {
+        if mode != calendarMode, saveMeta(calendarViewKey, .string(mode.rawValue)) { calendarMode = mode }
     }
 
     /// Show a task in the editor over the calendar.
@@ -882,7 +889,7 @@ final class AppModel {
         case .place(let place): ids += [place.projectId, place.sectionId, place.parentId]
         case .project(let id): ids.append(id)
         case .label(let id): ids.append(id)
-        case .day: break
+        case .day, .slot: break
         }
         let sections = snapshot.sectionsByProject.values.joined()
         var names: [String: String] = [:]

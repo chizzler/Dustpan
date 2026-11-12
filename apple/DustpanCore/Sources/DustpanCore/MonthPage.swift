@@ -36,7 +36,6 @@ public struct MonthPage: Sendable {
                             isPast: day < today, isToday: day == today)
             }
         }
-        colors = Dictionary(snapshot.liveProjects.compactMap { p in p["color"].string.map { (p.id, $0) } },
-                            uniquingKeysWith: { first, _ in first })
+        colors = snapshot.projectColors
     }
 }

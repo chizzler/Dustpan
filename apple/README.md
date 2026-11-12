@@ -53,8 +53,9 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `DustpanCore/Sources/DustpanCore/Views.swift` | Today, Upcoming, Anytime, Completed, the Filter page's results, and saved views: sorting and grouping |
 | `DustpanCore/Sources/DustpanCore/QueryTools.swift` | Help writing a query: suggestions for the word being typed, and the builder's conditions |
 | `DustpanCore/Sources/DustpanCore/Trash.swift` | The Trash's items, days left, and permanent deletes queued for the next sync |
-| `DustpanCore/Sources/DustpanCore/CalendarRules.swift` | The calendar's rules: the month's weeks, which tasks show on which day and in what order, deadlines, a day's load, the grid settings |
+| `DustpanCore/Sources/DustpanCore/CalendarRules.swift` | The calendar's rules: the month's weeks, which tasks show on which day and in what order, deadlines, a day's load, a task's block and the side-by-side layout of blocks, the grid settings |
 | `DustpanCore/Sources/DustpanCore/MonthPage.swift` | A month's days with their tasks, deadlines and load, for the calendar's Month |
+| `DustpanCore/Sources/DustpanCore/TimeGridPage.swift` | Week and Day's days: each one's Unscheduled lane, deadlines, load and laid-out blocks |
 | `DustpanCore/Sources/DustpanCore/Folding.swift` | Folding subtasks away: the stored list after a fold, and unfolding the way down to a new parent |
 | `DustpanCore/Sources/DustpanCore/Sectors.swift` | The part of time sectors the filter language needs |
 | `DustpanCore/Sources/DustpanCore/Reminders.swift` | Reminders that follow their dates, default reminders, and which are due to show |
@@ -72,7 +73,7 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `Dustpan/ArchivedPage.swift` | An archived project's page: Unarchive or Delete |
 | `Dustpan/MoveCommands.swift` | Edit ▸ Move Up to Outdent, for whichever list has the focus (`ListMoves` in `Moves.swift`) |
 | `Dustpan/FoldCommand.swift` | View ▸ Fold Subtasks (⌘←) and Unfold Subtasks (⌘→), for the selected task (`TaskFold` in `TaskFold.swift`) |
-| `Dustpan/CalendarWindow.swift` | The calendar's window: Month for now. `CalendarToolbar`, `MonthGrid`, `MonthCell`, `MonthDayHeader`, `CalendarTaskLine` and `MoreTasks` draw it; `CalendarButton` opens and closes it |
+| `Dustpan/CalendarWindow.swift` | The calendar's window: Day, Week or Month (`CalendarMode`, keys on `CalendarModeKeys`). `CalendarToolbar` above; `MonthGrid`, `MonthCell` and `MonthDayHeader` draw Month; `TimeGrid`, `TimeGridHeads`, `DayHead`, `HourGutter`, `TimeColumn` (`BlockLayout`, `GridBackground`, `NowLine`, `SlotDrop`) and `CalendarBlock` draw Week and Day; `CalendarTaskLine`, `MoreButton` and `MoreTasks` are shared; `CalendarButton` opens and closes it |
 | `Dustpan/ActiveUndo.swift` | Each window's own Undo: the model registers with the window in front |
 | `Dustpan/AppDelegate.swift` | Tells quitting from closing, so the calendar reopens with the app. Mac only |
 | `Dustpan/OutlineTaskList.swift` | Spike: project and Inbox lists on AppKit's `NSOutlineView` (View ▸ Outline Task List) |
@@ -110,6 +111,7 @@ Before 1.0 the minor number follows the Mac client's own slices.
 
 | Version | Date | What |
 | --- | --- | --- |
+| 0.15.0 | 2026-11-12 | Slice 12b, the calendar's Week and Day: Day, Week and Month in the toolbar, or d, w and m, remembered on this Mac. A time grid from 6:00, blocks as tall as their estimate in their project's colour (dashed without one), side by side when they overlap, "+N more" past four. Each day's header has its load, deadlines and the Unscheduled lane; today has the line for now. Drop a task on a 15-minute slot (a ghost shows where) or on the lane to drop its time. [ ] step by a day or a week. |
 | 0.14.0 | 2026-11-12 | Slice 12a, the calendar's Month, in a window of its own: the toolbar's calendar button, View ▸ Show Calendar (⌘K) or the Window menu. Six weeks with each day's tasks, deadlines and load, completed tasks on a toggle (h), [ ] and t to move about. Drag a task onto a day, from the calendar or a list. Reopens with the app. Each window keeps its own Undo. |
 | 0.13.0 | 2026-11-12 | Slice 11, Trash: deleted tasks and projects with their project, subtasks and days left. Restore with Undo (a task whose project is gone goes to the Inbox); Delete for Good and Empty Trash ask first and are sent with the next sync. Hideable like the other built-in pages. |
 | 0.12.1 | 2026-11-12 | Folding subtasks, as on the desktop: a chevron before a parent's check, ⌘← and ⌘→ (View ▸ Fold Subtasks, Unfold Subtasks), the row menu, and "3 subtasks" on a folded row. Kept on this Mac only. Fixed: typing L or C in an Add field or the Filter query opened the selected task's labels or completed it. |
