@@ -31,6 +31,9 @@ struct CalendarToolbar: ToolbarContent {
             .help("Day (d), Week (w) or Month (m)")
         }
         ToolbarItem(placement: .primaryAction) {
+            GridSettingsButton()
+        }
+        ToolbarItem(placement: .primaryAction) {
             Toggle("Show Completed", systemImage: "checkmark.circle", isOn: $showsCompleted)
                 .keyboardShortcut("h", modifiers: [])
                 .help("Show completed tasks (h)")

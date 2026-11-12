@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import DustpanCore
 
-// The calendar's rules. A port of tests/test_calendar_rules.py's MonthTest, TasksTest, LayoutTest, BlockTest
-// and GridPrefsTest.
+// The calendar's rules. A port of tests/test_calendar_rules.py's MonthTest, TasksTest, LayoutTest, BlockTest,
+// StretchTest, GridPrefsTest and GridMovesTest.
 
 private let utc = TimeZone(identifier: "UTC")!
 
@@ -211,6 +211,88 @@ private func h(_ hours: Double) -> Int { Int(hours * 60) }
         let b = DustpanCore.blockFor(task("b", "2026-11-04", "23:45"), zone: utc)
         #expect(b.map { [$0.start, $0.end] } == [1425, 1440] && b?.estimated == false)
         #expect(DustpanCore.blockFor(task("c", "2026-11-04"), zone: utc) == nil)
+    }
+}
+
+/// calendar.test.ts's cases for the bottom edge and the keyboard steps.
+@Suite struct CalendarStretchTests {
+    let px = 48.0 / 60  // 48 points an hour, 12 a slot
+
+    @Test func resizesInWholeSlots() {
+        let start = 10 * 60
+        let bottom = Double(start + 30) * px
+        #expect(resizeEstimate(start: start, offset: bottom + 2 * 12, perMinute: px) == 60)
+        #expect(resizeEstimate(start: start, offset: bottom + 2 * 12 + 5, perMinute: px) == 60)
+        #expect(resizeEstimate(start: start, offset: bottom - 12, perMinute: px) == 15)
+        #expect(resizeEstimate(start: start, offset: 0, perMinute: px) == 15)
+        #expect(resizeEstimate(start: start, offset: 0, perMinute: 0) == 15)
+    }
+
+    @Test func stepsTheEstimate() {
+        let cases: [(Int?, Int, Int)] = [(30, 15, 45), (30, -15, 15), (15, -15, 15), (nil, 15, 45), (nil, -15, 15),
+                                         (20, 15, 30), (20, -15, 15), (10080, 15, 10080)]
+        for (current, delta, want) in cases {
+            #expect(stepEstimate(current, delta) == want, "\(String(describing: current)) \(delta)")
+        }
+    }
+
+    @Test func stepsTheStartKeepingTheEnd() {
+        let cases: [(Int, Int?, Int, [Int])] = [(600, 60, -15, [585, 75]), (600, 60, 15, [615, 45]),
+                                                (600, 15, 15, [600, 15]), (600, nil, -15, [585, 45]),
+                                                (605, 30, 15, [615, 20]), (0, 30, -15, [0, 30])]
+        for (start, estimate, delta, want) in cases {
+            let got = stepStart(start, estimate, delta)
+            #expect([got.start, got.estimate] == want, "\(start) \(String(describing: estimate)) \(delta)")
+        }
+    }
+}
+
+@Suite struct CalendarGridMovesTests {
+    func moves(_ date: String? = nil, _ time: String? = nil, _ fields: [String: JSON] = [:],
+               onGrid: Bool = true) -> [GridMove: DropTarget?] {
+        let list = gridMoves(task("t", date, time, fields), gridStart: 6 * 60, onGrid: onGrid, zone: utc)
+        return Dictionary(uniqueKeysWithValues: list.map { ($0.move, $0.target) })
+    }
+
+    func at(_ text: String, _ minutes: Int? = nil) -> DropTarget { .slot(day(text), minutes: minutes) }
+
+    @Test func aTimedBlock() {
+        let list = gridMoves(task("t", "2026-11-05", "09:00", ["estimate_minutes": 60]), gridStart: 360, zone: utc)
+        #expect(list.map(\.move) == GridMove.allCases)
+        let m = moves("2026-11-05", "09:00", ["estimate_minutes": 60])
+        #expect(m[.earlier] == at("2026-11-05", 8 * 60 + 45))
+        #expect(m[.later] == at("2026-11-05", 9 * 60 + 15))
+        #expect(m[.dayBefore] == at("2026-11-04", 9 * 60))
+        #expect(m[.dayAfter] == at("2026-11-06", 9 * 60))
+        #expect(m[.shorter] == .stretch(45, start: nil))
+        #expect(m[.longer] == .stretch(75, start: nil))
+        #expect(m[.startEarlier] == .stretch(75, start: CalendarSpot(day: day("2026-11-05"), minutes: 8 * 60 + 45)))
+        #expect(m[.startLater] == .stretch(45, start: CalendarSpot(day: day("2026-11-05"), minutes: 9 * 60 + 15)))
+        #expect(m[.unschedule] == at("2026-11-05"))
+    }
+
+    @Test func theEndsOfTheDayAndTheShortestBlock() {
+        let m = moves("2026-11-05", "00:00", ["estimate_minutes": 15])
+        #expect(m[.earlier] == .some(nil) && m[.shorter] == .some(nil) && m[.startLater] == .some(nil))
+        #expect(moves("2026-11-05", "23:45")[.later] == .some(nil))
+    }
+
+    @Test func withoutAnEstimateItStretchesFromThirtyMinutes() {
+        let m = moves("2026-11-05", "09:00")
+        #expect(m[.shorter] == .stretch(15, start: nil) && m[.longer] == .stretch(45, start: nil))
+    }
+
+    @Test func withoutATimeTheArrowsPutItOnTheGrid() {
+        let m = moves("2026-11-05")
+        #expect(m[.earlier] == at("2026-11-05", 6 * 60))
+        #expect(m[.dayAfter] == at("2026-11-06"))
+        #expect([GridMove.shorter, .longer, .startEarlier, .startLater, .unschedule].allSatisfy { m[$0] == .some(nil) })
+    }
+
+    @Test func monthMovesDaysOnlyAndKeepsTheTime() {
+        #expect(moves("2026-11-30", "09:00", onGrid: false)
+            == [.dayBefore: .day(day("2026-11-29")), .dayAfter: .day(day("2026-12-01"))])
+        #expect(moves().isEmpty)
     }
 }
 

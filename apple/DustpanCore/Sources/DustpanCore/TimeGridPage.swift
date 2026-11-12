@@ -39,6 +39,10 @@ public struct TimeGridPage: Sendable {
     }
 
     public let columns: [Column]
+    /// The tasks' ids in the order j and k step through them: each day's lane, then its blocks by time.
+    public var order: [String] {
+        columns.flatMap { c in c.untimed.map(\.id) + c.blocks.map(\.id) + c.more.flatMap { $0.tasks.map(\.id) } }
+    }
     /// Project colours by id. The Inbox has none.
     public let colors: [String: String]
 

@@ -3,12 +3,13 @@ import SwiftUI
 
 /// A timed task on Week and Day's grid, as tall as its estimate, in its project's colour (grey for the Inbox).
 /// Without an estimate it's drawn 30 minutes long with a dashed edge. A click selects it, a double-click opens it,
-/// and an open one drags. A completed one is faded and struck through.
+/// an open one drags, and its bottom edge stretches it. A completed one is faded and struck through.
 struct CalendarBlock: View {
     @Environment(AppModel.self) private var model
     let block: TimeGridPage.Block
     let colors: [String: String]
     @Binding var selection: String?
+    @Binding var stretching: Stretching?
 
     var body: some View {
         let task = block.task
@@ -53,14 +54,19 @@ struct CalendarBlock: View {
                 .opacity(selection == task.id ? 0.8 : 0)
         }
         .clipShape(.rect(cornerRadius: 5))
+        .overlay(alignment: .bottom) {
+            if !done { StretchHandle(block: block, stretching: $stretching) }
+        }
         .contentShape(.rect)
         .onTapGesture(count: 2, perform: open)
         .onTapGesture(perform: select)
         .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(selection == block.task.id ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction(.default, select)
         .accessibilityValue(done ? "Completed" : "")
         .accessibilityAction(named: "Open", open)
         .help("\(title)\n\(when)" + (done ? "\nCompleted" : ""))
+        .contextMenu { CalendarTaskMenu(task: task) }
         .taskDrag(task, compact: true)
         .flashes(task.id)
     }

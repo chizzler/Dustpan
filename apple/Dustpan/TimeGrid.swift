@@ -35,6 +35,7 @@ struct TimeGrid: View {
             }
         }
         .scrollPosition($position)
+        .onChange(of: model.calendarGrid.startHour) { position.scrollTo(y: Double($1) * CalendarMetrics.hourHeight) }
         .onScrollGeometryChange(for: CGFloat.self, of: { $0.contentOffset.y + $0.contentInsets.top }) { _, y in scrolled.y = y }
     }
 }

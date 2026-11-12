@@ -8,12 +8,13 @@ struct TimeColumn: View {
     let column: TimeGridPage.Column
     let colors: [String: String]
     @Binding var selection: String?
+    @State private var stretching: Stretching?
 
     var body: some View {
         BlockLayout {
             ForEach(column.blocks) { block in
-                CalendarBlock(block: block, colors: colors, selection: $selection)
-                    .blockSpot(top: block.start, length: block.length, lane: block.lane, lanes: block.lanes)
+                CalendarBlock(block: block, colors: colors, selection: $selection, stretching: $stretching)
+                    .blockSpot(top: block.start, length: length(block), lane: block.lane, lanes: block.lanes)
             }
             ForEach(column.more) { more in
                 MoreButton(tasks: more.tasks, colors: colors, selection: $selection)
@@ -39,6 +40,12 @@ struct TimeColumn: View {
         .frame(maxWidth: .infinity)
         .contentShape(.rect)
         .onDrop(of: [.text], delegate: SlotDrop(model: model, day: column.day))
+    }
+
+    /// How tall a block is drawn: while its edge is dragged, as long as it would be.
+    private func length(_ block: TimeGridPage.Block) -> Int {
+        guard let stretching, stretching.taskId == block.id else { return block.length }
+        return max(minBlockMinutes, min(stretching.estimate, dayMinutes - block.start))
     }
 
     /// The dragged task's estimate, or the 30 minutes an unestimated block is drawn.

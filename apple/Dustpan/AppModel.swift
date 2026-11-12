@@ -563,6 +563,12 @@ final class AppModel {
         if on != calendarShowsCompleted, saveMeta(calendarShowCompletedKey, .bool(on)) { calendarShowsCompleted = on }
     }
 
+    /// The grid's hours and day length on this device, repaired as they're read.
+    func setCalendarGrid(_ grid: GridPrefs) {
+        let grid = GridPrefs(grid.json)
+        if grid != calendarGrid, saveMeta(calendarGridKey, grid.json) { calendarGrid = grid }
+    }
+
     func setCalendarMode(_ mode: CalendarMode) {
         if mode != calendarMode, saveMeta(calendarViewKey, .string(mode.rawValue)) { calendarMode = mode }
     }
@@ -889,7 +895,7 @@ final class AppModel {
         case .place(let place): ids += [place.projectId, place.sectionId, place.parentId]
         case .project(let id): ids.append(id)
         case .label(let id): ids.append(id)
-        case .day, .slot: break
+        case .day, .slot, .stretch: break
         }
         let sections = snapshot.sectionsByProject.values.joined()
         var names: [String: String] = [:]

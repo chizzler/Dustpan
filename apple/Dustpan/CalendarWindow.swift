@@ -21,15 +21,18 @@ struct CalendarWindow: View {
         let snapshot = model.snapshot
         Group {
             if mode == .month {
-                MonthGrid(page: MonthPage(snapshot, anchor: shown, today: model.today, showCompleted: showsCompleted,
-                                          dayLength: model.calendarGrid.dayLength),
-                          selection: $selection)
+                let page = MonthPage(snapshot, anchor: shown, today: model.today, showCompleted: showsCompleted,
+                                     dayLength: model.calendarGrid.dayLength)
+                MonthGrid(page: page, selection: $selection)
+                    .calendarKeys(selection: $selection, order: page.order)
             } else {
-                TimeGrid(page: TimeGridPage(snapshot, days: days(shown), today: model.today,
-                                            showCompleted: showsCompleted, dayLength: model.calendarGrid.dayLength),
-                         startHour: model.calendarGrid.startHour, selection: $selection, scrolled: scrolled)
+                let page = TimeGridPage(snapshot, days: days(shown), today: model.today, showCompleted: showsCompleted,
+                                        dayLength: model.calendarGrid.dayLength)
+                TimeGrid(page: page, startHour: model.calendarGrid.startHour, selection: $selection, scrolled: scrolled)
+                    .calendarKeys(selection: $selection, order: page.order)
             }
         }
+        .environment(\.calendarActions, CalendarActions(onGrid: mode != .month, move: move))
         .navigationTitle(title(shown))
         .navigationSubtitle(subtitle(shown))
         .toolbar { CalendarToolbar(anchor: $anchor, mode: $mode, showsCompleted: $showsCompleted) }
@@ -55,8 +58,19 @@ struct CalendarWindow: View {
         if !AppDelegate.quitting { model.setCalendarOpen(false) }
     }
 
+    /// A move by key or menu, with Edit ▸ Undo. A task moved off the days shown takes the view with it.
+    private func move(_ taskId: String, _ target: DropTarget, _ name: String) {
+        model.drop(taskId, on: target, named: name)
+        guard let day = target.day else { return }
+        let shown = anchor ?? model.today
+        let range = mode == .month ? monthGrid(shown, weekStart: weekStart).flatMap { $0 } : days(shown)
+        if day < range[0] || day > range[range.count - 1] { anchor = day }
+    }
+
+    private var weekStart: Int { model.snapshot.filterContext(today: model.today).weekStart }
+
     private func days(_ day: Day) -> [Day] {
-        mode == .day ? [day] : weekDates(day, weekStart: model.snapshot.filterContext(today: model.today).weekStart)
+        mode == .day ? [day] : weekDates(day, weekStart: weekStart)
     }
 
     /// "November 2026", "9–15 Nov" or "Thu 12 November".

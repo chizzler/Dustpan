@@ -37,10 +37,12 @@ struct CalendarTaskLine: View {
         .onTapGesture(count: 2, perform: open)
         .onTapGesture(perform: select)
         .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(selection == task.id ? [.isButton, .isSelected] : .isButton)
+        .accessibilityAction(.default, select)
         .accessibilityValue(done ? "Completed" : "")
         .accessibilityAction(named: "Open", open)
         .help(done ? "\(title)\nCompleted" : title)
+        .contextMenu { CalendarTaskMenu(task: task) }
         .taskDrag(task, compact: true)
         .flashes(task.id)
     }

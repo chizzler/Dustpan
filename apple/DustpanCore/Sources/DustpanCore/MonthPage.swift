@@ -15,6 +15,8 @@ public struct MonthPage: Sendable {
     }
 
     public let weeks: [[Cell]]
+    /// The tasks' ids in the order j and k step through them: day by day, each in its order.
+    public var order: [String] { weeks.flatMap { $0.flatMap { $0.tasks.map(\.id) } } }
     /// Project colours by id, for the dots on task lines. The Inbox has none.
     public let colors: [String: String]
 

@@ -24,9 +24,13 @@ public func monthGrid(_ day: Day, weekStart: Int = 1) -> [[Day]] {
 }
 
 /// Where a task is on the calendar: a day, and minutes from midnight when it has a time.
-public struct CalendarSpot: Equatable, Sendable {
+public struct CalendarSpot: Hashable, Sendable {
     public let day: Day
     public let minutes: Int?
+
+    public init(day: Day, minutes: Int?) {
+        (self.day, self.minutes) = (day, minutes)
+    }
 }
 
 /// A task's due on this device. A zoned due converts.
@@ -148,6 +152,8 @@ public let minBlockMinutes = 25
 /// The latest a block may start.
 public let lastSlot = dayMinutes - slotMinutes
 public let maxLanes = 4
+/// The settings' day lengths, as the web app's.
+public let dayLengths = [240, 300, 360, 420, 480, 540, 600, 720]
 
 /// Minutes from midnight as "HH:MM".
 public func hhmm(_ minutes: Int) -> String {
@@ -246,6 +252,74 @@ public func layoutDay(_ blocks: [(id: String, start: Int, end: Int)], maxLanes: 
     return (placed, overflow)
 }
 
+// MARK: - Stretching and keyboard steps (calendar.ts)
+
+private func clamp(_ n: Int, _ lo: Int, _ hi: Int) -> Int { min(hi, max(lo, n)) }
+
+/// The estimate from dragging a block's bottom edge to offset points below midnight: whole slots, 15 minutes to a week.
+public func resizeEstimate(start: Int, offset: Double, perMinute: Double) -> Int {
+    guard perMinute > 0 else { return slotMinutes }
+    let slots = ((offset / perMinute - Double(start)) / Double(slotMinutes)).rounded(.toNearestOrEven)
+    return clamp(Int(slots) * slotMinutes, slotMinutes, Int(maxEstimate))
+}
+
+/// Onto the 15-minute grid, in the direction of travel.
+private func snap(_ minutes: Int, _ delta: Int) -> Int {
+    (delta > 0 ? minutes / slotMinutes : (minutes + slotMinutes - 1) / slotMinutes) * slotMinutes
+}
+
+/// The estimate delta minutes longer; an unestimated block starts from its drawn 30 minutes.
+public func stepEstimate(_ current: Int?, _ delta: Int) -> Int {
+    clamp(snap(current ?? defaultBlockMinutes, delta) + delta, slotMinutes, Int(maxEstimate))
+}
+
+/// The start delta minutes later and the estimate that keeps the end where it was.
+public func stepStart(_ start: Int, _ estimate: Int?, _ delta: Int) -> (start: Int, estimate: Int) {
+    let end = start + (estimate ?? defaultBlockMinutes)
+    let moved = clamp(snap(start, delta) + delta, max(0, end - Int(maxEstimate)), clamp(end - slotMinutes, 0, lastSlot))
+    return (moved, end - moved)
+}
+
+/// A calendar task's moves by key and menu.
+public enum GridMove: CaseIterable, Sendable {
+    case earlier, later, dayBefore, dayAfter, shorter, longer, startEarlier, startLater, unschedule
+}
+
+/// The moves for a calendar task's keys and menu, in order, each with its drop target, or nil when it would
+/// change nothing. On the grid (Day and Week): earlier and later by 15 minutes (a task without a time goes to the
+/// grid's first hour), a day either way, the estimate or the start 15 minutes either way, and back to the lane.
+/// Times set here are floating, as a drop on the grid. In Month only the day moves, keeping the time (.day).
+public func gridMoves(_ task: Row, gridStart: Int, onGrid: Bool = true,
+                      zone: TimeZone = .current) -> [(move: GridMove, target: DropTarget?)] {
+    guard let due = viewedDue(task, zone: zone) else { return [] }
+    let day = due.day
+    guard onGrid else { return [(.dayBefore, .day(day - 1)), (.dayAfter, .day(day + 1))] }
+    let days: [(move: GridMove, target: DropTarget?)] = [(.dayBefore, .slot(day - 1, minutes: due.minutes)),
+                                                         (.dayAfter, .slot(day + 1, minutes: due.minutes))]
+    guard let start = due.minutes else {
+        let place = DropTarget.slot(day, minutes: clamp(gridStart, 0, lastSlot))
+        return [(.earlier, place), (.later, place)] + days
+            + [GridMove.shorter, .longer, .startEarlier, .startLater, .unschedule].map { ($0, nil) }
+    }
+    let estimate = task["estimate_minutes"].int.map(Int.init).flatMap { $0 > 0 ? $0 : nil }
+    func at(_ minute: Int) -> DropTarget? {
+        let minute = clamp(minute, 0, lastSlot)
+        return minute == start ? nil : .slot(day, minutes: minute)
+    }
+    func longer(_ delta: Int) -> DropTarget? {
+        let stepped = stepEstimate(estimate, delta)
+        return stepped == estimate ? nil : .stretch(stepped, start: nil)
+    }
+    func starting(_ delta: Int) -> DropTarget? {
+        let (moved, length) = stepStart(start, estimate, delta)
+        return moved == start ? nil : .stretch(length, start: CalendarSpot(day: day, minutes: moved))
+    }
+    return [(.earlier, at(start - slotMinutes)), (.later, at(start + slotMinutes))] + days
+        + [(.shorter, longer(-slotMinutes)), (.longer, longer(slotMinutes)),
+           (.startEarlier, starting(-slotMinutes)), (.startLater, starting(slotMinutes)),
+           (.unschedule, .slot(day, minutes: nil))]
+}
+
 /// This device's grid settings (meta calendar_grid), each invalid or missing one at its default.
 /// A port of normalizeGridPrefs: when the hours cross, the stored one is kept and the other repaired.
 public struct GridPrefs: Equatable, Sendable {
@@ -255,6 +329,9 @@ public struct GridPrefs: Equatable, Sendable {
     public var dayLength = defaultDayLength
 
     public init() {}
+
+    /// As meta calendar_grid stores it.
+    public var json: JSON { ["startHour": .int(Int64(startHour)), "endHour": .int(Int64(endHour)), "dayLength": .int(Int64(dayLength))] }
 
     public init(_ raw: JSON) {
         func whole(_ name: String, _ range: ClosedRange<Int>) -> Int? {

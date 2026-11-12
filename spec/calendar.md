@@ -160,3 +160,22 @@ Mac slice 12b: Week and Day. Built 2026-11-12, tried and approved 2026-11-13.
 - **Drops:** on the grid, a ghost at the 15-minute slot under the pointer as long as the task's estimate; the task gets
   that date and a floating time. On a header: that date, no time. Undo for each.
 - Not yet: stretching, the grid keys and menu, and the grid settings (12c).
+
+## On the Mac (0.16.0)
+
+Mac slice 12c: stretching, keys, menu and settings. Built 2026-11-13, checked by script, owner trial pending.
+
+- `CalendarRules.swift` gains `resizeEstimate`, `stepEstimate`, `stepStart` and `gridMoves` with the desktop's StretchTest
+  and GridMovesTest; the drop target `.stretch(estimate, start:)` is the desktop's `Stretch`, with its write tests.
+- **Stretch:** the bottom 6 points of an open block show the resize pointer; dragging follows in whole slots and
+  writes the estimate on release, with Undo.
+- **Select:** a click, or j and k through the shown tasks (each day's lane, then its blocks). Return or a double-click
+  opens, c completes or reopens, Delete deletes, Esc unselects. VoiceOver's press selects too; "Open" opens.
+  A task that leaves the view hands the selection to its neighbour.
+- **Keys:** as the desktop's, each one write with Edit ▸ Undo (no toast). A task moved off the days shown takes the
+  view with it.
+- **Menu:** right-click: Edit…, Complete or Reopen, Skip for a repeating task, the moves with their keys (greyed
+  when they'd change nothing; Month has only Day Before and Day After), Due Today, Due Tomorrow, Move To, Delete.
+  No Labels item, as on the desktop. `.` and Shift+F10 don't open it: SwiftUI can't open a context menu from a key.
+- **Settings:** the gear in the toolbar, a popover with the grid's start and end and the day length (4 to 12 hours),
+  for this Mac only (`meta.calendar_grid`). Changing the start scrolls the grid to it.

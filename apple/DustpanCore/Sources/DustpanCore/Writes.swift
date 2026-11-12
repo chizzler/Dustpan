@@ -1170,6 +1170,15 @@ extension Writer {
                 if let minutes { due["time"] = .string(hhmm(minutes)) }
                 if task["due"] == .object(due) { return [] }
                 return try planEdit(taskId, TaskEdit(due: .object(due)))
+            case .stretch(let estimate, let start):
+                var edit = TaskEdit()
+                if let start {
+                    var due: [String: JSON] = ["date": .string(start.day.description)]
+                    if let minutes = start.minutes { due["time"] = .string(hhmm(minutes)) }
+                    if task["due"] != .object(due) { edit.due = .object(due) }
+                }
+                if task["estimate_minutes"].int != Int64(estimate) { edit.estimateMinutes = .int(Int64(estimate)) }
+                return edit.isEmpty ? [] : try planEdit(taskId, edit)
             case .label(let labelId):
                 _ = try liveLabel(labelId)
                 let labels = labelIds(task)

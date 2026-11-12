@@ -150,6 +150,9 @@ private func spot(_ parent: String? = nil, before: String? = nil, after: String?
         #expect(text(.day(Day("2026-11-05")!)) == "Due Thu 5 Nov")
         #expect(text(.slot(Day("2026-11-05")!, minutes: 8 * 60 + 45)) == "Due Thu 5 Nov at 08:45")
         #expect(text(.slot(Day("2026-11-05")!, minutes: nil)) == "Due Thu 5 Nov, no time")
+        #expect(text(.stretch(90, start: nil)) == "Takes 1h 30m")
+        #expect(text(.stretch(45, start: CalendarSpot(day: Day("2026-11-05")!, minutes: 8 * 60 + 45)))
+                == "Starts at 08:45, takes 45 min")
         #expect(text(.project(nil), ["project_id": "p1"]) == "Moved to Inbox")
         #expect(text(.project("p2"), ["project_id": "p1"]) == "Moved to Work")
         #expect(text(.label("l1")) == "Added errand")
@@ -300,6 +303,25 @@ private func spot(_ parent: String? = nil, before: String? = nil, after: String?
         #expect(try writer.drop("t1", on: .slot(Day("2026-11-06")!, minutes: nil)).undo.isEmpty)
         try writer.revert(done.undo)
         #expect(try task("t1")["due"] == ["date": "2026-11-05", "time": "09:00", "tz": "Europe/Berlin"])
+    }
+
+    @Test func aStretchSetsTheEstimateAndKeepsAZonedDue() throws {
+        let due: JSON = ["date": "2026-11-05", "time": "09:00", "tz": "Europe/Berlin"]
+        try seed("task", "t1", ["title": "Dentist", "due": due, "estimate_minutes": 30])
+        let done = try writer.drop("t1", on: .stretch(60, start: nil))
+        #expect(try task("t1")["due"] == due && task("t1")["estimate_minutes"] == 60)
+        #expect(try writer.drop("t1", on: .stretch(60, start: nil)).undo.isEmpty)
+        try writer.revert(done.undo)
+        #expect(try task("t1")["estimate_minutes"] == 30)
+    }
+
+    @Test func aStretchFromTheTopMovesTheStartTooAndUndoesBoth() throws {
+        try seed("task", "t1", ["title": "Write", "due": ["date": "2026-11-05", "time": "09:00"]])
+        let start = CalendarSpot(day: Day("2026-11-05")!, minutes: 8 * 60 + 45)
+        let done = try writer.drop("t1", on: .stretch(45, start: start))
+        #expect(try task("t1")["due"] == ["date": "2026-11-05", "time": "08:45"] && task("t1")["estimate_minutes"] == 45)
+        try writer.revert(done.undo)
+        #expect(try task("t1")["due"] == ["date": "2026-11-05", "time": "09:00"] && task("t1")["estimate_minutes"] == .null)
     }
 
     @Test func onADayClearsTheSector() throws {
