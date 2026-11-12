@@ -187,9 +187,12 @@ public func projectPath(_ projectId: String, _ projects: [String: Row]) -> Strin
 ///
 /// For the Inbox (nil): its tasks, then the planned tasks without a project.
 /// Completed subtasks stay beneath an open ancestor; completed top-level tasks belong only in Completed.
-public func projectSections(_ snap: Snapshot, _ projectId: String?) -> [Section] {
+/// Completed subtasks stay beneath an open ancestor until swept (cleared), after their open siblings (sinkCompleted).
+/// Completed top-level tasks belong only in Completed.
+public func projectSections(_ snap: Snapshot, _ projectId: String?, cleared: [String: JSON] = [:],
+                            settling: [String: Bool] = [:]) -> [Section] {
     let rows = snap.tasks.filter { t in
-        t["project_id"].string == projectId && (t["completed_at"].isNull || t["parent_id"].isTruthy)
+        t["project_id"].string == projectId && (t["completed_at"].isNull || completedSubtaskVisible(t, cleared: cleared))
     }
     let byId = Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     func visibleParent(_ task: Row) -> String? {
@@ -197,7 +200,8 @@ public func projectSections(_ snap: Snapshot, _ projectId: String?) -> [Section]
         if task["completed_at"].isNull && !parent["completed_at"].isNull { return nil }
         return parent.id
     }
-    let roots = buildTree(rows, parentOf: visibleParent).filter { $0.row["completed_at"].isNull }
+    let roots = sinkCompleted(buildTree(rows, parentOf: visibleParent).filter { $0.row["completed_at"].isNull },
+                              settling: settling)
 
     guard let projectId else {
         let parentOf = { (id: String) in snap.allTasks[id] }

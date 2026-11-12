@@ -146,11 +146,27 @@ final class AppModel {
     @ObservationIgnored weak var undoManager: UndoManager?
     /// Why the app can't start: no config, or no database.
     private(set) var setupProblem: String?
-    var page: Page? = .today
+    var page: Page? = .today {
+        didSet {
+            guard page != oldValue else { return }
+            settling = [:]
+            offeredParent = nil
+        }
+    }
     /// The optional pages hidden from the sidebar here, by key.
     private(set) var hiddenPages: Set<String> = []
     /// Tasks whose subtasks are folded away on this device, in the order they were folded.
     private(set) var foldedTasks: [String] = []
+    /// Completed subtasks the broom swept from project lists on this device.
+    private(set) var clearedSubtasks: [String: JSON] = [:]
+    /// Each parent's progress over its direct subtasks, for the pie in its check.
+    private(set) var progress: [String: SubtaskProgress] = [:]
+    /// A parent whose last open subtask was just completed here: the list offers to complete it.
+    private(set) var offeredParent: String?
+    /// Tasks just ticked or reopened, with whether they still sort as done: they keep their place in project lists
+    /// until 3 s after the last tick on the page, then settle together.
+    private(set) var settling: [String: Bool] = [:]
+    @ObservationIgnored private var settle: Task<Void, Never>?
     /// The Filter page's query, kept while other pages are shown.
     var filterQuery = ""
     /// Bumped to put the focus in the Filter page's query.
@@ -278,6 +294,8 @@ final class AppModel {
             waiting = try store.outboxCount()
             hiddenPages = Set(try store.meta(hiddenPagesKey).array?.compactMap(\.string) ?? [])
             foldedTasks = try store.meta(foldedTasksKey).array?.compactMap(\.string) ?? []
+            clearedSubtasks = try store.meta(clearedSubtasksKey).object ?? [:]
+            progress = progressMap(snapshot.allTasks.values, cleared: clearedSubtasks)
             calendarOpen = try store.meta(calendarOpenKey).bool == true
             calendarShowsCompleted = try store.meta(calendarShowCompletedKey).bool == true
             calendarGrid = GridPrefs(try store.meta(calendarGridKey))
@@ -746,14 +764,74 @@ final class AppModel {
     func uses(of label: Row) -> Int { carrying(snapshot.allTasks.values, label.id).count }
 
     /// Complete an open task, or reopen a completed one. A repeating task moves on. Undo puts it back.
-    func toggle(_ task: Row) {
+    /// A subtask keeps its place for a moment; completing the last open one offers to complete its parent.
+    func toggle(_ task: Row, offer: Bool = true) {
         let title = task["title"].string ?? ""
+        if task["parent_id"].isTruthy { hold(task) }
         if task["completed_at"].isNull {
-            undoable("Complete", { try $0.complete(task.id) }) { done in
+            let done = undoable("Complete", { try $0.complete(task.id) }) { done in
                 done.nextDue.map { "“\(title)” next due \(formatDay($0))" } ?? "Completed “\(title)”"
             }
+            if done != nil, offer, let parent = readyParent(task.id, tasks: snapshot.allTasks) { offeredParent = parent.id }
         } else {
             undoable("Reopen", { try $0.reopen(task.id) }) { _ in "Reopened “\(title)”" }
+        }
+    }
+
+    /// The offered parent, while it's still ready: all its subtasks done and itself open.
+    var readyToComplete: Row? {
+        offeredParent.flatMap { snapshot.allTasks[$0] }.flatMap { isReady($0, tasks: snapshot.allTasks) ? $0 : nil }
+    }
+
+    /// Complete the offered parent. Its own parent isn't offered in turn.
+    func acceptOffer() {
+        guard let parent = readyToComplete else { return }
+        offeredParent = nil
+        toggle(parent, offer: false)
+    }
+
+    func declineOffer() { offeredParent = nil }
+
+    /// A ticked or reopened subtask sorts as it did until the page has been still for 3 s.
+    private func hold(_ task: Row) {
+        if settling[task.id] == nil { settling[task.id] = !task["completed_at"].isNull }
+        settle?.cancel()
+        settle = Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            settling = [:]
+        }
+    }
+
+    /// The broom: hide these completed subtasks, and the completed ones under them, from this Mac's project lists.
+    /// They stay in Completed. Undo brings them back.
+    func sweep(_ tasks: [Row]) {
+        let before = clearedSubtasks
+        guard saveCleared(sweeping(tasks, all: snapshot.allTasks, into: before)) else { return }
+        show(Toast(message: "Cleared completed subtasks", undoable: undoManager != nil))
+        undoManager?.registerUndo(withTarget: self) { model in
+            model.toast = nil
+            _ = model.saveCleared(before)
+        }
+        undoManager?.setActionName("Clear Completed Subtasks")
+    }
+
+    private func saveCleared(_ cleared: [String: JSON]) -> Bool {
+        guard saveMeta(clearedSubtasksKey, .object(cleared)) else { return false }
+        clearedSubtasks = cleared
+        progress = progressMap(snapshot.allTasks.values, cleared: cleared)
+        return true
+    }
+
+    /// A row's project label: open the task's project (or the Inbox), unfolded down to it, and show it there.
+    func showInProject(_ task: Row) {
+        page = task["project_id"].string.map(Page.project) ?? .inbox
+        saveFolds(unfoldedDownTo(foldedTasks, task.id, tasks: snapshot.allTasks))
+        Task {
+            try? await Task.sleep(for: .milliseconds(100))
+            flash = task.id
+            try? await Task.sleep(for: .milliseconds(700))
+            if flash == task.id { flash = nil }
         }
     }
 

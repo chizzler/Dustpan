@@ -14,7 +14,8 @@ struct TaskList: View {
 
     var body: some View {
         let (title, projectId) = model.listHeading(page)
-        let sections = projectSections(model.snapshot, projectId)
+        let sections = projectSections(model.snapshot, projectId, cleared: model.clearedSubtasks,
+                                       settling: model.settling)
         let folded = Set(model.foldedTasks)
         let lists = sections.map { section in
             section.isList ? DropList(projectId: projectId, sectionId: section.id,
@@ -61,6 +62,7 @@ struct TaskList: View {
                 selection = Set(selection.map { shownTask($0, folded: Set(folded)) })
             }
         }
+        .animation(.default, value: model.settling)
         .taskMenus(selection: $selection, lists: lists.compactMap { $0 }, folds: folds)
         .focusedValue(\.taskFold, taskFold(folds))
         .navigationTitle(title)
@@ -185,8 +187,14 @@ private struct PlacedTaskRow: View {
                 }
             }
             .frame(width: foldSlotWidth)
-            TaskRow(task: task, labels: model.snapshot.labels, folded: item.fold == true ? openBelow(item.node) : 0) {
+            TaskRow(task: task, labels: model.snapshot.labels, progress: model.progress[id],
+                    folded: item.fold == true ? openBelow(item.node) : 0) {
                 withAnimation { model.toggle(task) }
+            }
+            let completed = item.node.children.map(\.row).filter { !$0["completed_at"].isNull }
+            if item.isOpen && !completed.isEmpty {
+                Spacer(minLength: 8)
+                BroomButton(completed: completed)
             }
         }
         // Inside the drag: outside it, onGeometryChange breaks the List's clicks after a drag (macOS 27).
@@ -419,6 +427,10 @@ struct TaskRow: View {
     let labels: [String: Row]
     /// For a task listed away from its project: "Project" or "Project › Parent task".
     var place: String?
+    /// A click on the place opens the task in its project.
+    var showPlace: (() -> Void)?
+    /// An open parent's progress over its direct subtasks.
+    var progress: SubtaskProgress?
     /// The label page this row is on: its own chip is left out.
     var labelPage: String?
     /// The open subtasks folded away under it.
@@ -428,14 +440,7 @@ struct TaskRow: View {
     var body: some View {
         let done = !task["completed_at"].isNull
         HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Button(done ? "Reopen" : "Complete", systemImage: done ? "checkmark.circle.fill" : "circle",
-                   action: toggle)
-                .labelStyle(.iconOnly)
-                .buttonStyle(.plain)
-                .foregroundStyle(priorityColor(task["priority"].int))
-                .bold(task["priority"].int.map { $0 < 4 } ?? false)
-                .contentShape(.circle)
-                .help(done ? "Reopen" : "Complete")
+            TaskCheck(done: done, priority: task["priority"].int, progress: progress, toggle: toggle)
             VStack(alignment: .leading, spacing: 3) {
                 Text(task["title"].string ?? "")
                     .strikethrough(done)
@@ -456,7 +461,9 @@ struct TaskRow: View {
         let chips = shownLabels(task["labels"], labels, skip: labelPage)
         let rule = task["recurrence"].string.flatMap { $0.isEmpty ? nil : $0 }
         let deadline = task["deadline"].string.flatMap(Day.init)
-        if due != nil || estimate != nil || !chips.isEmpty || rule != nil || place != nil || deadline != nil || folded > 0 {
+        let count = progress.flatMap { task["completed_at"].isNull && $0.total > 0 ? $0 : nil }
+        if due != nil || estimate != nil || !chips.isEmpty || rule != nil || place != nil || deadline != nil || folded > 0
+            || count != nil {
             HStack(spacing: 10) {
                 if let due {
                     Label(due.text, systemImage: "calendar")
@@ -476,6 +483,13 @@ struct TaskRow: View {
                 if let estimate {
                     Label(formatMinutes(Int(estimate)), systemImage: "timer").foregroundStyle(.secondary)
                 }
+                if let count {
+                    Text("\(count.done)/\(count.total)")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                        .help(count.text)
+                        .accessibilityLabel(count.text)
+                }
                 if folded > 0 {
                     Label(folded == 1 ? "1 subtask" : "\(folded) subtasks", systemImage: "list.bullet.indent")
                         .foregroundStyle(.secondary)
@@ -490,7 +504,16 @@ struct TaskRow: View {
                 }
                 if let place {
                     Spacer()
-                    Text(place).foregroundStyle(.secondary).lineLimit(1)
+                    if let showPlace {
+                        Button(place, action: showPlace)
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .focusable(false)
+                            .help("Show in \(place)")
+                    } else {
+                        Text(place).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
             }
             .labelStyle(.titleAndIcon)

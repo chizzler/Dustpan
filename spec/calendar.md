@@ -163,7 +163,7 @@ Mac slice 12b: Week and Day. Built 2026-11-12, tried and approved 2026-11-13.
 
 ## On the Mac (0.16.0)
 
-Mac slice 12c: stretching, keys, menu and settings. Built 2026-11-13, checked by script, owner trial pending.
+Mac slice 12c: stretching, keys, menu and settings. Built 2026-11-13, tried and approved the same day.
 
 - `CalendarRules.swift` gains `resizeEstimate`, `stepEstimate`, `stepStart` and `gridMoves` with the desktop's StretchTest
   and GridMovesTest; the drop target `.stretch(estimate, start:)` is the desktop's `Stretch`, with its write tests.

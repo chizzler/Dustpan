@@ -73,3 +73,21 @@ Upstream's prompt, as part of this slice.
 - Progress in the task editor's subtask list. Upstream shows it there too.
 - Progress on calendar blocks.
 - A setting to turn the pie off.
+
+## On the Mac (0.17.0)
+
+Built 2026-11-13, with the broom, the settling and the project label from the desktop's 0.12.4. Checked by script,
+owner trial pending. `Subtasks.swift` ports `progress_map`, `is_ready`, `ready_parent`, `sink_completed` and the broom's
+record, with their tests; `projectSections` takes the swept subtasks and the settling ones.
+
+- **The pie** as on the desktop, drawn as a SwiftUI shape over the check's circle: a faint ring for none done, a wedge,
+  a full disc for all. "3/5" after the row's details. The tooltip and VoiceOver's value say "3 of 5 subtasks completed".
+  No hover tick: the Mac's circles don't show one.
+- **The offer** is a bar along the top of the page. Complete is **⌘Return**, not Return: as a window shortcut, plain
+  Return took the Add field's own, and the list's table keeps Return to itself. Esc dismisses it.
+- **The broom** on an open parent with completed subtasks showing, in project and Inbox lists. Undo in the toast and
+  Edit ▸ Undo. Stored in the desktop's `meta.cleared_completed_subtasks`.
+- **Settling:** a ticked or reopened subtask keeps its place until 3 s after the last tick on the page, then they all
+  move together, animated. Another page settles at once.
+- **The project label** on Today, Upcoming and the other grouped pages is a button: it opens the task's project or the
+  Inbox, unfolds the way down to the task, and selects and flashes it.

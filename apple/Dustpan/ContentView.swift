@@ -32,6 +32,7 @@ struct ContentView: View {
                     }
                 }
                 .id(model.page)
+                .safeAreaInset(edge: .top, spacing: 0) { ParentOffer() }
             }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) { CalendarButton(model: model) }

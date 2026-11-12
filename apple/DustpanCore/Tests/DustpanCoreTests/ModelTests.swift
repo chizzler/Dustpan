@@ -111,7 +111,49 @@ func shape(_ nodes: [Node]) -> String {
         try put("task", "nested", ["title": "Nested", "project_id": "p", "parent_id": "done", "completed_at": 10])
         try put("task", "open", ["title": "Open", "project_id": "p", "parent_id": "parent", "position": 2])
         try put("task", "top_done", ["title": "Top done", "project_id": "p", "completed_at": 10])
-        #expect(shape(projectSections(try snapshot(store), "p")[0].tasks) == "parent(done(nested) open)")
+        #expect(shape(projectSections(try snapshot(store), "p")[0].tasks) == "parent(open done(nested))")
+    }
+
+    @Test func completedSubtaskStaysUntilClearedAndReappearsAfterRecompletion() throws {
+        try put("project", "p", ["name": "P"])
+        try put("task", "parent", ["title": "Parent", "project_id": "p"])
+        try put("task", "done", ["title": "Done", "project_id": "p", "parent_id": "parent", "completed_at": 10])
+        try put("task", "nested", ["title": "Nested", "project_id": "p", "parent_id": "done", "completed_at": 10])
+        try put("task", "open", ["title": "Open", "project_id": "p", "parent_id": "parent"])
+        let snap = try snapshot(store)
+        let cleared = sweeping([snap.allTasks["done"]!], all: snap.allTasks, into: [:])
+        #expect(cleared == ["done": [10, "parent"], "nested": [10, "done"]])
+        #expect(shape(projectSections(snap, "p", cleared: cleared)[0].tasks) == "parent(open)")
+        try put("task", "done", ["completed_at": nil])
+        #expect(shape(projectSections(try snapshot(store), "p", cleared: cleared)[0].tasks) == "parent(done open)")
+        try put("task", "done", ["completed_at": 20])
+        #expect(shape(projectSections(try snapshot(store), "p", cleared: cleared)[0].tasks) == "parent(open done)")
+    }
+
+    @Test func completedSubtasksSinkBelowOpenOnesAtEveryLevel() throws {
+        try put("project", "p", ["name": "P"])
+        try put("task", "parent", ["title": "Parent", "project_id": "p"])
+        for (tid, pos, done) in [("a", 1, JSON.int(5)), ("b", 2, nil), ("c", 3, .int(6)), ("d", 4, nil)] {
+            try put("task", tid, ["title": .string(tid), "project_id": "p", "parent_id": "parent", "position": .int(Int64(pos)),
+                                  "completed_at": done])
+        }
+        try put("task", "b1", ["title": "b1", "project_id": "p", "parent_id": "b", "position": 1, "completed_at": 7])
+        try put("task", "b2", ["title": "b2", "project_id": "p", "parent_id": "b", "position": 2])
+        let snap = try snapshot(store)
+        #expect(shape(projectSections(snap, "p")[0].tasks) == "parent(b(b2 b1) d a c)")
+        #expect(snap.allTasks["a"]?["position"] == 1 && snap.allTasks["c"]?["position"] == 3)
+    }
+
+    @Test func settlingTasksKeepTheirPlace() throws {
+        try put("project", "p", ["name": "P"])
+        try put("task", "parent", ["title": "Parent", "project_id": "p"])
+        for (tid, pos, done) in [("a", 1, JSON.int(5)), ("b", 2, nil), ("c", 3, .int(6)), ("d", 4, nil)] {
+            try put("task", tid, ["title": .string(tid), "project_id": "p", "parent_id": "parent", "position": .int(Int64(pos)),
+                                  "completed_at": done])
+        }
+        // a was just ticked (it was open), d was just reopened (it was done)
+        let sections = projectSections(try snapshot(store), "p", settling: ["a": false, "d": true])
+        #expect(shape(sections[0].tasks) == "parent(a b c d)")
     }
 
     @Test func openChildOfCompletedParentIsTopLevel() throws {

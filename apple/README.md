@@ -56,6 +56,7 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `DustpanCore/Sources/DustpanCore/CalendarRules.swift` | The calendar's rules: the month's weeks, which tasks show on which day and in what order, deadlines, a day's load, a task's block and the side-by-side layout of blocks, stretching and the moves by key (`gridMoves`), the grid settings |
 | `DustpanCore/Sources/DustpanCore/MonthPage.swift` | A month's days with their tasks, deadlines and load, for the calendar's Month |
 | `DustpanCore/Sources/DustpanCore/TimeGridPage.swift` | Week and Day's days: each one's Unscheduled lane, deadlines, load and laid-out blocks |
+| `DustpanCore/Sources/DustpanCore/Subtasks.swift` | Completed subtasks in lists: the broom's record, sinking below open siblings, a parent's progress and when it's ready to complete |
 | `DustpanCore/Sources/DustpanCore/Folding.swift` | Folding subtasks away: the stored list after a fold, and unfolding the way down to a new parent |
 | `DustpanCore/Sources/DustpanCore/Sectors.swift` | The part of time sectors the filter language needs |
 | `DustpanCore/Sources/DustpanCore/Reminders.swift` | Reminders that follow their dates, default reminders, and which are due to show |
@@ -74,6 +75,9 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `Dustpan/MoveCommands.swift` | Edit ▸ Move Up to Outdent, for whichever list has the focus (`ListMoves` in `Moves.swift`) |
 | `Dustpan/FoldCommand.swift` | View ▸ Fold Subtasks (⌘←) and Unfold Subtasks (⌘→), for the selected task (`TaskFold` in `TaskFold.swift`) |
 | `Dustpan/CalendarWindow.swift` | The calendar's window: Day, Week or Month (`CalendarMode`, keys on `CalendarModeKeys`). `CalendarToolbar` above; `MonthGrid`, `MonthCell` and `MonthDayHeader` draw Month; `TimeGrid`, `TimeGridHeads`, `DayHead`, `HourGutter`, `TimeColumn` (`BlockLayout`, `GridBackground`, `NowLine`, `SlotDrop`) and `CalendarBlock` draw Week and Day; `CalendarTaskLine`, `MoreButton` and `MoreTasks` are shared. `StretchHandle` stretches a block; `CalendarKeys` and `CalendarTaskMenu` (with `CalendarActions`) are the keys and menu; `GridSettingsButton` and `GridSettings` the gear. `CalendarButton` opens and closes it |
+| `Dustpan/TaskCheck.swift` | A task's check circle, with `ProgressPie` for a parent's done subtasks |
+| `Dustpan/BroomButton.swift` | Clears a parent's completed subtasks from this Mac's lists (`BroomIcon` draws it) |
+| `Dustpan/ParentOffer.swift` | The banner offering to complete a parent whose last subtask was just done |
 | `Dustpan/ActiveUndo.swift` | Each window's own Undo: the model registers with the window in front |
 | `Dustpan/AppDelegate.swift` | Tells quitting from closing, so the calendar reopens with the app. Mac only |
 | `Dustpan/OutlineTaskList.swift` | Spike: project and Inbox lists on AppKit's `NSOutlineView` (View ▸ Outline Task List) |
@@ -111,6 +115,7 @@ Before 1.0 the minor number follows the Mac client's own slices.
 
 | Version | Date | What |
 | --- | --- | --- |
+| 0.17.0 | 2026-11-13 | Catching up with the desktop's 0.12.4. A parent's check circle holds a pie of its done subtasks (a faint ring for none, a disc for all), with "3/5" on the row and the count in the tooltip. Completing the last open subtask offers to complete the parent in a banner: Complete (⌘Return) or Esc. Completed subtasks stay under their parent, below its open ones, until the broom on the parent clears them from this Mac's lists, with Undo; a ticked or reopened subtask keeps its place until the page has been still for 3 s. A row's project label on Today and the other grouped pages opens the task in its project, unfolded. |
 | 0.16.0 | 2026-11-13 | Slice 12c on the calendar: drag a block's bottom edge to change its estimate in 15-minute steps. Select with a click or j and k; Return opens, c completes, Delete deletes, Esc unselects. On the grid ↑ ↓ move 15 minutes, ← → a day, ⇧↑ ⇧↓ shorter or longer, ⌥⇧↑ ⌥⇧↓ the start, u back to the lane; in Month ← → keep the time. Each with Edit ▸ Undo, and the view follows a task moved off it. Right-click for the row menu with the moves. The gear sets the grid's hours and day length for this Mac. |
 | 0.15.0 | 2026-11-12 | Slice 12b, the calendar's Week and Day: Day, Week and Month in the toolbar, or d, w and m, remembered on this Mac. A time grid from 6:00, blocks as tall as their estimate in their project's colour (dashed without one), side by side when they overlap, "+N more" past four. Each day's header has its load, deadlines and the Unscheduled lane; today has the line for now. Drop a task on a 15-minute slot (a ghost shows where) or on the lane to drop its time. [ ] step by a day or a week. |
 | 0.14.0 | 2026-11-12 | Slice 12a, the calendar's Month, in a window of its own: the toolbar's calendar button, View ▸ Show Calendar (⌘K) or the Window menu. Six weeks with each day's tasks, deadlines and load, completed tasks on a toggle (h), [ ] and t to move about. Drag a task onto a day, from the calendar or a list. Reopens with the app. Each window keeps its own Undo. |

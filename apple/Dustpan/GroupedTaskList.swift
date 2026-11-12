@@ -167,7 +167,7 @@ struct GroupedTaskList: View {
     private func rows(_ tasks: [Row]) -> some View {
         ForEach(tasks) { task in
             TaskRow(task: task, labels: model.snapshot.labels, place: model.snapshot.place(of: task),
-                    labelPage: labelPage) {
+                    showPlace: { model.showInProject(task) }, progress: model.progress[task.id], labelPage: labelPage) {
                 withAnimation { model.toggle(task) }
             }
             .taskDrag(task)
