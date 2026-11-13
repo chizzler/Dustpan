@@ -36,6 +36,6 @@ struct GridSettings: View {
     private func load() { grid = model.calendarGrid }
 
     private func hourText(_ hour: Int) -> String {
-        hour == 24 ? "Midnight" : clockText(hour * 60, timeFormat: model.snapshot.prefs["time_format"]?.string ?? "system")
+        hour == 24 ? "Midnight" : clockText(hour * 60, timeFormat: prefChoice(model.snapshot.prefs, "time_format"))
     }
 }

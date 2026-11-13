@@ -328,8 +328,8 @@ public func quickAddContext(prefs: [String: JSON], projects: [Row], today: Day, 
     })
     ctx.dayMonthOrder = dayMonthOrder(prefs, firstLanguage: first)
     ctx.weekStart = prefs["week_start"]?.string.flatMap { weekStartPrefs[$0] } ?? 1
-    ctx.dayParts = prefs["day_parts"]?.string == "on"
-    ctx.energy = prefs["energy"]?.string == "on"
-    ctx.sectors = prefs["time_sectors"]?.string == "on"
+    ctx.dayParts = prefIsOn(prefs, "day_parts")
+    ctx.energy = prefIsOn(prefs, "energy")
+    ctx.sectors = prefIsOn(prefs, "time_sectors")
     return ctx
 }

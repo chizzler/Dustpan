@@ -18,13 +18,6 @@ struct PreferencesForm: View {
     @State private var problem: String?
     @State private var showsProblem = false
 
-    /// What each choice in PrefChoices is called here.
-    private static let names = [
-        "system": "System", "24h": "24-Hour", "12h": "12-Hour", "day-month": "Day–Month", "month-day": "Month–Day",
-        "iso": "ISO (YYYY-MM-DD)", "mon": "Monday", "sun": "Sunday", "sat": "Saturday", "en": "English",
-        "de": "Deutsch", "fr": "Français", "es": "Español", "it": "Italiano", "pt": "Português",
-    ]
-
     init(prefs: [String: JSON]) {
         let defaults = ReminderDefaults(prefs: prefs)
         _timed = State(initialValue: defaults.timed)
@@ -97,7 +90,7 @@ struct PreferencesForm: View {
     private func choicePicker(_ title: String, subtitle: String? = nil, _ choices: [String],
                               _ selection: Binding<String>) -> some View {
         Picker(selection: selection) {
-            ForEach(choices, id: \.self) { Text(Self.names[$0] ?? $0).tag($0) }
+            ForEach(choices, id: \.self) { Text(PrefChoices.labels[$0] ?? $0).tag($0) }
         } label: {
             Text(title)
             if let subtitle { Text(subtitle) }

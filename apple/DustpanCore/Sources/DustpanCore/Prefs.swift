@@ -14,6 +14,12 @@ public enum PrefChoices {
     static let enums = ["date_format": dateFormats, "time_format": timeFormats, "week_start": weekStarts,
                         "language": languages]
     static let reminders = ["reminder_default_timed", "reminder_default_dated"]
+    /// What each choice is called in Settings.
+    public static let labels = [
+        "system": "System", "24h": "24-Hour", "12h": "12-Hour", "day-month": "Day–Month", "month-day": "Month–Day",
+        "iso": "ISO (YYYY-MM-DD)", "mon": "Monday", "sun": "Sunday", "sat": "Saturday", "en": "English",
+        "de": "Deutsch", "fr": "Français", "es": "Español", "it": "Italiano", "pt": "Português",
+    ]
 }
 
 /// Settings ▸ Default reminders, as OpenTodo's DefaultRemindersSettings.tsx offers them.

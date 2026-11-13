@@ -248,9 +248,8 @@ public final class Syncer {
         var ops: [Op] = []
         for f in try store.allFields() {
             if let byId = authors[f.entity], byId[f.entityId] != me { continue }
-            let op = Op(id: newId(), entity: f.entity, entityId: f.entityId, field: f.field, value: f.value, ts: f.ts,
-                        device: f.device)
-            if isUploaded(op) { ops.append(uploadOp(op, id: op.id, device: device)) }
+            let op = Op(f)
+            if isUploaded(op) { ops.append(uploadOp(op, id: newId(), device: device)) }
         }
         try store.outboxAdd(ops.sorted(by: opOrder))
         try store.setMeta("cursor", 0)

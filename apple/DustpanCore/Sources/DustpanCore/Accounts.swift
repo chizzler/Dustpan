@@ -20,11 +20,7 @@ private let leadFieldRank = Dictionary(uniqueKeysWithValues: [
 let batchWhole: Set = ["reminder", "comment", "attachment", "time_entry"]
 
 /// The upload order: entity kind, entity, then the fields the server checks first.
-func opOrder(_ a: Op, _ b: Op) -> Bool {
-    let ka = (entityRank[a.entity] ?? entityRank.count, a.entity, a.entityId, leadFieldRank[a.field] ?? leadFieldRank.count, a.field)
-    let kb = (entityRank[b.entity] ?? entityRank.count, b.entity, b.entityId, leadFieldRank[b.field] ?? leadFieldRank.count, b.field)
-    return ka < kb
-}
+func opOrder(_ a: Op, _ b: Op) -> Bool { a.uploadRank < b.uploadRank }
 
 /// The server and a digest of the token: a new token for the same account needs no /me.
 func accountKey(url: URL, token: String) -> JSON {
@@ -89,12 +85,17 @@ private let syncStateReset: [(String, JSON)] = [
     (pendingPurgesKey, []), (trashRetentionKey, .null),
 ]
 
-private extension Op {
+extension Op {
+    /// A stored field as an op, its id still to give.
     init(_ f: Store.Field) {
         self.init(id: "", entity: f.entity, entityId: f.entityId, field: f.field, value: f.value, ts: f.ts, device: f.device)
     }
 
-    var key: [String] { [entity, entityId, field] }
+    fileprivate var key: [String] { [entity, entityId, field] }
+
+    fileprivate var uploadRank: (Int, String, String, Int, String) {
+        (entityRank[entity] ?? entityRank.count, entity, entityId, leadFieldRank[field] ?? leadFieldRank.count, field)
+    }
 }
 
 /// The standalone actor becomes userId: completions, authored rows, and default reminders' ids.
@@ -278,8 +279,8 @@ public func migrateAccount(_ store: Store, userId: String, accountKey key: JSON?
             } else if pair == ["review", "focus_slots"], let text = value.string, !text.isEmpty {
                 value = .string(refs(text) { slot, ref in ids[String(ref)].map { "\(slot):\($0)" } })
             }
-            let op = Op(id: newId(), entity: f.entity, entityId: entityId, field: field, value: value, ts: f.ts,
-                        device: isReservedDevice(f.device) ? device : f.device)
+            let op = uploadOp(Op(id: "", entity: f.entity, entityId: entityId, field: field, value: value, ts: f.ts,
+                                 device: f.device), id: newId(), device: device)
             try store.apply(op)
             ops.append(op)
         }

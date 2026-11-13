@@ -35,7 +35,7 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `DustpanCore/Sources/DustpanCore/Api.swift` | HTTP client, `URLSession` |
 | `DustpanCore/Sources/DustpanCore/Config.swift` | The config file (optional: without one Dustpan runs standalone), saving and clearing it, and where the database lives |
 | `DustpanCore/Sources/DustpanCore/Accounts.swift` | Standalone data joining an account, uploading into another account or replacing with it, and the account epoch that stops a sync mixing two |
-| `DustpanCore/Sources/DustpanCore/Prefs.swift` | Preferences on user_prefs as Settings writes them, and their choices |
+| `DustpanCore/Sources/DustpanCore/Prefs.swift` | Preferences on user_prefs as Settings writes them, their choices and what Settings calls them |
 | `DustpanCore/Sources/DustpanCore/Model.swift` | Display rules: trees, sections, the Inbox, counts |
 | `DustpanCore/Sources/DustpanCore/Dates.swift` | Due date display, the instant a due denotes, and the editor's due |
 | `DustpanCore/Sources/DustpanCore/Writes.swift` | Local edits: one batch per action, applied and queued, with Undo. Labels too |
@@ -54,7 +54,7 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `DustpanCore/Sources/DustpanCore/Filter.swift` | The filter language: parser, error messages, evaluation, blocked tasks |
 | `DustpanCore/Sources/DustpanCore/Views.swift` | Today, Upcoming, Anytime, Completed, the Filter page's results, and saved views: sorting and grouping |
 | `DustpanCore/Sources/DustpanCore/QueryTools.swift` | Help writing a query: suggestions for the word being typed, and the builder's conditions |
-| `DustpanCore/Sources/DustpanCore/Trash.swift` | The Trash's items, days left, permanent deletes queued for the next sync, and deleting here at once when the data has never been on a server |
+| `DustpanCore/Sources/DustpanCore/Trash.swift` | The Trash's items, days left, permanent deletes queued for the next sync, deleting here at once when the data has never been on a server, and no retention while standalone |
 | `DustpanCore/Sources/DustpanCore/CalendarRules.swift` | The calendar's rules: the month's weeks, which tasks show on which day and in what order, deadlines, a day's load, a task's block and the side-by-side layout of blocks, stretching and the moves by key (`gridMoves`), the grid settings |
 | `DustpanCore/Sources/DustpanCore/MonthPage.swift` | A month's days with their tasks, deadlines and load, for the calendar's Month |
 | `DustpanCore/Sources/DustpanCore/TimeGridPage.swift` | Week and Day's days: each one's Unscheduled lane, deadlines, load and laid-out blocks |

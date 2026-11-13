@@ -20,7 +20,7 @@ struct CalendarTaskLine: View {
                 .foregroundStyle(done ? Color.secondary : Color(hex: task["project_id"].string.flatMap { colors[$0] }) ?? .gray)
                 .accessibilityHidden(true)
             if let minutes = shownSpot(task)?.minutes {
-                Text(clockText(minutes, timeFormat: model.snapshot.prefs["time_format"]?.string ?? "system"))
+                Text(clockText(minutes, timeFormat: prefChoice(model.snapshot.prefs, "time_format")))
                     .monospacedDigit()
                     .foregroundStyle(.secondary)
             }

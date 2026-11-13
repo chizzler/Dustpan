@@ -374,7 +374,7 @@ final class AppModel {
             snapshot = try DustpanCore.snapshot(store)
             trash = trashItems(tasks: snapshot.allTasks, projects: try store.rows("project"))
             purging = try pendingPurges(store)
-            trashRetention = isConnected ? try DustpanCore.trashRetention(store) : 0
+            trashRetention = try DustpanCore.trashRetention(store, connected: isConnected)
             purgeMode = try DustpanCore.purgeMode(store, connected: isConnected)
             waiting = try store.outboxCount()
             hiddenPages = Set(try store.meta(hiddenPagesKey).array?.compactMap(\.string) ?? [])

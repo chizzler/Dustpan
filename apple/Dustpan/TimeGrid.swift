@@ -24,7 +24,7 @@ struct TimeGrid: View {
             LazyVStack(spacing: 0, pinnedViews: .sectionHeaders) {
                 Section {
                     HStack(alignment: .top, spacing: 0) {
-                        HourGutter(timeFormat: model.snapshot.prefs["time_format"]?.string ?? "system")
+                        HourGutter(timeFormat: prefChoice(model.snapshot.prefs, "time_format"))
                         ForEach(page.columns) { column in
                             TimeColumn(column: column, colors: page.colors, selection: $selection)
                         }

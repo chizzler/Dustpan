@@ -77,7 +77,7 @@ struct CalendarBlock: View {
     }
 
     private func clock(_ minutes: Int) -> String {
-        clockText(minutes, timeFormat: model.snapshot.prefs["time_format"]?.string ?? "system")
+        clockText(minutes, timeFormat: prefChoice(model.snapshot.prefs, "time_format"))
     }
 
     private func select() { selection = block.task.id }

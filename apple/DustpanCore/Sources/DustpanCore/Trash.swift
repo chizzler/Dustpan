@@ -81,8 +81,9 @@ public func remainingDays(deletedAt: Int64, retention: Int64, now: Int64) -> Int
 }
 
 /// The days the server keeps an item in the Trash, as it last said, or 30 until it has.
-public func trashRetention(_ store: Store) throws -> Int64 {
-    try store.meta(trashRetentionKey).int ?? defaultTrashRetention
+public func trashRetention(_ store: Store, connected: Bool = true) throws -> Int64 {
+    guard connected else { return 0 }
+    return try store.meta(trashRetentionKey).int ?? defaultTrashRetention
 }
 
 func pendingList(_ store: Store) throws -> [TrashItem.Target] {
@@ -150,13 +151,7 @@ func expandPurge(_ store: Store, _ targets: [TrashItem.Target]) throws -> [Trash
         cache[entity] = fresh
         return fresh
     }
-    var sorted: [Row]?
-    func sortedTasks() throws -> [Row] {
-        if let sorted { return sorted }
-        let fresh = try rows("task").values.sorted { $0.id < $1.id }
-        sorted = fresh
-        return fresh
-    }
+    let sortedTasks = try rows("task").values.sorted { $0.id < $1.id }
     var seen: Set<TrashItem.Target> = [], out: [TrashItem.Target] = [], tasks: [String] = []
     func add(_ entity: String, _ id: String) -> Bool {
         let target = TrashItem.Target(entity: entity, id: id)
@@ -169,7 +164,7 @@ func expandPurge(_ store: Store, _ targets: [TrashItem.Target]) throws -> [Trash
               add(target.entity, target.id) else { continue }
         if target.entity == "task" { tasks.append(target.id) }
         guard target.entity == "project" else { continue }
-        for task in try sortedTasks() where task["project_id"].string == target.id && add("task", task.id) {
+        for task in sortedTasks where task["project_id"].string == target.id && add("task", task.id) {
             tasks.append(task.id)
         }
         for child in projectChildren {
@@ -180,7 +175,7 @@ func expandPurge(_ store: Store, _ targets: [TrashItem.Target]) throws -> [Trash
         if try rows("project_prefs")[target.id] != nil { _ = add("project_prefs", target.id) }
     }
     var deletedChildren: [String: [String]] = [:]
-    for task in try sortedTasks() where !task["deleted_at"].isNull {
+    for task in sortedTasks where !task["deleted_at"].isNull {
         if let parent = task["parent_id"].string { deletedChildren[parent, default: []].append(task.id) }
     }
     var i = 0
