@@ -21,6 +21,7 @@ FIXTURES = (
     "web/src/lib/filter/evaluate.vectors.json", "web/src/lib/sectors.vectors.json",
     "web/src/lib/inbox.vectors.json", "docs/filters.md", "internal/quickadd/vocab.json",
     "internal/filter/testdata/formatted.txt", "internal/filter/testdata/limits.json",
+    "web/src/ui/icons/catalogue.json", "web/src/ui/icons/lucide.ts", "web/src/ui/icons/catalogue.paths.ts",
 )
 
 
@@ -65,7 +66,10 @@ def main():
     for folder in ("desktop/dustpan", "desktop/tests"):
         for path in sorted((ROOT / folder).rglob("*.py")):
             add(path.relative_to(ROOT).as_posix())
-    for source in ("desktop/dustpan/quickadd/vocab.json", "desktop/data/io.github.chizzler.Dustpan.svg",
+    for source in ("desktop/dustpan/quickadd/vocab.json", "desktop/dustpan/icons/catalogue.json",
+                   "desktop/dustpan/icons/paths.json", "desktop/dustpan/icons/lucide.json",
+                   "desktop/dustpan/icons/LICENSE-lucide.txt",
+                   "desktop/data/io.github.chizzler.Dustpan.svg",
                    "desktop/data/io.github.chizzler.Dustpan.desktop", "desktop/data/dustpan-v1.vectorcraft",
                    "desktop/install.sh", "packaging/aur/PKGBUILD.in", "packaging/aur/dustpan",
                    "packaging/aur/io.github.chizzler.Dustpan.desktop", "packaging/aur/dustpan-autostart.desktop"):
@@ -79,6 +83,8 @@ def main():
     entries["desktop/tests/upstream/LICENSE"] = (git("show", f"{UPSTREAM_TAG}:LICENSE", cwd=args.opentodo), 0o644)
     if entries["desktop/dustpan/quickadd/vocab.json"][0] != entries["desktop/tests/upstream/internal/quickadd/vocab.json"][0]:
         raise ValueError("quick-add vocabulary differs from pinned OpenTodo")
+    if entries["desktop/dustpan/icons/catalogue.json"][0] != entries["desktop/tests/upstream/web/src/ui/icons/catalogue.json"][0]:
+        raise ValueError("icon catalogue differs from pinned OpenTodo")
 
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)

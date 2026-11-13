@@ -190,6 +190,7 @@ Before 1.0: the minor number follows the slices (0.12 is slice 12), the patch nu
 
 | Version | Date | What |
 | --- | --- | --- |
+| 0.12.5 | 2026-11-13 | Project icons: all 1,854 of Lucide's, with a picker that browses categories from a sidebar and suggests icons from the project's name; a Theme colour for projects; a large heading on every page, with a project's sub-projects to open; completed subtasks settle after 2 seconds, not 3. Fixed: the label and icon pickers kept taking the focus after closing. |
 | 0.12.4 | 2026-11-06 | Subtask progress and an offer to complete the parent; clickable project labels on grouped rows; completed subtasks settle below open siblings after 3 seconds. |
 | 0.12.3 | 2026-11-04 | Fold a task's subtasks away in project and Inbox lists: a chevron before the check, ← and →, and the row menu. Per device. Every row has a leading slot, so checks line up on every page. |
 | 0.12.2 | 2026-11-04 | Slice 12c: stretch a block's bottom edge to change its estimate; keys and a menu move tasks on the calendar; grid hours and day length in settings. A click on a calendar task selects it, a double-click opens it. |

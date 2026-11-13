@@ -11,7 +11,7 @@ gi.require_version("Gsk", "4.0")
 gi.require_version("Pango", "1.0")
 from gi.repository import Adw, Gdk, Gio, GLib, Graphene, Gsk, Gtk, Pango  # noqa: E402
 
-from . import theme  # noqa: E402
+from . import icons, theme  # noqa: E402
 
 INDENT_PX = 24  # one level of subtasks
 FOLD_PX = 16  # the leading slot on every task row, where a parent shows its fold chevron
@@ -87,6 +87,8 @@ button.task-place:hover label { text-decoration: underline; }
 .section-heading button { min-height: 24px; min-width: 24px; padding: 0; }
 .colour-choice { min-width: 28px; min-height: 28px; padding: 0; border-radius: 999px; }
 .colour-choice:checked { box-shadow: inset 0 0 0 2px var(--accent-color); }
+.icon-choice { min-width: 36px; min-height: 36px; padding: 0; }
+button.icon-choice.current { background: alpha(var(--accent-bg-color), 0.25); }
 .note-editor { min-height: 96px; }
 .note-preview { padding: 10px 12px; }
 .note-quote { border-left: 3px solid alpha(currentColor, 0.25); padding-left: 10px; }
@@ -98,6 +100,16 @@ button.task-place:hover label { text-decoration: underline; }
 .label-chip.more { padding: 1px 8px; }
 .label-picker list row { padding: 2px 6px; }
 """
+
+
+def focus_soon(widget):
+    """Focus widget once the main loop is idle. Only once: passing grab_focus itself to idle_add would repeat
+    forever, because it returns True, and keep taking the focus back after a popover closes."""
+    def focus():
+        widget.grab_focus()
+        return GLib.SOURCE_REMOVE
+
+    GLib.idle_add(focus)
 
 
 def animations_enabled():
@@ -206,15 +218,21 @@ class BrandDust(Gtk.DrawingArea):
                     cr.fill()
 
 
-class Dot(Gtk.Widget):
-    """A small coloured circle. Colours are hex strings in OpenTodo."""
+NO_COLOUR = "#94a3b8"  # a dot or icon whose colour is missing or can't be read
 
-    def __init__(self, color, size=10):
-        super().__init__(valign=Gtk.Align.CENTER)
+
+class Dot(Gtk.Widget):
+    """A small coloured circle. Colours are hex strings in OpenTodo.
+
+    theme: a colour of None means the theme's text colour (a project's "Theme" colour, spec/icons.md).
+    """
+
+    def __init__(self, color, size=10, hexpand=False, theme=False):
+        super().__init__(valign=Gtk.Align.CENTER, hexpand=hexpand)
         self.set_size_request(size, size)
-        self.rgba = Gdk.RGBA()
-        if not (isinstance(color, str) and self.rgba.parse(color)):
-            self.rgba.parse("#94a3b8")
+        self.rgba = None if theme and color is None else Gdk.RGBA()
+        if self.rgba is not None and not (isinstance(color, str) and self.rgba.parse(color)):
+            self.rgba.parse(NO_COLOUR)
 
     def do_snapshot(self, snap):
         width, height = self.get_width(), self.get_height()
@@ -223,8 +241,48 @@ class Dot(Gtk.Widget):
         clip = Gsk.RoundedRect()
         clip.init_from_rect(rect, size / 2)
         snap.push_rounded_clip(clip)
-        snap.append_color(self.rgba, rect)
+        snap.append_color(self.rgba or self.get_color(), rect)
         snap.pop()
+
+
+class IconMark(Gtk.Widget):
+    """A catalogue icon in a colour (spec/icons.md), drawn sharp at the screen's scale.
+
+    A colour of None is the theme's text colour, read at each draw so it follows a theme change.
+    """
+
+    textures = {}  # (name, colour, pixels): Gdk.Texture, shared by every mark
+
+    def __init__(self, name, color, size=16):
+        super().__init__(valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
+        self.set_size_request(size, size)
+        self.name, self.size = name, size
+        rgba = Gdk.RGBA()
+        self.color = None if color is None else rgba.to_string() if isinstance(color, str) and rgba.parse(color) \
+            else NO_COLOUR
+
+    def do_snapshot(self, snap):
+        surface = (native := self.get_native()) and native.get_surface()
+        pixels = math.ceil(self.size * (surface.get_scale() if surface else self.get_scale_factor()))
+        color = self.color or self.get_color().to_string()
+        key = (self.name, color, pixels)
+        if key not in self.textures:
+            self.textures[key] = Gdk.Texture.new_from_bytes(GLib.Bytes.new(icons.svg(self.name, color, pixels)))
+        x, y = (self.get_width() - self.size) / 2, (self.get_height() - self.size) / 2
+        snap.append_texture(self.textures[key], Graphene.Rect().init(x, y, self.size, self.size))
+
+
+def project_mark(project, size=16):
+    """A project's icon in its colour, or its dot when it has none or this client can't draw it.
+
+    The dot sits in an icon-wide slot, so names line up whether their projects have icons or not.
+    """
+    name, color = project.get("icon"), project.get("color")
+    if icons.known(name):
+        return IconMark(name, color, size)
+    slot = Gtk.Box(width_request=size, valign=Gtk.Align.CENTER, hexpand=False)  # stops the dot's hexpand spreading
+    slot.append(Dot(color, max(10, size // 2), hexpand=True, theme=True))
+    return slot
 
 
 class Pie(Gtk.Widget):

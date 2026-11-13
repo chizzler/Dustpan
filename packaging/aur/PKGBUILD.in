@@ -36,6 +36,7 @@ package() {
     "$pkgdir/usr/share/doc/dustpan/dustpan-autostart.desktop"
   install -Dm644 NOTICE.md "$pkgdir/usr/share/licenses/dustpan/NOTICE.md"
   install -Dm644 LICENSE "$pkgdir/usr/share/licenses/dustpan/LICENSE"
+  install -Dm644 desktop/dustpan/icons/LICENSE-lucide.txt "$pkgdir/usr/share/licenses/dustpan/LICENSE-lucide.txt"
   python -m compileall -q -s "$pkgdir" -p / "$pkgdir/usr/lib/dustpan/dustpan"
   python -O -m compileall -q -s "$pkgdir" -p / "$pkgdir/usr/lib/dustpan/dustpan"
 }

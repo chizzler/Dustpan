@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date, datetime, time
 
-from . import labels as label_rules, quickadd, sectors
+from . import icons, labels as label_rules, quickadd, sectors
 from .clock import HybridClock, wall_ms
 from .dates import day_start_minutes, due_instant, logical_today
 from .dragdrop import Place, Stretch, ToDay, ToLabel, ToProject, ToSlot
@@ -50,6 +50,7 @@ LABEL_PALETTE = tuple(c for c, _ in LABEL_COLOURS)
 PROJECT_COLOURS = (("#ef4444", "Red"), ("#f97316", "Orange"), ("#eab308", "Yellow"), ("#22c55e", "Green"),
                    ("#14b8a6", "Teal"), ("#3b82f6", "Blue"), ("#8b5cf6", "Violet"), ("#ec4899", "Pink"))
 PROJECT_PALETTE = tuple(c for c, _ in PROJECT_COLOURS)
+AUTO_COLOUR = object()  # add_project: the first palette colour no project uses. None is "Theme" (spec/icons.md)
 
 
 class CannotEdit(Exception):
@@ -887,32 +888,38 @@ class Writer:
                 position = max(position, n + 1)
         return position
 
-    def add_project(self, name, parent_id=None, color=None):
+    def add_project(self, name, parent_id=None, color=AUTO_COLOUR, icon=None):
         """A project, last at the top level or under parent_id. Returns its id."""
         name = name.strip()
         if not name:
             raise CannotEdit("A project needs a name")
+        if color is not AUTO_COLOUR:
+            check_colour(color)
+        check_icon(icon)
         project_id = str(uuid.uuid4())
 
         def plan():
             projects = self.store.rows("project")
             self._check_parent(projects, parent_id)
             used = {p.get("color") for p in projects.values() if live(p)}
+            chosen = next((c for c in PROJECT_PALETTE if c not in used), PROJECT_PALETTE[0]) \
+                if color is AUTO_COLOUR else color
             return [("project", project_id, {
-                "name": name, "color": color or next((c for c in PROJECT_PALETTE if c not in used), PROJECT_PALETTE[0]),
+                "name": name, "color": chosen,
                 "position": self._last_project_position(projects, parent_id), "archived": False,
                 "parent_id": parent_id, "created_at": self.now(), "deleted_at": None,
+                **({"icon": icon} if icon else {}),
             })]
 
         self.commit(plan)
         return project_id
 
     def edit_project(self, project_id, changes):
-        """Write the changed fields of a project: any of name, color and parent_id. One batch.
+        """Write the changed fields of a project: any of name, color, icon and parent_id. One batch.
 
         A new parent also writes a position, last among the new siblings.
         """
-        unknown = set(changes) - {"name", "color", "parent_id"}
+        unknown = set(changes) - {"name", "color", "icon", "parent_id"}
         if unknown:
             raise ValueError(f"not editable: {sorted(unknown)}")
 
@@ -927,9 +934,11 @@ class Writer:
                 if name != project.get("name"):
                     patch["name"] = name
             if "color" in changes and changes["color"] != project.get("color"):
-                if not re.fullmatch(r"#[0-9a-fA-F]{6}", changes["color"] or ""):
-                    raise ValueError(f"color: {changes['color']!r}")
+                check_colour(changes["color"])
                 patch["color"] = changes["color"]
+            if "icon" in changes and changes["icon"] != project.get("icon"):
+                check_icon(changes["icon"])
+                patch["icon"] = changes["icon"]
             if "parent_id" in changes and changes["parent_id"] != project.get("parent_id"):
                 self._check_parent(projects, changes["parent_id"], project_id)
                 patch["parent_id"] = changes["parent_id"]
@@ -1305,6 +1314,18 @@ class Writer:
             return [("user_prefs", "me", patch)] if patch else []
 
         self.commit(plan)
+
+
+def check_colour(color):
+    """A project's colour is a hex string, or None for the theme's text colour (spec/icons.md)."""
+    if color is not None and not re.fullmatch(r"#[0-9a-fA-F]{6}", color if isinstance(color, str) else ""):
+        raise ValueError(f"color: {color!r}")
+
+
+def check_icon(name):
+    """An icon written must be None or one this client can draw (spec/icons.md)."""
+    if name is not None and not icons.known(name):
+        raise ValueError(f"icon: {name!r}")
 
 
 def project_descendants(project_id, projects):

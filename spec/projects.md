@@ -10,7 +10,8 @@ and `sections.ts` (v0.18.0). Every action is one batch, as in [writes.md](writes
 | --- | --- |
 | Create | `name`, `color`, `position`, `archived: false`, `parent_id`, `created_at`, `deleted_at: null` |
 | Rename | `name`, trimmed, never empty |
-| Colour | `color`, a hex string |
+| Colour | `color`, a hex string, or `null` for Theme ([icons.md](icons.md#the-theme-colour)) |
+| Icon | `icon`, a Lucide name or `null`; the web app draws only its catalogue's 411 ([icons.md](icons.md)) |
 | Move under another project, or to the top | `parent_id` and `position`, last among the new siblings |
 | Archive | `archived: true` on the project and every live descendant not already archived |
 | Unarchive | `archived: false` on the project only. Its archived sub-projects stay archived |

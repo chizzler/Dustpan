@@ -14,6 +14,7 @@ from . import config  # noqa: E402
 from .api import Api, ApiError, Offline  # noqa: E402
 from .dates import day_start_minutes, format_time, uses_12h  # noqa: E402
 from .filters import FilterError  # noqa: E402
+from .iconpicker import IconPicker  # noqa: E402
 from .labelpicker import NEW_LABEL_COLOUR, LabelPicker  # noqa: E402
 from .model import CLEARED_SUBTASKS, completed_subtask_visible  # noqa: E402
 from .querybar import QueryBar  # noqa: E402
@@ -24,8 +25,8 @@ from .reminders import (DEADLINE_PRESETS, DEFAULT_DATED_PRESETS, DEFAULT_TIMED_P
                         describe, offset_label, parse_custom_offset, read_defaults)  # noqa: E402
 from .sync import UnsupportedAccount, adopt_standalone, migrate_account, reset_for_account, verify_account  # noqa: E402
 from .views import run_query, view_options  # noqa: E402
-from .widgets import Dot, broom_button, escape, label_chip  # noqa: E402
-from .writes import (DAY_STARTS, LABEL_COLOURS, LOCAL_USER, PROJECT_COLOURS, CannotEdit, live,
+from .widgets import NO_COLOUR, Dot, broom_button, escape, label_chip, project_mark  # noqa: E402
+from .writes import (AUTO_COLOUR, DAY_STARTS, LABEL_COLOURS, LOCAL_USER, PROJECT_COLOURS, CannotEdit, live,
                      project_descendants)  # noqa: E402
 
 PRIORITIES = ["Priority 1", "Priority 2", "Priority 3", "No priority"]
@@ -573,13 +574,14 @@ class ViewDialog(Adw.Dialog):
 
 
 class ProjectDialog(Adw.Dialog):
-    """Create or edit a project: name, colour and parent. An existing one can also be archived or deleted."""
+    """Create or edit a project: name, colour, icon and parent. An existing one can also be archived or deleted."""
 
     def __init__(self, window, project=None, parent_id=None):
         super().__init__(title="Edit project" if project else "New project", content_width=460)
         self.window = window
         self.project = project
         self.color = project.get("color") if project else PROJECT_COLOURS[0][0]
+        self.icon = project.get("icon") if project else None
 
         cancel = Gtk.Button(label="Cancel")
         cancel.connect("clicked", lambda _b: self.close())
@@ -596,11 +598,13 @@ class ProjectDialog(Adw.Dialog):
         main.add(self.name_row)
 
         # A new project's colour is chosen by the writer unless the user picks one.
+        # Theme is no colour (None): the theme's text colour, as the web app's "No colour" (spec/icons.md).
         self.picked = project is not None
         colours = Gtk.Box(spacing=4, valign=Gtk.Align.CENTER)
         first = None
-        for hex_, name in PROJECT_COLOURS:
-            button = Gtk.ToggleButton(child=Dot(hex_, 16), tooltip_text=name, css_classes=["flat", "colour-choice"],
+        for hex_, name in ((None, "Theme"), *PROJECT_COLOURS):
+            button = Gtk.ToggleButton(child=Dot(hex_, 16, theme=True), tooltip_text=name,
+                                      css_classes=["flat", "colour-choice"],
                                       active=project is not None and hex_ == self.color)
             button.set_group(first)
             first = first or button
@@ -609,6 +613,15 @@ class ProjectDialog(Adw.Dialog):
         colour_row = Adw.ActionRow(title="Colour")
         colour_row.add_suffix(colours)
         main.add(colour_row)
+
+        # spec/icons.md: suggestions come from the name as typed, drawn in the colour as picked.
+        self.icon_button = Gtk.MenuButton(valign=Gtk.Align.CENTER, tooltip_text="Choose an icon", css_classes=["flat"],
+                                          popover=IconPicker(lambda: (self.name_row.get_text(), self.shown_color(), self.icon),
+                                                             self.pick_icon))
+        icon_row = Adw.ActionRow(title="Icon", activatable_widget=self.icon_button)
+        icon_row.add_suffix(self.icon_button)
+        main.add(icon_row)
+        self.show_icon()
 
         # Any live, unarchived project but this one and those below it.
         below = {p.id for p in project_descendants(project.id, window.store.rows("project"))} if project else set()
@@ -646,6 +659,23 @@ class ProjectDialog(Adw.Dialog):
 
     def pick(self, color):
         self.color, self.picked = color, True
+        self.show_icon()
+
+    def pick_icon(self, name):
+        self.icon = name
+        self.show_icon()
+
+    def shown_color(self):
+        """A new project's colour is the writer's choice until one is picked: grey till then."""
+        return self.color if self.picked else NO_COLOUR
+
+    def show_icon(self):
+        """The icon in the chosen colour, or "None" beside the dot the project shows instead."""
+        box = Gtk.Box(spacing=8)
+        box.append(project_mark({"icon": self.icon, "color": self.shown_color()}))
+        if self.icon is None:
+            box.append(Gtk.Label(label="None", css_classes=["dim-label"]))
+        self.icon_button.set_child(box)
 
     def save(self):
         window = self.window
@@ -653,13 +683,14 @@ class ProjectDialog(Adw.Dialog):
         parent_id = self.parents[self.parent_row.get_selected()]
         try:
             if self.project:
-                changes = {"name": name, "color": self.color}
+                changes = {"name": name, "color": self.color, "icon": self.icon}
                 if parent_id != self.shown_parent:
                     changes["parent_id"] = parent_id
                 window.writer.edit_project(self.project.id, changes)
                 project_id = self.project.id
             else:
-                project_id = window.writer.add_project(name, parent_id, self.color if self.picked else None)
+                project_id = window.writer.add_project(name, parent_id, self.color if self.picked else AUTO_COLOUR,
+                                                       self.icon)
         except CannotEdit as err:
             self.toasts.add_toast(Adw.Toast(title=escape(str(err)), timeout=5))
             return

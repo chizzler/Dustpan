@@ -9,7 +9,7 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 
 from .labels import exact, find, key  # noqa: E402
-from .widgets import Dot, scroll_into_view  # noqa: E402
+from .widgets import Dot, focus_soon, scroll_into_view  # noqa: E402
 
 NEW_LABEL_COLOUR = "#94a3b8"  # a created label's dot until the writer gives it its colour
 MAX_HEIGHT = 320
@@ -53,7 +53,7 @@ class LabelPicker(Gtk.Popover):
         if not choose:
             box.append(Gtk.Label(label="Enter adds or removes · Esc closes", css_classes=["dim-label", "caption"]))
         self.set_child(box)
-        self.connect("show", lambda _p: GLib.idle_add(self.entry.grab_focus))
+        self.connect("show", lambda _p: focus_soon(self.entry))
         self.fill()
 
     # ---- the list ----

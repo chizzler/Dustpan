@@ -27,6 +27,7 @@ from .filters import Context, FilterError, shift  # noqa: E402
 from .labelpicker import LabelPicker  # noqa: E402
 from .labels import ROW_CHIPS, carrying, duplicates, in_order, picker_order, remember, shown  # noqa: E402
 from .markdown import first_line  # noqa: E402
+from .pagehead import CSS as PAGEHEAD_CSS, HEADER_AFTER_PX, MARK_PX, page_head  # noqa: E402
 from .querybar import QueryBar  # noqa: E402
 from .model import (CLEARED_SUBTASKS, FOLDED_TASKS, count_open, folded_after, is_ready, order_key,  # noqa: E402
                     progress_map, project_path, project_sections, ready_parent, snapshot, unfolded_down_to)
@@ -38,7 +39,7 @@ from .views import (LOGBOOK_PAGE, WEEK_START, compare_tasks, group_tasks, in_any
                     logbook, manual_order, open_count, run_query, run_view, sorted_tasks, today_groups,
                     upcoming_groups, view_options)
 from .widgets import (CSS, FOLD_PX, INDENT_PX, BrandDust, BrandMark, Dot, Pie, ThemeFollower,  # noqa: E402
-                      broom_button, escape, flash, label_chip, on_right_click, popup_menu, save_screenshot,
+                      broom_button, escape, flash, label_chip, on_right_click, popup_menu, project_mark, save_screenshot,
                       scroll_into_view)
 from .writes import LOCAL_USER, CannotEdit, Writer, descendants, live, project_descendants  # noqa: E402
 
@@ -60,6 +61,20 @@ SETTLE_MS = 2000  # a ticked or reopened subtask keeps its place until this long
 RECENT_LABELS = "recent_labels"  # store meta: labels assigned lately on this device, newest first
 # On first start, reminders that fired longer ago than this are not shown.
 STALE_REMINDER_MS = 24 * 60 * 60_000
+
+
+def open_text(count, what="open"):
+    """A page's count: "3 open tasks", "1 to do", or "Nothing open"."""
+    if not count:
+        return f"Nothing {what}" if what == "open" else "Nothing to do"
+    return f"{count} {what} task{'s' if count != 1 else ''}" if what == "open" else f"{count} {what}"
+
+
+def walk_nodes(nodes):
+    """Every node of a project tree, depth first."""
+    for node in nodes:
+        yield node
+        yield from walk_nodes(node.children)
 
 
 class Window(Adw.ApplicationWindow):
@@ -181,6 +196,8 @@ class Window(Adw.ApplicationWindow):
         # One viewport for every page: swapping its child keeps the scroll position, with no frame at the top.
         self.viewport = Gtk.Viewport()
         self.content.set_child(self.viewport)
+        self.page_name = "Today"
+        self.content.get_vadjustment().connect("value-changed", lambda _a: self.show_header_title())
         self.autoscrolls = [Autoscroll(sidebar_scroll),
                             Autoscroll(self.content, lambda dy: self.page_drop and self.page_drop.scrolled(dy))]
         content_view = Adw.ToolbarView(content=self.content)
@@ -490,7 +507,7 @@ class Window(Adw.ApplicationWindow):
             for node in nodes:
                 name = node.row.get("name", "")
                 self.project_paths.append((node.id, " › ".join(path + [name])))
-                self.add_sidebar_row(node.id, name, depth, color=node.row.get("color"),
+                self.add_sidebar_row(node.id, name, depth, mark=project_mark(node.row),
                                      count=count_open(self.snap, node.id, self.today),
                                      menu=lambda pid=node.id: self.project_menu(pid),
                                      item=("project", node.id, parent_id, [c.id for c in node.children]))
@@ -531,7 +548,7 @@ class Window(Adw.ApplicationWindow):
         if archived:
             self.add_sidebar_heading("Archived")
         for path, project in archived:
-            self.add_sidebar_row(ARCHIVED + project.id, path, 0, color=project.get("color"),
+            self.add_sidebar_row(ARCHIVED + project.id, path, 0, mark=project_mark(project),
                                  menu=lambda pid=project.id: self.archived_menu(pid))
 
         target = self.rows_by_key.get(self.selected) or self.rows_by_key[TODAY]
@@ -554,13 +571,16 @@ class Window(Adw.ApplicationWindow):
             box.append(button)
         self.sidebar.append(Gtk.ListBoxRow(child=box, selectable=False, activatable=False))
 
-    def add_sidebar_row(self, key, name, depth, icon=None, color=None, count=0, menu=None, warning=None, item=None):
-        """menu() gives the sections of the row's right-click menu, for popup_menu. warning: a marker's tooltip.
+    def add_sidebar_row(self, key, name, depth, icon=None, color=None, mark=None, count=0, menu=None, warning=None,
+                        item=None):
+        """Before the name: mark, else the named icon, else a dot in color.
+
+        menu() gives the sections of the row's right-click menu, for popup_menu. warning: a marker's tooltip.
 
         item: (kind, id, parent id, child ids) for a row that can be dragged to reorder it among its kind.
         """
         box = Gtk.Box(spacing=10, margin_start=6 + depth * INDENT_PX // 2)
-        box.append(Gtk.Image(icon_name=icon) if icon else Dot(color))
+        box.append(mark or (Gtk.Image(icon_name=icon) if icon else Dot(color)))
         box.append(Gtk.Label(label=name, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END))
         if warning:
             box.append(Gtk.Image(icon_name="dialog-warning-symbolic", tooltip_text=warning, css_classes=["warning"]))
@@ -571,6 +591,7 @@ class Window(Adw.ApplicationWindow):
         row = Gtk.ListBoxRow(child=box)
         row.key = key
         row.name = name
+        row.icon = icon
         if menu:
             on_right_click(row, lambda x, y: popup_menu(row, menu(), x, y))
         row.item = item
@@ -598,7 +619,7 @@ class Window(Adw.ApplicationWindow):
             key, row = TODAY, self.rows_by_key[TODAY]
             self.selected = TODAY
             self.adding = None
-        self.title.set_title(row.name)
+        self.page_name = row.name
         self.check_prompt()
         is_view, is_archived, is_label = key.startswith(VIEW), key.startswith(ARCHIVED), key.startswith(LABEL)
         self.add_button.set_visible(not is_view and not is_archived and key not in NO_ADDING)
@@ -625,6 +646,7 @@ class Window(Adw.ApplicationWindow):
         self.page_drop = PageDrop(column, self.drag, self.drop_task)
         self.task_widgets = {}
         self.folds = {}
+        column.append(self.page_heading(key, row))
         if key == TODAY:
             self.fill_groups(column, today_groups(self.snap.tasks, self.today),
                              lambda group: ToDay(self.today) if group.key == "today" else None)
@@ -651,6 +673,7 @@ class Window(Adw.ApplicationWindow):
             self.fill_project(column, None if key == INBOX else key)
         self.viewport.set_child(Adw.Clamp(child=self.page_drop.widget, maximum_size=760))
         self.content.get_vadjustment().set_value(scroll)
+        self.show_header_title()
         # Focus now, before anything is drawn: the old focused row is gone, and GTK would hand the focus
         # to the first row on the page for a frame (the highlight jumping to the top, the list scrolling there).
         self.restore_focus(self.focus_task, old_order)
@@ -701,6 +724,53 @@ class Window(Adw.ApplicationWindow):
         while widget is not None and widget not in rows:
             widget = widget.get_parent()
         return rows.get(widget)
+
+    # ---- the page heading (spec/pagehead.md) ----
+
+    def page_heading(self, key, row):
+        """The large title at the top of the page: a project's icon, name and where it sits, or a page's symbol."""
+        symbol = Gtk.Image(icon_name=row.icon, pixel_size=MARK_PX - 2, css_classes=["page-symbol"]) if row.icon else None
+        if key == TODAY:
+            return page_head("Today", symbol, eyebrow=f"{date.fromisoformat(self.today):%A %-d %B}",
+                             meta=open_text(sum(in_today(t, self.today) for t in self.snap.tasks), "to do"))
+        if key == INBOX:
+            # Everything open on the page, planned or not. The sidebar counts only the unplanned.
+            count = sum(open_count(t, self.today) for t in self.snap.tasks_by_project.get(None, []))
+            return page_head("Inbox", symbol, meta=open_text(count))
+        if key.startswith(LABEL):
+            label = self.snap.labels[key[len(LABEL):]]
+            count = sum(1 for t in self.snap.tasks if open_count(t, self.today) and label.id in (t.get("labels") or []))
+            return page_head(label.get("name", ""), Dot(label.get("color"), 14), eyebrow="Label", meta=open_text(count))
+        if key.startswith(VIEW):
+            return page_head(row.name, symbol, eyebrow="Saved view")
+        project_id = key[len(ARCHIVED):] if key.startswith(ARCHIVED) else None if key in BUILT_IN else key
+        if project_id is None:  # Upcoming, Anytime, Completed, Filter, Trash
+            return page_head(row.name, symbol)
+        project = self.store.rows("project")[project_id]
+        path = dict(self.project_paths).get(project_id, "")
+        if key.startswith(ARCHIVED):
+            eyebrow = "Archived project"
+        else:
+            eyebrow = path.rsplit(" › ", 1)[0] if " › " in path else "Project"
+        node = next((n for n in walk_nodes(self.snap.projects) if n.id == project_id), None)
+        places = [(project_mark(c.row), c.row.get("name", ""), lambda pid=c.id: self.open_page(pid))
+                  for c in (node.children if node else [])]
+        parent_id = project.get("parent_id")
+        up = (lambda: self.open_page(parent_id)) if parent_id in self.rows_by_key and not key.startswith(ARCHIVED) \
+            else None
+        return page_head(project.get("name", ""), project_mark(project, MARK_PX), eyebrow=eyebrow,
+                         places=places, up=up,
+                         meta=None if key.startswith(ARCHIVED) else open_text(count_open(self.snap, project_id, self.today)))
+
+    def show_header_title(self):
+        """The header bar names the page only once its heading has scrolled out of sight."""
+        scrolled = self.content.get_vadjustment().get_value() > HEADER_AFTER_PX
+        self.title.set_title(self.page_name if scrolled else "")
+
+    def open_page(self, key):
+        """Select a sidebar row, as a click on it would."""
+        if (row := self.rows_by_key.get(key)) is not None:
+            self.sidebar.select_row(row)
 
     def note(self, column, text, css="dim-label"):
         column.append(Gtk.Label(label=text, xalign=0, wrap=True, margin_top=12, margin_bottom=8, css_classes=[css]))
@@ -854,7 +924,8 @@ class Window(Adw.ApplicationWindow):
                 "deleting for good…" if gone else None if days is None else f"{days} day{'' if days == 1 else 's'} left",
             ]
             row = Adw.ActionRow(title=item.title, subtitle=" · ".join(p for p in parts if p), use_markup=False)
-            row.add_prefix(Dot(item.color) if item.entity == "project" else Gtk.Image(icon_name="radio-symbolic"))
+            row.add_prefix(project_mark({"color": item.color, "icon": item.icon}) if item.entity == "project"
+                           else Gtk.Image(icon_name="radio-symbolic"))
             restore = Gtk.Button(label="Restore", valign=Gtk.Align.CENTER, sensitive=not gone, css_classes=["flat"])
             restore.connect("clicked", lambda _b, i=item: self.restore_item(i))
             row.add_suffix(restore)
@@ -1963,7 +2034,7 @@ class App(Adw.Application):
         self.add_action(quit_action)
         self.set_accels_for_action("app.quit", ["<Control>q"])
         provider = Gtk.CssProvider()
-        provider.load_from_string(CSS + CALENDAR_CSS)
+        provider.load_from_string(CSS + CALENDAR_CSS + PAGEHEAD_CSS)
         Gtk.StyleContext.add_provider_for_display(Gdk.Display.get_default(), provider,
                                                   Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         self.theme = ThemeFollower(Gdk.Display.get_default())

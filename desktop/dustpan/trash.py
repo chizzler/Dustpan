@@ -27,6 +27,7 @@ class Item:
     deleted_at: int
     project_name: str | None = None  # for tasks: their project, None for the Inbox
     color: str | None = None  # for projects
+    icon: str | None = None  # for projects
     subtasks: int = 0  # deleted with this task, and restored with it
 
 
@@ -56,7 +57,7 @@ def items(tasks, projects):
     for p in projects.values():
         if p.get("deleted_at") is not None:
             out.append(Item("project", p.id, p.get("name") or "Untitled project", p.get("deleted_at"),
-                            color=p.get("color")))
+                            color=p.get("color"), icon=p.get("icon")))
     deleted = [t for t in tasks.values() if t.get("deleted_at") is not None]
 
     def parent_of(task):

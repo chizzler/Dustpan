@@ -1,4 +1,4 @@
-# Dustpan for Linux 0.12.4 — release draft
+# Dustpan for Linux 0.12.5 — release draft
 
 A native GTK 4 / libadwaita task manager for Omarchy and Arch Linux. Tasks live in a local SQLite database
 so it works standalone out of the box, with optional sync to your own OpenTodo server.
@@ -17,6 +17,13 @@ so it works standalone out of the box, with optional sync to your own OpenTodo s
 
 ## Since v0.12.3
 
+- Project icons: pick one of Lucide's 1,854 line icons for a project, with suggestions from its name.
+  The picker browses 30 categories from a sidebar, or searches them all. They sync through OpenTodo;
+  its web app shows the 411 in its own catalogue, and the project's dot for the rest.
+- A Theme colour for projects: no colour of their own, drawn in the theme's text colour.
+- A large heading on every page. A project shows its icon, where it sits and its sub-projects.
+- Fixed: after choosing an icon or a label, the picker kept taking the focus, so a name couldn't be typed.
+- Completed subtasks settle below open ones 2 seconds after the last tick.
 - Subtask progress, the parent-completion prompt, and delayed sorting of completed subtasks.
 - Clickable project names on grouped task rows.
 - Desktop visual polish and the Dustpan icon.
@@ -49,7 +56,7 @@ This is a pre-1.0 release.
 
 ## Validation
 
-The current suite ran 338 Python tests with no failures, including GTK window tests. Regression tests cover
+The current suite ran 358 Python tests with no failures, including GTK window tests. Regression tests cover
 both standalone fixes: account switching during sync, and permanent deletion after disconnect.
 The earlier 314-test recovery and package validation predates standalone support; release artifacts need
 rebuilding and revalidation. Calendar row key handlers have also been
