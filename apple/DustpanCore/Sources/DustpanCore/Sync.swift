@@ -54,18 +54,18 @@ public final class Syncer {
     func checkAccount() async throws {
         let stored = try store.meta("user_id").string
         let key = server.accountKey, storedKey = try store.meta("account_key")
-        if let stored, stored != localUser, key == nil || storedKey == key {
+        if !isLocalUser(stored), let stored, key == nil || storedKey == key {
             userId = stored
             return
         }
         let (id, verifiedKey) = try await verifyAccount(server)
         userId = id
-        guard let stored, stored != localUser else {
+        if isLocalUser(stored) {
             try adoptStandalone(store, userId: id, accountKey: verifiedKey)
             return
         }
         guard stored == id else { throw Failure.accountMismatch }
-        if let verifiedKey { try store.transaction { try store.setMeta("account_key", verifiedKey) } }
+        try store.transaction { try rememberAccountKey(store, verifiedKey) }
     }
 
     /// Push edits, pull changes, then send queued purges and pull their markers.
@@ -208,7 +208,7 @@ public final class Syncer {
 
     /// Keep ops a server limit refused. Returns how many are held.
     func hold(_ sent: [String: Op], _ limited: [JSON]) throws -> Int {
-        var held = (try store.meta("held_ops").array ?? []).compactMap(Op.init(json:))
+        var held = try heldOps(store)
         var known = Set(held.map(\.id))
         for r in limited {
             if let id = r["id"].string, let op = sent[id], !known.contains(id) {
@@ -221,7 +221,7 @@ public final class Syncer {
     }
 
     func requeueHeld() throws {
-        let held = (try store.meta("held_ops").array ?? []).compactMap(Op.init(json:))
+        let held = try heldOps(store)
         if !held.isEmpty {
             try store.outboxAdd(held)
             try store.setMeta("held_ops", [])
@@ -248,10 +248,9 @@ public final class Syncer {
         var ops: [Op] = []
         for f in try store.allFields() {
             if let byId = authors[f.entity], byId[f.entityId] != me { continue }
-            if f.entity == "attachment" && f.field == "uploaded_at" { continue }
-            // Deviation from the web app, see spec/sync.md, "Re-seed after a restore".
-            ops.append(Op(id: UUID().uuidString.lowercased(), entity: f.entity, entityId: f.entityId, field: f.field,
-                          value: f.value, ts: f.ts, device: isReservedDevice(f.device) ? device : f.device))
+            let op = Op(id: newId(), entity: f.entity, entityId: f.entityId, field: f.field, value: f.value, ts: f.ts,
+                        device: f.device)
+            if isUploaded(op) { ops.append(uploadOp(op, id: op.id, device: device)) }
         }
         try store.outboxAdd(ops.sorted(by: opOrder))
         try store.setMeta("cursor", 0)
@@ -261,6 +260,23 @@ public final class Syncer {
         // identity changes until the full pull finishes.
         try store.setMeta("reseed_device", .string(newId()))
     }
+}
+
+/// Ops a server limit held back, offered again on the next exchange.
+func heldOps(_ store: Store) throws -> [Op] {
+    (try store.meta("held_ops").array ?? []).compactMap(Op.init(json:))
+}
+
+/// A stored field the server takes back: all but an attachment's uploaded_at, which only it writes.
+func isUploaded(_ op: Op) -> Bool { !(op.entity == "attachment" && op.field == "uploaded_at") }
+
+/// A stored field sent again as an op with id. A reserved device is replaced with ours: the server refuses a batch
+/// holding one. Deviation from the web app, see spec/sync.md, "Re-seed after a restore".
+func uploadOp(_ op: Op, id: String, device: String) -> Op {
+    var out = op
+    out.id = id
+    if isReservedDevice(op.device) { out.device = device }
+    return out
 }
 
 /// Device ids only the server may write. A batch holding one is refused whole.

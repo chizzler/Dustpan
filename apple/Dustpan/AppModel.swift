@@ -110,8 +110,8 @@ final class AppModel {
     private(set) var purging: Set<TrashItem.Target> = []
     /// Days the server keeps an item in the Trash; 0 is until deleted for good, as standalone.
     private(set) var trashRetention = defaultTrashRetention
-    /// Deleting for good happens here and now: the data has never been on a server.
-    private(set) var purgesLocally = false
+    /// How Delete for Good goes: here and now, or through the server.
+    private(set) var purgeMode = PurgeMode.local
     private(set) var status = Status.idle
     private(set) var lastSynced: Date?
     /// Local changes not yet accepted by the server.
@@ -240,7 +240,7 @@ final class AppModel {
         while !Task.isCancelled {
             try? await Task.sleep(for: Self.pollInterval)
             let interval = live ? Self.livePollInterval : Self.pollInterval
-            if isConnected, lastSync.duration(to: .now) >= interval - .seconds(1) { await sync() }
+            if lastSync.duration(to: .now) >= interval - .seconds(1) { await sync() }
         }
     }
 
@@ -308,64 +308,26 @@ final class AppModel {
 
     // MARK: the OpenTodo account
 
-    /// What connecting to an account would do with the data here.
-    enum AccountPlan {
-        /// Standalone data joins the account, or it's the account the data already belongs to.
-        case join
-        /// The data here belongs to another account: Settings asks whether to upload it or replace it.
-        case choose
-    }
-
     /// Ask the server whose token it is.
     func verify(_ config: Config) async throws -> (userId: String, key: JSON?) {
         try await verifyAccount(Api(config: config))
     }
 
-    func plan(for userId: String) throws -> AccountPlan {
+    /// How the data here meets userId's account, or nil when Settings must ask: it holds another account's data.
+    func joinPlan(for userId: String) throws -> AccountJoin? {
         guard let store else { throw CannotEdit("Dustpan isn't set up") }
-        let stored = try store.meta("user_id").string
-        let empty = try store.allFields().isEmpty
-        if stored == nil || stored == localUser || stored == userId || empty { return .join }
-        return .choose
+        return try DustpanCore.joinPlan(store, userId: userId)
     }
 
-    enum AccountChoice {
-        /// Re-key the data here and upload it into the new account.
-        case upload
-        /// Drop the data here and pull the new account's.
-        case replace
-    }
-
-    /// Connect to config's account, changing the data here as the plan or choice says, once no sync is running.
-    func connect(_ config: Config, userId: String, key: JSON?, choice: AccountChoice? = nil) async throws {
+    /// Connect to config's account, changing the data here as how says, once no sync is running. No sync starts
+    /// meanwhile.
+    func connect(_ config: Config, userId: String, key: JSON?, _ how: AccountJoin) async throws {
         guard let store else { throw CannotEdit("Dustpan isn't set up") }
-        try await changeAccount(to: config) {
-            let stored = try store.meta("user_id").string
-            switch choice {
-            case .upload: try migrateAccount(store, userId: userId, accountKey: key)
-            case .replace: try resetForAccount(store, userId: userId, accountKey: key)
-            case nil:
-                if stored == nil || stored == localUser {
-                    try adoptStandalone(store, userId: userId, accountKey: key)
-                } else if stored != userId {
-                    // Only when the data here is empty: nothing to lose.
-                    try resetForAccount(store, userId: userId, accountKey: key)
-                } else if let key {
-                    try store.transaction { try store.setMeta("account_key", key) }
-                }
-            }
-        }
-    }
-
-    /// Run change, then sync with config. No sync starts meanwhile, and a running one ends first.
-    private func changeAccount(to config: Config, _ change: () throws -> Void) async throws {
         changingAccount = true
-        stopLive()
-        editSync?.cancel()
-        editSync = nil
+        pauseSync()
         while status == .syncing { try? await Task.sleep(for: .milliseconds(50)) }
         do {
-            try change()
+            try join(store, userId: userId, key: key, how)
             try config.save()
         } catch {
             changingAccount = false
@@ -383,13 +345,18 @@ final class AppModel {
     /// Stop syncing and keep everything here: Dustpan runs standalone.
     func disconnect() throws {
         try Config.clear()
-        stopLive()
-        editSync?.cancel()
-        editSync = nil
+        pauseSync()
         use(nil)
         syncAgain = false
         status = .idle
         refresh()
+    }
+
+    /// The live stream and a pending edit's sync stop.
+    private func pauseSync() {
+        stopLive()
+        editSync?.cancel()
+        editSync = nil
     }
 
     private func syncSoon() {
@@ -408,7 +375,7 @@ final class AppModel {
             trash = trashItems(tasks: snapshot.allTasks, projects: try store.rows("project"))
             purging = try pendingPurges(store)
             trashRetention = isConnected ? try DustpanCore.trashRetention(store) : 0
-            purgesLocally = try !isConnected && neverConnected(store)
+            purgeMode = try DustpanCore.purgeMode(store, connected: isConnected)
             waiting = try store.outboxCount()
             hiddenPages = Set(try store.meta(hiddenPagesKey).array?.compactMap(\.string) ?? [])
             foldedTasks = try store.meta(foldedTasksKey).array?.compactMap(\.string) ?? []
@@ -687,7 +654,7 @@ final class AppModel {
     func deleteForGood(_ items: [TrashItem]) {
         guard let store else { return }
         do {
-            if purgesLocally {
+            if purgeMode == .local {
                 try purgeLocal(store, items.map(\.target))
             } else {
                 try queuePurges(store, items.map(\.target))

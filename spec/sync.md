@@ -97,8 +97,9 @@ The connection's `accountKey` is the server URL and a SHA-256 of the token, as o
 
 - **Settings ▸ Sync** does what the desktop's Settings does: verify with `/me`, then adopt standalone data, keep the
   same account's, or ask "Upload Local Tasks" (migrate) or "Replace Local Data" (reset) for another account's.
-- **Account changes** go through `AppModel.changeAccount`: the live stream and pending sync stop, no new sync starts,
-  a running one ends first, then the data changes, the config is saved and sync starts again.
+- **Account changes** go through `AppModel.connect`, with the plan from `joinPlan` (or the person's choice): the live
+  stream and pending sync stop, no new sync starts, a running one ends first, then `join` changes the data, the config
+  is saved and sync starts again.
 - **Disconnect** clears the config file's two lines and stops sync; the data stays.
 - Standalone, the toolbar has no sync status and ⌘R is off.
 

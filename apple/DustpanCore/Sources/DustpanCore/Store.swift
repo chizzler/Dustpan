@@ -118,6 +118,8 @@ public final class Store {
 
     func clearOutbox() throws { try run("DELETE FROM outbox", []) }
 
+    func hasFields() throws -> Bool { try !query("SELECT 1 FROM fields LIMIT 1", []) { _ in () }.isEmpty }
+
     public struct Field {
         public let entity, entityId, field: String
         public let value: JSON

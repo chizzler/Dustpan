@@ -49,12 +49,13 @@ public func parseCustomOffset(_ text: String) -> Int64? {
     return direction == "after" || sign == "+" ? minutes : -minutes
 }
 
-struct ReminderDefaults: Equatable {
-    var timed: Int64?
-    var dated: Int64?
+/// The default reminders, in minutes from the due time: nil for none.
+public struct ReminderDefaults: Equatable {
+    public var timed: Int64?
+    public var dated: Int64?
 
     /// From a user_prefs row's values.
-    init(prefs: [String: JSON]) {
+    public init(prefs: [String: JSON]) {
         timed = parseDefault(prefs["reminder_default_timed"] ?? .null)
         dated = parseDefault(prefs["reminder_default_dated"] ?? .null)
     }

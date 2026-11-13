@@ -89,31 +89,32 @@ struct SyncSettings: View {
             problem = error.message
             return
         }
-        busy = true
-        Task {
-            defer { busy = false }
-            do {
-                let (userId, key) = try await model.verify(config)
-                if try model.plan(for: userId) == .choose {
-                    joining = AccountToJoin(config: config, userId: userId, key: key)
-                    choosesAccount = true
-                    return
-                }
-                try await model.connect(config, userId: userId, key: key)
-                notice = "Connected to OpenTodo."
-            } catch {
-                problem = Self.explain(error)
+        run {
+            let (userId, key) = try await model.verify(config)
+            guard let how = try model.joinPlan(for: userId) else {
+                joining = AccountToJoin(config: config, userId: userId, key: key)
+                choosesAccount = true
+                return false
             }
+            try await model.connect(config, userId: userId, key: key, how)
+            return true
         }
     }
 
-    private func join(_ account: AccountToJoin, _ choice: AppModel.AccountChoice) {
+    private func join(_ account: AccountToJoin, _ how: AccountJoin) {
+        run {
+            try await model.connect(account.config, userId: account.userId, key: account.key, how)
+            return true
+        }
+    }
+
+    /// Busy while work runs; then whether it connected, or why not.
+    private func run(_ work: @escaping () async throws -> Bool) {
         busy = true
         Task {
             defer { busy = false }
             do {
-                try await model.connect(account.config, userId: account.userId, key: account.key, choice: choice)
-                notice = "Connected to OpenTodo."
+                if try await work() { notice = "Connected to OpenTodo." }
             } catch {
                 problem = Self.explain(error)
             }

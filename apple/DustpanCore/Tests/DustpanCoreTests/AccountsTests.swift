@@ -391,3 +391,17 @@ private func task(_ id: String) -> TrashItem.Target { .init(entity: "task", id: 
         }
     }
 }
+
+@Suite struct JoinPlanTests {
+    @Test func standaloneAdoptsTheSameAccountKeepsAndAnotherAsksUnlessThereIsNothingToLose() throws {
+        let store = try memoryStore()
+        #expect(try joinPlan(store, userId: "u1") == .adopt)
+        try store.setMeta("user_id", "local")
+        #expect(try joinPlan(store, userId: "u1") == .adopt)
+        try store.setMeta("user_id", "u1")
+        #expect(try joinPlan(store, userId: "u1") == .same)
+        #expect(try joinPlan(store, userId: "u2") == .replace)
+        _ = try Writer(store: store).addTask("Mine")
+        #expect(try joinPlan(store, userId: "u2") == nil)
+    }
+}

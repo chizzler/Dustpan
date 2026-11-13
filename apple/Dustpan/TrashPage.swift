@@ -54,15 +54,14 @@ struct TrashPage: View {
     }
 
     private func purgeMessage(_ items: [TrashItem]) -> String {
-        let reach = model.purgesLocally ? "" : model.isConnected ? " from every device and the server"
-            : " from every device and the server when you reconnect"
-        guard items.count == 1 else {
-            return model.purgesLocally ? "They're deleted permanently. This can't be undone."
-                : "They're removed\(reach). This can't be undone."
+        let fate = switch model.purgeMode {
+        case .local: "deleted permanently"
+        case .server: "removed from every device and the server"
+        case .onReconnect: "removed from every device and the server when you reconnect"
         }
+        guard items.count == 1 else { return "They're \(fate). This can't be undone." }
         return (items[0].isProject ? "Its tasks go with it. "
-            : "Any deleted subtasks go with it, including those deleted separately. ")
-            + (model.purgesLocally ? "It's deleted permanently" : "It's removed\(reach)") + ", and can't be undone."
+            : "Any deleted subtasks go with it, including those deleted separately. ") + "It's \(fate), and can't be undone."
     }
 }
 

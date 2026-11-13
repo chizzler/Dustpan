@@ -9,17 +9,20 @@ import Foundation
 public let accountEpochKey = "account_epoch"
 
 /// Parents and tasks upload before reminders, comments, attachments and time entries.
-let entityOrder = ["project", "section", "field", "label", "view", "task", "reminder", "comment", "attachment",
-                   "time_entry", "user_prefs", "project_prefs", "review"]
-let leadFields = ["project_id", "task_id", "user_id", "author_id", "series_id", "recurrence", "kind", "started_at"]
+private let entityRank = Dictionary(uniqueKeysWithValues: [
+    "project", "section", "field", "label", "view", "task", "reminder", "comment", "attachment", "time_entry",
+    "user_prefs", "project_prefs", "review",
+].enumerated().map { ($1, $0) })
+private let leadFieldRank = Dictionary(uniqueKeysWithValues: [
+    "project_id", "task_id", "user_id", "author_id", "series_id", "recurrence", "kind", "started_at",
+].enumerated().map { ($1, $0) })
 /// Entities whose fields go in one request: the server checks them together.
 let batchWhole: Set = ["reminder", "comment", "attachment", "time_entry"]
 
 /// The upload order: entity kind, entity, then the fields the server checks first.
 func opOrder(_ a: Op, _ b: Op) -> Bool {
-    func rank(_ list: [String], _ name: String) -> Int { list.firstIndex(of: name) ?? list.count }
-    let ka = (rank(entityOrder, a.entity), a.entity, a.entityId, rank(leadFields, a.field), a.field)
-    let kb = (rank(entityOrder, b.entity), b.entity, b.entityId, rank(leadFields, b.field), b.field)
+    let ka = (entityRank[a.entity] ?? entityRank.count, a.entity, a.entityId, leadFieldRank[a.field] ?? leadFieldRank.count, a.field)
+    let kb = (entityRank[b.entity] ?? entityRank.count, b.entity, b.entityId, leadFieldRank[b.field] ?? leadFieldRank.count, b.field)
     return ka < kb
 }
 
@@ -40,13 +43,55 @@ public func verifyAccount(_ server: any SyncServer) async throws -> (userId: Str
     return (id, server.accountKey)
 }
 
+/// No account yet: the data here is standalone.
+public func isLocalUser(_ userId: String?) -> Bool { userId == nil || userId == localUser }
+
+/// How the data here meets an account.
+public enum AccountJoin {
+    /// Standalone data joins it.
+    case adopt
+    /// The data here already belongs to it.
+    case same
+    /// Another account's data: re-keyed and uploaded into this one.
+    case upload
+    /// The data here goes, and this account's comes down.
+    case replace
+}
+
+/// How the data here meets userId's account, or nil when it holds another account's data: the person chooses.
+public func joinPlan(_ store: Store, userId: String) throws -> AccountJoin? {
+    let stored = try store.meta("user_id").string
+    if isLocalUser(stored) { return .adopt }
+    if stored == userId { return .same }
+    return try store.hasFields() ? nil : .replace
+}
+
+public func join(_ store: Store, userId: String, key: JSON?, _ how: AccountJoin) throws {
+    switch how {
+    case .adopt: try adoptStandalone(store, userId: userId, accountKey: key)
+    case .same: try store.transaction { try rememberAccountKey(store, key) }
+    case .upload: try migrateAccount(store, userId: userId, accountKey: key)
+    case .replace: try resetForAccount(store, userId: userId, accountKey: key)
+    }
+}
+
+func rememberAccountKey(_ store: Store, _ key: JSON?) throws {
+    if let key { try store.setMeta("account_key", key) }
+}
+
 private func bumpEpoch(_ store: Store) throws {
     try store.setMeta(accountEpochKey, .int((try store.meta(accountEpochKey).int ?? 0) + 1))
 }
 
+/// The sync state an account switch starts again.
+private let syncStateReset: [(String, JSON)] = [
+    ("cursor", 0), ("backfill_ack", 0), ("generation", .null), ("reseed_device", .null), ("held_ops", []),
+    (pendingPurgesKey, []), (trashRetentionKey, .null),
+]
+
 private extension Op {
-    init(_ f: Store.Field, id: String = "") {
-        self.init(id: id, entity: f.entity, entityId: f.entityId, field: f.field, value: f.value, ts: f.ts, device: f.device)
+    init(_ f: Store.Field) {
+        self.init(id: "", entity: f.entity, entityId: f.entityId, field: f.field, value: f.value, ts: f.ts, device: f.device)
     }
 
     var key: [String] { [entity, entityId, field] }
@@ -65,14 +110,14 @@ private func rewriteLocal(_ op: Op, _ userId: String, _ reminders: [String: Stri
 /// each, in upload order, for the first exchange to send.
 public func adoptStandalone(_ store: Store, userId: String, accountKey key: JSON? = nil) throws {
     try store.transaction {
-        if let stored = try store.meta("user_id").string, stored != localUser {
+        guard isLocalUser(try store.meta("user_id").string) else {
             throw Syncer.Failure.accountChanged("this device was connected to an account in the meantime")
         }
         try bumpEpoch(store)
         let device = try store.device()
         let fields = try store.allFields()
         let queued = try store.outboxBatch(limit: try store.outboxCount()).map(\.op)
-        let held = (try store.meta("held_ops").array ?? []).compactMap(Op.init(json:))
+        let held = try heldOps(store)
         if !fields.isEmpty || !queued.isEmpty || !held.isEmpty {
             var taskIds = Set(fields.filter { $0.entity == "task" }.map(\.entityId))
             taskIds.formUnion(fields.filter { $0.entity == "reminder" && $0.field == "task_id" }.compactMap(\.value.string))
@@ -83,8 +128,9 @@ public func adoptStandalone(_ store: Store, userId: String, accountKey key: JSON
                 let new = defaultReminderId(userId: userId, taskId: taskId)
                 if reminderIds.contains(old), old != new { reminderMap[old] = new }
             }
-            let rewritten = fields.map { rewriteLocal(Op($0), userId, reminderMap) }
-            if rewritten != fields.map({ Op($0) }) {
+            let original = fields.map { Op($0) }
+            let rewritten = original.map { rewriteLocal($0, userId, reminderMap) }
+            if rewritten != original {
                 try store.clearFields()
                 for op in rewritten { try store.apply(op) }
             }
@@ -97,11 +143,7 @@ public func adoptStandalone(_ store: Store, userId: String, accountKey key: JSON
 
             if try store.meta("generation").isNull {
                 // Never synced: send each field once, as it stands, whatever edits led to it.
-                let ops = try store.allFields().filter { !($0.entity == "attachment" && $0.field == "uploaded_at") }.map { f in
-                    var op = Op(f, id: knownIds[[f.entity, f.entityId, f.field]] ?? newId())
-                    if isReservedDevice(f.device) { op.device = device }
-                    return op
-                }
+                let ops = rewritten.filter(isUploaded).map { uploadOp($0, id: knownIds[$0.key] ?? newId(), device: device) }
                 try store.clearOutbox()
                 try store.outboxAdd(ops.sorted(by: opOrder))
                 try store.setMeta("held_ops", [])
@@ -114,7 +156,7 @@ public func adoptStandalone(_ store: Store, userId: String, accountKey key: JSON
             }
         }
         try store.setMeta("user_id", .string(userId))
-        if let key { try store.setMeta("account_key", key) }
+        try rememberAccountKey(store, key)
     }
 }
 
@@ -144,9 +186,9 @@ public func migrateAccount(_ store: Store, userId: String, accountKey key: JSON?
         var rows: [String: [String: [String: JSON]]] = [:]
         for f in fields { rows[f.entity, default: [:]][f.entityId, default: [:]][f.field] = f.value }
 
-        let skipEntities: Set = ["attachment"]
+        // Attachments' files stay with the old account.
         var skipRows: Set<[String]> = []
-        for (entity, author) in Syncer.authored where !skipEntities.contains(entity) {
+        for (entity, author) in Syncer.authored where entity != "attachment" {
             for (id, values) in rows[entity] ?? [:] where !mine.contains(values[author]?.string ?? "") {
                 skipRows.insert([entity, id])
             }
@@ -154,7 +196,7 @@ public func migrateAccount(_ store: Store, userId: String, accountKey key: JSON?
 
         var ids: [String: String] = [:]
         for (entity, byId) in rows
-        where !["user_prefs", "review", "project_prefs", "task", "reminder"].contains(entity) && !skipEntities.contains(entity) {
+        where !["user_prefs", "review", "project_prefs", "task", "reminder", "attachment"].contains(entity) {
             for id in byId.keys where !skipRows.contains([entity, id]) { ids[id] = newId() }
         }
         let tasks = rows["task"] ?? [:]
@@ -194,7 +236,7 @@ public func migrateAccount(_ store: Store, userId: String, accountKey key: JSON?
 
         var ops: [Op] = []
         try store.clearFields()
-        for f in fields where !skipEntities.contains(f.entity) && !skipRows.contains([f.entity, f.entityId]) {
+        for f in fields where f.entity != "attachment" && !skipRows.contains([f.entity, f.entityId]) {
             let entityId: String
             if ["user_prefs", "review"].contains(f.entity) {
                 entityId = f.entityId
@@ -262,12 +304,8 @@ public func migrateAccount(_ store: Store, userId: String, accountKey key: JSON?
             try store.setMeta("notified", .object(Dictionary(uniqueKeysWithValues: notified.compactMap { id, at in
                 ids[id].map { ($0, at) } })))
         }
-        let reset: [(String, JSON)] = [
-            ("cursor", 0), ("backfill_ack", 0), ("generation", .null), ("reseed_device", .null), ("held_ops", []),
-            (pendingPurgesKey, []), (trashRetentionKey, .null), ("user_id", .string(userId)),
-        ]
-        for (name, value) in reset { try store.setMeta(name, value) }
-        if let key { try store.setMeta("account_key", key) }
+        for (name, value) in syncStateReset + [("user_id", .string(userId))] { try store.setMeta(name, value) }
+        try rememberAccountKey(store, key)
     }
 }
 
@@ -278,12 +316,11 @@ public func resetForAccount(_ store: Store, userId: String, accountKey key: JSON
         try bumpEpoch(store)
         try store.clearFields()
         try store.clearOutbox()
-        let reset: [(String, JSON)] = [
-            ("cursor", 0), ("backfill_ack", 0), ("generation", .null), ("reseed_device", .null), ("held_ops", []),
-            (pendingPurgesKey, []), (trashRetentionKey, .null), ("notified", .null), (foldedTasksKey, []),
-            (clearedSubtasksKey, [:]), (recentLabelsKey, []), ("user_id", .string(userId)),
+        let local: [(String, JSON)] = [
+            ("notified", .null), (foldedTasksKey, []), (clearedSubtasksKey, [:]), (recentLabelsKey, []),
+            ("user_id", .string(userId)),
         ]
-        for (name, value) in reset { try store.setMeta(name, value) }
-        if let key { try store.setMeta("account_key", key) }
+        for (name, value) in syncStateReset + local { try store.setMeta(name, value) }
+        try rememberAccountKey(store, key)
     }
 }

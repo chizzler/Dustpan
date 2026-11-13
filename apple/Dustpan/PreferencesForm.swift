@@ -18,28 +18,25 @@ struct PreferencesForm: View {
     @State private var problem: String?
     @State private var showsProblem = false
 
-    private static let timeFormats = [("system", "System"), ("24h", "24-Hour"), ("12h", "12-Hour")]
-    private static let dateFormats = [("system", "System"), ("day-month", "Day–Month"), ("month-day", "Month–Day"),
-                                      ("iso", "ISO (YYYY-MM-DD)")]
-    private static let weekStarts = [("system", "System"), ("mon", "Monday"), ("sun", "Sunday"), ("sat", "Saturday")]
-    private static let languages = [("system", "System"), ("en", "English"), ("de", "Deutsch"), ("fr", "Français"),
-                                    ("es", "Español"), ("it", "Italiano"), ("pt", "Português")]
+    /// What each choice in PrefChoices is called here.
+    private static let names = [
+        "system": "System", "24h": "24-Hour", "12h": "12-Hour", "day-month": "Day–Month", "month-day": "Month–Day",
+        "iso": "ISO (YYYY-MM-DD)", "mon": "Monday", "sun": "Sunday", "sat": "Saturday", "en": "English",
+        "de": "Deutsch", "fr": "Français", "es": "Español", "it": "Italiano", "pt": "Português",
+    ]
 
     init(prefs: [String: JSON]) {
-        let defaults = defaultReminderOffsets(prefs)
-        func choice(_ name: String, _ choices: [String]) -> String {
-            prefs[name]?.string.flatMap { choices.contains($0) ? $0 : nil } ?? "system"
-        }
+        let defaults = ReminderDefaults(prefs: prefs)
         _timed = State(initialValue: defaults.timed)
         _dated = State(initialValue: defaults.dated)
-        _timeFormat = State(initialValue: choice("time_format", PrefChoices.timeFormats))
-        _dateFormat = State(initialValue: choice("date_format", PrefChoices.dateFormats))
-        _weekStart = State(initialValue: choice("week_start", PrefChoices.weekStarts))
+        _timeFormat = State(initialValue: prefChoice(prefs, "time_format"))
+        _dateFormat = State(initialValue: prefChoice(prefs, "date_format"))
+        _weekStart = State(initialValue: prefChoice(prefs, "week_start"))
         _dayStart = State(initialValue: dayStartText(prefs))
-        _language = State(initialValue: choice("language", PrefChoices.languages))
-        _sectors = State(initialValue: prefs["time_sectors"]?.string == "on")
-        _dayParts = State(initialValue: prefs["day_parts"]?.string == "on")
-        _energy = State(initialValue: prefs["energy"]?.string == "on")
+        _language = State(initialValue: prefChoice(prefs, "language"))
+        _sectors = State(initialValue: prefIsOn(prefs, "time_sectors"))
+        _dayParts = State(initialValue: prefIsOn(prefs, "day_parts"))
+        _energy = State(initialValue: prefIsOn(prefs, "energy"))
     }
 
     var body: some View {
@@ -55,9 +52,9 @@ struct PreferencesForm: View {
                 Text("Added automatically when a task first gets a due date.")
             }
             Section("Date and Time") {
-                choicePicker("Time format", Self.timeFormats, $timeFormat)
-                choicePicker("Date order", subtitle: "For dates like 06/11 in quick add", Self.dateFormats, $dateFormat)
-                choicePicker("Week starts on", Self.weekStarts, $weekStart)
+                choicePicker("Time format", PrefChoices.timeFormats, $timeFormat)
+                choicePicker("Date order", subtitle: "For dates like 06/11 in quick add", PrefChoices.dateFormats, $dateFormat)
+                choicePicker("Week starts on", PrefChoices.weekStarts, $weekStart)
                 Picker(selection: $dayStart) {
                     ForEach(dayStarts, id: \.self) { Text(dayStartLabel($0)).tag($0) }
                 } label: {
@@ -66,7 +63,7 @@ struct PreferencesForm: View {
                 }
             }
             Section("Quick Add") {
-                choicePicker("Language", Self.languages, $language)
+                choicePicker("Language", PrefChoices.languages, $language)
                 switchRow("Time sectors", "Understand phrases like “this week” or “next month”", $sectors)
                 switchRow("Parts of the day", "Understand “morning” and “afternoon”", $dayParts)
                 switchRow("Energy levels", "Understand “deep”, “medium” and “low energy”", $energy)
@@ -94,13 +91,13 @@ struct PreferencesForm: View {
 
     private func dayStartLabel(_ value: String) -> String {
         guard value != "00:00" else { return "Midnight" }
-        return clockText(Int(value.prefix(2))! * 60 + Int(value.suffix(2))!, timeFormat: timeFormat)
+        return clockText(dayStartMinutes(.string(value)), timeFormat: timeFormat)
     }
 
-    private func choicePicker(_ title: String, subtitle: String? = nil, _ choices: [(String, String)],
+    private func choicePicker(_ title: String, subtitle: String? = nil, _ choices: [String],
                               _ selection: Binding<String>) -> some View {
         Picker(selection: selection) {
-            ForEach(choices, id: \.0) { Text($0.1).tag($0.0) }
+            ForEach(choices, id: \.self) { Text(Self.names[$0] ?? $0).tag($0) }
         } label: {
             Text(title)
             if let subtitle { Text(subtitle) }

@@ -120,7 +120,7 @@ func sendPurges(_ store: Store, _ server: any SyncServer) async throws -> Int {
         if let row = try store.rows(target.entity)[target.id], !row["deleted_at"].isNull {
             // A server limit, or an edit made during sync, may leave its delete unsent.
             let waiting = try store.outboxBatch(limit: try store.outboxCount()).map(\.op)
-                + (try store.meta("held_ops").array ?? []).compactMap(Op.init(json:))
+                + (try heldOps(store))
             if waiting.contains(where: { $0.entity == target.entity && $0.entityId == target.id }) { continue }
             do {
                 try await server.purge(entity: target.entity, id: target.id)
@@ -150,6 +150,13 @@ func expandPurge(_ store: Store, _ targets: [TrashItem.Target]) throws -> [Trash
         cache[entity] = fresh
         return fresh
     }
+    var sorted: [Row]?
+    func sortedTasks() throws -> [Row] {
+        if let sorted { return sorted }
+        let fresh = try rows("task").values.sorted { $0.id < $1.id }
+        sorted = fresh
+        return fresh
+    }
     var seen: Set<TrashItem.Target> = [], out: [TrashItem.Target] = [], tasks: [String] = []
     func add(_ entity: String, _ id: String) -> Bool {
         let target = TrashItem.Target(entity: entity, id: id)
@@ -162,8 +169,7 @@ func expandPurge(_ store: Store, _ targets: [TrashItem.Target]) throws -> [Trash
               add(target.entity, target.id) else { continue }
         if target.entity == "task" { tasks.append(target.id) }
         guard target.entity == "project" else { continue }
-        for task in try rows("task").values.sorted(by: { $0.id < $1.id })
-        where task["project_id"].string == target.id && add("task", task.id) {
+        for task in try sortedTasks() where task["project_id"].string == target.id && add("task", task.id) {
             tasks.append(task.id)
         }
         for child in projectChildren {
@@ -174,7 +180,7 @@ func expandPurge(_ store: Store, _ targets: [TrashItem.Target]) throws -> [Trash
         if try rows("project_prefs")[target.id] != nil { _ = add("project_prefs", target.id) }
     }
     var deletedChildren: [String: [String]] = [:]
-    for task in try rows("task").values.sorted(by: { $0.id < $1.id }) where !task["deleted_at"].isNull {
+    for task in try sortedTasks() where !task["deleted_at"].isNull {
         if let parent = task["parent_id"].string { deletedChildren[parent, default: []].append(task.id) }
     }
     var i = 0
@@ -201,7 +207,7 @@ public func purgeLocal(_ store: Store, _ targets: [TrashItem.Target]) throws -> 
         let expanded = try expandPurge(store, targets)
         let gone = Set(expanded)
         for target in expanded { try store.purge(entity: target.entity, id: target.id) }
-        let held = (try store.meta("held_ops").array ?? []).compactMap(Op.init(json:))
+        let held = try heldOps(store)
         if !held.isEmpty {
             try store.setMeta("held_ops", .array(held.filter {
                 !gone.contains(.init(entity: $0.entity, id: $0.entityId))
@@ -213,8 +219,17 @@ public func purgeLocal(_ store: Store, _ targets: [TrashItem.Target]) throws -> 
     }
 }
 
-/// True when the data here has never belonged to an OpenTodo account, so nothing of it can be on a server.
-public func neverConnected(_ store: Store) throws -> Bool {
-    let user = try store.meta("user_id").string
-    return user == nil || user == localUser
+/// How Delete for Good goes.
+public enum PurgeMode {
+    /// At once: the data here has never been on a server.
+    case local
+    /// Through the server, on the next sync.
+    case server
+    /// Through the server, once reconnected: it may hold a copy, which would come back.
+    case onReconnect
+}
+
+public func purgeMode(_ store: Store, connected: Bool) throws -> PurgeMode {
+    if connected { return .server }
+    return isLocalUser(try store.meta("user_id").string) ? .local : .onReconnect
 }

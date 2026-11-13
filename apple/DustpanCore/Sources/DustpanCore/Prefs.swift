@@ -35,10 +35,7 @@ extension Writer {
         try commit {
             let current = try store.rows("user_prefs")["me"]?.values ?? [:]
             var patch: [String: JSON] = [:]
-            for (name, want) in wanted {
-                let cur = current[name] ?? .null
-                if prefDiffers(name, want, cur) { patch[name] = want }
-            }
+            for (name, want) in wanted where prefDiffers(name, want, current) { patch[name] = want }
             return patch.isEmpty ? [] : [Change("user_prefs", "me", patch)]
         }
     }
@@ -71,10 +68,9 @@ private func normalizePref(_ name: String, _ value: JSON) throws -> JSON {
     return value
 }
 
-private func prefDiffers(_ name: String, _ want: JSON, _ cur: JSON) -> Bool {
-    if let choices = PrefChoices.enums[name] {
-        return want.string != (cur.string.flatMap { choices.contains($0) ? $0 : nil } ?? "system")
-    }
+private func prefDiffers(_ name: String, _ want: JSON, _ current: [String: JSON]) -> Bool {
+    let cur = current[name] ?? .null
+    if PrefChoices.enums[name] != nil { return want.string != prefChoice(current, name) }
     if name == "day_start" {
         let wantMinutes = dayStartMinutes(want), curMinutes = dayStartMinutes(cur)
         return wantMinutes != curMinutes || (wantMinutes == 0 && !(cur.isNull || cur.string == "" || cur.string == "00:00"))
@@ -82,13 +78,7 @@ private func prefDiffers(_ name: String, _ want: JSON, _ cur: JSON) -> Bool {
     if PrefChoices.reminders.contains(name) {
         return parseDefault(want) != parseDefault(cur) || (want.string == "" && !(cur.isNull || cur.string == ""))
     }
-    return (want.string == "on") != (cur.string == "on")
-}
-
-/// The default reminders a user_prefs row sets, in minutes from the due time: nil for none.
-public func defaultReminderOffsets(_ prefs: [String: JSON]) -> (timed: Int64?, dated: Int64?) {
-    let defaults = ReminderDefaults(prefs: prefs)
-    return (defaults.timed, defaults.dated)
+    return (want.string == "on") != prefIsOn(current, name)
 }
 
 /// "On the day at 09:00", "2 days before", "1 week before": a default for tasks with no time.
@@ -102,7 +92,12 @@ public func datedDefaultLabel(_ minutes: Int64) -> String {
 }
 
 /// user_prefs.day_start as "HH:MM", midnight when unset or out of range.
-public func dayStartText(_ prefs: [String: JSON]) -> String {
-    let minutes = dayStartMinutes(prefs["day_start"] ?? .null)
-    return String(format: "%02d:%02d", minutes / 60, minutes % 60)
+public func dayStartText(_ prefs: [String: JSON]) -> String { hhmm(dayStartMinutes(prefs["day_start"] ?? .null)) }
+
+/// A choice preference as it takes effect: "system" when unset or unknown.
+public func prefChoice(_ prefs: [String: JSON], _ name: String) -> String {
+    prefs[name]?.string.flatMap { PrefChoices.enums[name]?.contains($0) == true ? $0 : nil } ?? "system"
 }
+
+/// A quick-add switch: on only when stored as "on".
+public func prefIsOn(_ prefs: [String: JSON], _ name: String) -> Bool { prefs[name]?.string == "on" }
