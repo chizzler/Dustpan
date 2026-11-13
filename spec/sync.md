@@ -89,6 +89,20 @@ Two bugs were found in review on 2026-11-12 and fixed on 2026-11-13.
 Regression tests cover each case: switching during a request, replacing during a request, switching during a
 purge, deleting after disconnect then reconnecting, and switching with purges pending.
 
+## On the Mac (0.18.0)
+
+Built 2026-11-13. `Config.loadOptional`, `adoptStandalone`, `migrateAccount`, `resetForAccount`, the account epoch,
+whole-entity batches, per-op skew counts and the `reseed_device` pull port the desktop's, with its tests.
+The connection's `accountKey` is the server URL and a SHA-256 of the token, as on the desktop.
+
+- **Settings ▸ Sync** does what the desktop's Settings does: verify with `/me`, then adopt standalone data, keep the
+  same account's, or ask "Upload Local Tasks" (migrate) or "Replace Local Data" (reset) for another account's.
+- **Account changes** go through `AppModel.connect`, with the plan from `joinPlan` (or the person's choice): the live
+  stream and pending sync stop, no new sync starts, a running one ends first, then `join` changes the data, the config
+  is saved and sync starts again.
+- **Disconnect** clears the config file's two lines and stops sync; the data stays.
+- Standalone, the toolbar has no sync status and ⌘R is off.
+
 ## Re-seed after a restore
 
 In one transaction: every stored field becomes a new op `{id: new uuid, entity, entityId, field, value, ts, device}`

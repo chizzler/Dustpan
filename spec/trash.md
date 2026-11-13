@@ -63,3 +63,6 @@ The desktop's slice 11. Built 2026-11-12, tried and approved.
   Empty Trash… is in the toolbar. Both deletes ask first; a queued row is greyed and says "deleting for good…".
 - Restore has a toast and Edit ▸ Undo. A task restored to the Inbox says so.
 - Deleting a project with open tasks still asks first on the Mac (from 0.10.0); the desktop doesn't.
+- **0.18.0:** standalone, as on the desktop. `purgeLocal` and `expandPurge` port the desktop's, with its tests.
+  Data never connected to an account is deleted at once; once it has been, Delete for Good queues for the server, even
+  disconnected. Standalone, the retention line says items are kept until deleted for good.

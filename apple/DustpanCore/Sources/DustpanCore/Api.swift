@@ -6,6 +6,12 @@ public protocol SyncServer {
     func sync(_ body: JSON) async throws -> JSON
     /// Delete a task or project in the Trash for good. 409 not_deleted if it isn't there.
     func purge(entity: String, id: String) async throws
+    /// Which account the connection is: its server and a digest of its token. Nil when it can't say.
+    var accountKey: JSON? { get }
+}
+
+public extension SyncServer {
+    var accountKey: JSON? { nil }
 }
 
 public enum ApiError: Error, CustomStringConvertible {
@@ -54,6 +60,8 @@ public struct Api: SyncServer, Sendable {
         token = config.token
         self.session = session
     }
+
+    public var accountKey: JSON? { DustpanCore.accountKey(url: baseURL, token: token) }
 
     public func me() async throws -> JSON { try await send("GET", ["api", "v1", "me"]) }
     public func sync(_ body: JSON) async throws -> JSON { try await send("POST", ["api", "v1", "sync"], body: body) }

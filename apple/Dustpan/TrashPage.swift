@@ -1,7 +1,8 @@
 import DustpanCore
 import SwiftUI
 
-/// Deleted tasks and projects, newest first. Restore works offline; deleting for good waits for the server.
+/// Deleted tasks and projects, newest first. Restore works offline. Deleting for good waits for the server, unless
+/// the data here has never been on one.
 struct TrashPage: View {
     @Environment(AppModel.self) private var model
     @State private var purging: [TrashItem] = []
@@ -53,10 +54,14 @@ struct TrashPage: View {
     }
 
     private func purgeMessage(_ items: [TrashItem]) -> String {
-        guard items.count == 1 else { return "They're removed from every device and the server. This can't be undone." }
+        let fate = switch model.purgeMode {
+        case .local: "deleted permanently"
+        case .server: "removed from every device and the server"
+        case .onReconnect: "removed from every device and the server when you reconnect"
+        }
+        guard items.count == 1 else { return "They're \(fate). This can't be undone." }
         return (items[0].isProject ? "Its tasks go with it. "
-            : "Any deleted subtasks go with it, including those deleted separately. ")
-            + "It's removed from every device and the server, and can't be undone."
+            : "Any deleted subtasks go with it, including those deleted separately. ") + "It's \(fate), and can't be undone."
     }
 }
 

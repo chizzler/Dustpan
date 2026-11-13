@@ -127,3 +127,13 @@ import Testing
         #expect(try store.meta("notified") == ["stale": .int(now - staleReminderMs - 1)])
     }
 }
+
+@Suite struct CustomDefaultOffsets {
+    @Test func parsedAndFormatted() {
+        #expect(formatDefault(-30) == "-30")
+        let cases: [(String, Int64)] = [("15m", -15), ("2h", -120), ("3 days before", -4320), ("1w", -10080),
+                                        ("30m after", 30), ("+45m", 45), ("0", 0), ("-45", -45)]
+        for (text, minutes) in cases { #expect(parseCustomOffset(text) == minutes, "\(text)") }
+        for bad in ["", "nope", "999d", "+10m before"] { #expect(parseCustomOffset(bad) == nil, "\(bad)") }
+    }
+}

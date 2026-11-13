@@ -70,6 +70,9 @@ public struct Place: Hashable, Sendable {
     }
 }
 
+/// Who writes completions, time entries and default reminders until an OpenTodo account adopts the data.
+public let localUser = "local"
+
 let positionGap: Double = 1000
 /// The server's bound on an estimate, in minutes: a week.
 public let maxEstimate: Int64 = 10080
@@ -207,9 +210,12 @@ public final class Writer {
 
     // MARK: rules every batch follows
 
+    /// The OpenTodo user, or localUser while standalone.
+    func userId() throws -> String { try store.meta("user_id").string ?? localUser }
+
     /// A write of completed_at carries completed_by: us when completing, null when reopening.
     func completedBy(_ changes: [Change]) throws -> [Change] {
-        let me = try store.meta("user_id")
+        let me = JSON.string(try userId())
         return changes.map { change in
             guard change.entity == "task", let completed = change.patch["completed_at"],
                   change.patch["completed_by"] == nil else { return change }
@@ -245,7 +251,8 @@ public final class Writer {
     func defaultReminders(_ changes: [Change]) throws -> [Change] {
         let scheduled = taskPatches(changes).filter { $0.value["due"]?.object != nil }
         let defaults = ReminderDefaults(prefs: try store.rows("user_prefs")["me"]?.values ?? [:])
-        guard !scheduled.isEmpty, let userId = try store.meta("user_id").string, !defaults.isEmpty else { return [] }
+        guard !scheduled.isEmpty, !defaults.isEmpty else { return [] }
+        let userId = try userId()
         let tasks = try store.rows("task")
         let reminders = try store.rows("reminder")
         let batch = changes.filter { $0.entity == "reminder" }
@@ -1303,8 +1310,8 @@ extension Writer {
                 changes.append(Change("reminder", newId(), typedReminder(taskId, due: task["due"] ?? nil, typed,
                                                                           today: today, now: now)))
             }
-            if let spent = parsed.spentMinutes, let me = try store.meta("user_id").string {
-                let end = self.now()
+            if let spent = parsed.spentMinutes {
+                let me = try userId(), end = self.now()
                 changes.append(Change("time_entry", newId(), [
                     "task_id": .string(taskId), "user_id": .string(me), "started_at": .int(end - Int64(spent) * 60_000),
                     "ended_at": .int(end), "device_id": .string(try store.device()), "note": "", "created_at": .int(end),

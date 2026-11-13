@@ -18,13 +18,19 @@ public final class Syncer {
 
     public enum Failure: Error, CustomStringConvertible {
         case unsupportedAccount(String)
+        /// The token belongs to another account than the data here. Settings decides what to do with it.
+        case accountMismatch
+        /// The account changed while this sync ran. Nothing from it was kept.
+        case accountChanged(String)
         /// The server keeps refusing our ops as too far in the future.
         case clockSkew
         case badResponse(String)
 
         public var description: String {
             switch self {
-            case .unsupportedAccount(let why): why
+            case .unsupportedAccount(let why), .accountChanged(let why): why
+            case .accountMismatch:
+                "this device holds data from another OpenTodo account; reconnect in Settings to choose how to handle it"
             case .clockSkew: "this device's clock is far off and the server keeps refusing its changes"
             case .badResponse(let what): "unexpected answer from the server: \(what)"
             }
@@ -34,6 +40,9 @@ public final class Syncer {
     let store: Store
     let server: any SyncServer
     let clock: HybridClock
+    /// Who this sync is for, and the account epoch it started under.
+    var userId: String?
+    var epoch: Int64 = 0
 
     public init(store: Store, server: any SyncServer, clock: HybridClock? = nil) {
         self.store = store
@@ -41,20 +50,35 @@ public final class Syncer {
         self.clock = clock ?? HybridClock(store: store)
     }
 
-    /// Learn who we are, once. Refuse accounts this client can't handle yet.
+    /// Learn who we are: once per account, adopting standalone data on its first connection.
     func checkAccount() async throws {
-        if !(try store.meta("user_id").isNull) { return }
-        let me = try await server.me()
-        if me["encryption"]["enabled"].bool == true {
-            throw Failure.unsupportedAccount("end-to-end encrypted accounts are not supported yet")
+        let stored = try store.meta("user_id").string
+        let key = server.accountKey, storedKey = try store.meta("account_key")
+        if !isLocalUser(stored), let stored, key == nil || storedKey == key {
+            userId = stored
+            return
         }
-        guard let id = me["user"]["id"].string else { throw Failure.badResponse("/me has no user id") }
-        try store.transaction { try store.setMeta("user_id", .string(id)) }
+        let (id, verifiedKey) = try await verifyAccount(server)
+        userId = id
+        if isLocalUser(stored) {
+            try adoptStandalone(store, userId: id, accountKey: verifiedKey)
+            return
+        }
+        guard stored == id else { throw Failure.accountMismatch }
+        try store.transaction { try rememberAccountKey(store, verifiedKey) }
     }
 
     /// Push edits, pull changes, then send queued purges and pull their markers.
     /// Throws ApiError, Failure or StoreError.
     public func run() async throws -> Result {
+        try await checkAccount()
+        try store.transaction {
+            // Pin the account this sync belongs to. A switch after this is caught by checkSameAccount.
+            epoch = try store.meta(accountEpochKey).int ?? 0
+            if try store.meta("user_id").string != userId {
+                throw Failure.accountChanged("the account changed before sync started")
+            }
+        }
         var result = try await exchange()
         if try await sendPurges(store, server) > 0 {
             let again = try await exchange()
@@ -66,23 +90,50 @@ public final class Syncer {
         return result
     }
 
+    /// Call inside a transaction.
+    func checkSameAccount() throws {
+        if try store.meta(accountEpochKey).int ?? 0 != epoch {
+            throw Failure.accountChanged("the account changed during sync; nothing from that sync was kept")
+        }
+    }
+
+    /// Up to a batch of ops, without splitting a reminder, comment, attachment or time entry across requests.
+    func nextBatch() throws -> [(seq: Int64, op: Op)] {
+        let batch = try store.outboxBatch(limit: Self.batch + 1)
+        guard batch.count > Self.batch else { return batch }
+        let split = Array(batch.prefix(Self.batch))
+        let tail = split.last!.op
+        guard batchWhole.contains(tail.entity), batch[Self.batch].op.entity == tail.entity,
+              batch[Self.batch].op.entityId == tail.entityId else { return split }
+        let trimmed = split.filter { $0.op.entity != tail.entity || $0.op.entityId != tail.entityId }
+        return trimmed.isEmpty ? split : trimmed
+    }
+
     /// Exchange until the outbox is empty and nothing remains to pull.
     func exchange() async throws -> Result {
-        try await checkAccount()
         let device = try store.transaction { try store.device() }
         var result = Result()
-        var skewRounds = 0
-        try store.transaction { try requeueHeld() }
+        var skewCounts: [String: Int] = [:]
+        try store.transaction {
+            try checkSameAccount()
+            try requeueHeld()
+        }
         while true {
-            let batch = try store.outboxBatch(limit: Self.batch)
-            let body: JSON = [
-                "device": .string(device),
-                "cursor": try store.meta("cursor").isNull ? 0 : try store.meta("cursor"),
-                "ops": .array(batch.map(\.op.json)),
-                "features": Self.features,
-                "backfillAck": .int(try store.meta("backfill_ack").int ?? 0),
-                "tzOffset": .int(Int64(TimeZone.current.secondsFromGMT() / 60)),
-            ]
+            let (batch, body) = try store.transaction {
+                try checkSameAccount()
+                let batch = try nextBatch()
+                let body: JSON = [
+                    // A restore can bring back fields we no longer hold, our own old writes too. Pull under a
+                    // temporary identity so the server sends them.
+                    "device": .string(try store.meta("reseed_device").string ?? device),
+                    "cursor": try store.meta("cursor").isNull ? 0 : try store.meta("cursor"),
+                    "ops": .array(batch.map(\.op.json)),
+                    "features": Self.features,
+                    "backfillAck": .int(try store.meta("backfill_ack").int ?? 0),
+                    "tzOffset": .int(Int64(TimeZone.current.secondsFromGMT() / 60)),
+                ]
+                return (batch, body)
+            }
             let res = try await server.sync(body)
             guard let serverTime = res["serverTime"].int else { throw Failure.badResponse("no serverTime") }
 
@@ -90,15 +141,17 @@ public final class Syncer {
             let skewed = rejected.filter { $0["reason"].string == "clock_skew" }
             let limited = rejected.filter { $0["reason"].string?.hasPrefix("limit_") == true }
             let refused = rejected.filter { !skewed.contains($0) && !limited.contains($0) }
-            if !skewed.isEmpty {
-                skewRounds += 1
-                if skewRounds > Self.maxSkewRounds { throw Failure.clockSkew }
+            for r in skewed {
+                let id = r["id"].string ?? ""
+                skewCounts[id, default: 0] += 1
+                if skewCounts[id]! > Self.maxSkewRounds { throw Failure.clockSkew }
             }
             let sent = Dictionary(batch.map { ($0.op.id, $0.op) }, uniquingKeysWith: { first, _ in first })
             let ops = (res["ops"].array ?? []).compactMap(Op.init(json:))
             let purged = res["purged"].array ?? []
 
             let reseeded = try store.transaction {
+                try checkSameAccount()
                 try store.outboxRemove(batch.map(\.seq))
                 try clock.followServer(serverTime)
                 try restamp(sent, skewed, serverTime)
@@ -125,6 +178,7 @@ public final class Syncer {
                 if !res["trashRetentionDays"].isNull { try store.setMeta(trashRetentionKey, res["trashRetentionDays"]) }
                 if !res["backfillSeq"].isNull { try store.setMeta("backfill_ack", res["backfillSeq"]) }
                 try store.setMeta("cursor", res["cursor"])
+                if res["hasMore"].bool != true, try store.outboxCount() == 0 { try store.setMeta("reseed_device", .null) }
                 return false
             }
             if reseeded { continue }
@@ -136,7 +190,8 @@ public final class Syncer {
 
     /// Stamp ops refused for clock skew again and queue them. Ops that shared a stamp share the new one.
     func restamp(_ sent: [String: Op], _ skewed: [JSON], _ serverTime: Int64) throws {
-        let ops = skewed.compactMap { $0["id"].string.flatMap { sent[$0] } }.sorted { $0.ts < $1.ts }
+        let ops = skewed.compactMap { $0["id"].string.flatMap { sent[$0] } }
+            .sorted { $0.ts != $1.ts ? $0.ts < $1.ts : opOrder($0, $1) }
         guard !ops.isEmpty else { return }
         try clock.refused(skewed.lazy.compactMap { $0["serverTime"].int }.first ?? serverTime)
         var fresh: [Int64: Int64] = [:]
@@ -153,7 +208,7 @@ public final class Syncer {
 
     /// Keep ops a server limit refused. Returns how many are held.
     func hold(_ sent: [String: Op], _ limited: [JSON]) throws -> Int {
-        var held = (try store.meta("held_ops").array ?? []).compactMap(Op.init(json:))
+        var held = try heldOps(store)
         var known = Set(held.map(\.id))
         for r in limited {
             if let id = r["id"].string, let op = sent[id], !known.contains(id) {
@@ -166,7 +221,7 @@ public final class Syncer {
     }
 
     func requeueHeld() throws {
-        let held = (try store.meta("held_ops").array ?? []).compactMap(Op.init(json:))
+        let held = try heldOps(store)
         if !held.isEmpty {
             try store.outboxAdd(held)
             try store.setMeta("held_ops", [])
@@ -193,16 +248,35 @@ public final class Syncer {
         var ops: [Op] = []
         for f in try store.allFields() {
             if let byId = authors[f.entity], byId[f.entityId] != me { continue }
-            if f.entity == "attachment" && f.field == "uploaded_at" { continue }
-            // Deviation from the web app, see spec/sync.md, "Re-seed after a restore".
-            ops.append(Op(id: UUID().uuidString.lowercased(), entity: f.entity, entityId: f.entityId, field: f.field,
-                          value: f.value, ts: f.ts, device: isReservedDevice(f.device) ? device : f.device))
+            let op = Op(id: newId(), entity: f.entity, entityId: f.entityId, field: f.field, value: f.value, ts: f.ts,
+                        device: f.device)
+            if isUploaded(op) { ops.append(uploadOp(op, id: op.id, device: device)) }
         }
-        try store.outboxAdd(ops)
+        try store.outboxAdd(ops.sorted(by: opOrder))
         try store.setMeta("cursor", 0)
         try store.setMeta("backfill_ack", 0)
         try store.setMeta("generation", .string(generation))
+        // Kept across an interrupted re-seed. The device id and every field's clock stay; only the request's
+        // identity changes until the full pull finishes.
+        try store.setMeta("reseed_device", .string(newId()))
     }
+}
+
+/// Ops a server limit held back, offered again on the next exchange.
+func heldOps(_ store: Store) throws -> [Op] {
+    (try store.meta("held_ops").array ?? []).compactMap(Op.init(json:))
+}
+
+/// A stored field the server takes back: all but an attachment's uploaded_at, which only it writes.
+func isUploaded(_ op: Op) -> Bool { !(op.entity == "attachment" && op.field == "uploaded_at") }
+
+/// A stored field sent again as an op with id. A reserved device is replaced with ours: the server refuses a batch
+/// holding one. Deviation from the web app, see spec/sync.md, "Re-seed after a restore".
+func uploadOp(_ op: Op, id: String, device: String) -> Op {
+    var out = op
+    out.id = id
+    if isReservedDevice(op.device) { out.device = device }
+    return out
 }
 
 /// Device ids only the server may write. A batch holding one is refused whole.

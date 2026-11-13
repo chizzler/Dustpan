@@ -195,7 +195,7 @@ public struct DueDraft: Equatable, Sendable {
 // MARK: - Days
 
 /// user_prefs.day_start: "HH:MM" from 00:00 to 06:00. Anything else reads as midnight.
-func dayStartMinutes(_ value: JSON) -> Int {
+public func dayStartMinutes(_ value: JSON) -> Int {
     guard let text = value.string, text.count == 5, text.dropFirst(2).first == ":",
           let (h, m) = parseTime(text), h * 60 + m <= 6 * 60 else { return 0 }
     return h * 60 + m

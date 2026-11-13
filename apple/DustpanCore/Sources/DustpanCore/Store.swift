@@ -113,6 +113,13 @@ public final class Store {
         try run("DELETE FROM outbox WHERE entity = ? AND entity_id = ?", [.text(entity), .text(id)])
     }
 
+    /// Every field gone: data replaced by another account's, or re-keyed for it.
+    func clearFields() throws { try run("DELETE FROM fields", []) }
+
+    func clearOutbox() throws { try run("DELETE FROM outbox", []) }
+
+    func hasFields() throws -> Bool { try !query("SELECT 1 FROM fields LIMIT 1", []) { _ in () }.isEmpty }
+
     public struct Field {
         public let entity, entityId, field: String
         public let value: JSON
