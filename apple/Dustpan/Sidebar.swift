@@ -105,7 +105,7 @@ struct Sidebar: View {
                             presenting: deleting) { view in
             Button("Delete View", role: .destructive) { model.deleteView(view) }
         } message: { _ in
-            Text("The view goes from every device. Your tasks stay.")
+            Text(model.isConnected ? "The view goes from every device. Your tasks stay." : "Your tasks stay.")
         }
     }
 }

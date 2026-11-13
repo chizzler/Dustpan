@@ -24,6 +24,31 @@ func parseDefault(_ value: JSON) -> Int64? {
     return abs(n) <= maxReminderOffset ? n : nil
 }
 
+/// The user_prefs string for a default reminder's offset.
+func formatDefault(_ minutes: Int64) -> String { String(minutes) }
+
+/// A custom offset typed in Settings: "15m", "2h", "3d before", "30 min after", "+45m". Signed minutes, nil if it
+/// isn't one or is more than a year. A bare duration is before the due time; "after" or "+" makes it after.
+public func parseCustomOffset(_ text: String) -> Int64? {
+    let raw = text.trimmingCharacters(in: .whitespaces).lowercased()
+    if raw == "0" || raw == "at due time" { return 0 }
+    let units = "m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days|w|wk|wks|week|weeks"
+    guard let match = raw.wholeMatch(of: try! Regex(#"([+-])?\s*(\d{1,7})\s*("# + units + #")?(?:\s*(before|after))?"#))
+    else { return nil }
+    let sign = match.output[1].substring, direction = match.output[4].substring
+    if sign != nil && direction != nil { return nil }
+    let scale: Int64 = switch match.output[3].substring?.first {
+    case "h": 60
+    case "d": 1440
+    case "w": 10080
+    default: 1
+    }
+    let minutes = Int64(match.output[2].substring!)! * scale
+    guard minutes <= maxReminderOffset else { return nil }
+    if minutes == 0 { return 0 }
+    return direction == "after" || sign == "+" ? minutes : -minutes
+}
+
 struct ReminderDefaults: Equatable {
     var timed: Int64?
     var dated: Int64?

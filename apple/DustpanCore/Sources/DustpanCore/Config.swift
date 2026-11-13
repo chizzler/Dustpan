@@ -3,10 +3,17 @@ import Foundation
 /// The server and token, read from a KEY=VALUE file: OPENTODO_URL and OPENTODO_TOKEN.
 ///
 /// The file is ~/.config/dustpan/config, as on the desktop. DUSTPAN_CONFIG overrides it for development.
-/// The URL must be https, except to this machine: the token travels in every request.
+/// Without one, Dustpan runs standalone. The URL must be https, except to this machine: the token travels in every
+/// request.
 public struct Config: Sendable, Equatable {
+    static let keys: Set = ["OPENTODO_URL", "OPENTODO_TOKEN"]
+
     public let url: URL
     public let token: String
+
+    public init(url: URL, token: String) {
+        (self.url, self.token) = (url, token)
+    }
 
     public static func path(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL {
         if let path = environment["DUSTPAN_CONFIG"], !path.isEmpty { return URL(filePath: path) }
@@ -17,19 +24,95 @@ public struct Config: Sendable, Equatable {
         guard let text = try? String(contentsOf: path, encoding: .utf8) else {
             throw ConfigError(message: "no config at \(path.path)")
         }
+        let values = parse(text)
+        return try validate(url: values["OPENTODO_URL"] ?? "", token: values["OPENTODO_TOKEN"] ?? "", source: path.path)
+    }
+
+    /// The config, or nil to run standalone: no file, or blank values. A file that's wrong also runs standalone,
+    /// with a warning saying why, so its tasks stay reachable.
+    public static func loadOptional(from path: URL = path()) -> (config: Config?, warning: String?) {
+        guard FileManager.default.fileExists(atPath: path.path) else { return (nil, nil) }
+        guard let text = try? String(contentsOf: path, encoding: .utf8) else {
+            return (nil, "Could not read \(path.path)")
+        }
+        let values = parse(text)
+        let url = values["OPENTODO_URL"] ?? "", token = values["OPENTODO_TOKEN"] ?? ""
+        if url.isEmpty && token.isEmpty { return (nil, nil) }
+        do {
+            return (try validate(url: url, token: token, source: path.path), nil)
+        } catch {
+            return (nil, error.message)
+        }
+    }
+
+    /// A server URL and token as typed or read, checked.
+    public static func validate(url: String, token: String, source: String? = nil) throws(ConfigError) -> Config {
+        let prefix = source.map { "\($0): " } ?? ""
+        let url = url.trimmingCharacters(in: .whitespaces), token = token.trimmingCharacters(in: .whitespaces)
+        if (url + token).contains(where: \.isNewline) {
+            throw ConfigError(message: prefix + "URL and token must be single-line values")
+        }
+        guard !url.isEmpty, !token.isEmpty else {
+            throw ConfigError(message: source.map { "\($0) needs OPENTODO_URL and OPENTODO_TOKEN" }
+                ?? "Enter both the server URL and API token")
+        }
+        guard let parsed = URL(string: url), isSafe(parsed) else {
+            throw ConfigError(message: prefix + "OPENTODO_URL must start with https:// (http only for localhost)")
+        }
+        return Config(url: parsed, token: token)
+    }
+
+    /// Write OPENTODO_URL and OPENTODO_TOKEN with mode 600, keeping the file's other lines.
+    public func save(to path: URL = Config.path()) throws {
+        let lines = Self.otherLines(path) + ["OPENTODO_URL=\(url.absoluteString)", "OPENTODO_TOKEN=\(token)"]
+        try Self.writePrivate(path, lines.joined(separator: "\n") + "\n")
+    }
+
+    /// Take the server and token out of the file, to run standalone. A file left with nothing in it goes.
+    public static func clear(at path: URL = path()) throws {
+        guard FileManager.default.fileExists(atPath: path.path) else { return }
+        let kept = otherLines(path)
+        if kept.contains(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) {
+            try writePrivate(path, kept.joined(separator: "\n") + "\n")
+        } else {
+            try FileManager.default.removeItem(at: path)
+        }
+    }
+
+    static func parse(_ text: String) -> [String: String] {
         var values: [String: String] = [:]
         for line in text.split(whereSeparator: \.isNewline) {
-            guard let eq = line.firstIndex(of: "="), !line.drop(while: \.isWhitespace).hasPrefix("#") else { continue }
-            values[line[..<eq].trimmingCharacters(in: .whitespaces)] =
-                line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces)
+            guard let (key, value) = setting(line) else { continue }
+            values[key] = value
         }
-        guard let urlText = values["OPENTODO_URL"], !urlText.isEmpty,
-              let token = values["OPENTODO_TOKEN"], !token.isEmpty
-        else { throw ConfigError(message: "\(path.path) needs OPENTODO_URL and OPENTODO_TOKEN") }
-        guard let url = URL(string: urlText), isSafe(url) else {
-            throw ConfigError(message: "\(path.path): OPENTODO_URL must start with https:// (http only for localhost)")
+        return values
+    }
+
+    private static func setting(_ line: Substring) -> (String, String)? {
+        guard let eq = line.firstIndex(of: "="), !line.drop(while: \.isWhitespace).hasPrefix("#") else { return nil }
+        return (line[..<eq].trimmingCharacters(in: .whitespaces),
+                line[line.index(after: eq)...].trimmingCharacters(in: .whitespaces))
+    }
+
+    private static func otherLines(_ path: URL) -> [String] {
+        guard let text = try? String(contentsOf: path, encoding: .utf8) else { return [] }
+        return text.split(separator: "\n", omittingEmptySubsequences: false).dropLast(text.hasSuffix("\n") ? 1 : 0)
+            .filter { line in setting(line).map { !keys.contains($0.0) } ?? true }.map(String.init)
+    }
+
+    /// Written beside the file and moved over it, so a reader never sees half of it or another mode.
+    private static func writePrivate(_ path: URL, _ text: String) throws {
+        let directory = path.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let temporary = directory.appending(path: ".config-\(UUID().uuidString)")
+        guard FileManager.default.createFile(atPath: temporary.path, contents: Data(text.utf8),
+                                             attributes: [.posixPermissions: 0o600]) else {
+            throw ConfigError(message: "can't write \(path.path)")
         }
-        return Config(url: url, token: token)
+        guard rename(temporary.path, path.path) == 0 else {
+            try? FileManager.default.removeItem(at: temporary)
+            throw ConfigError(message: "can't write \(path.path)")
+        }
     }
 
     /// True for https, or plain http to this machine.

@@ -12,7 +12,7 @@ struct ContentView: View {
             ContentUnavailableView {
                 Label("Dustpan isn't set up", systemImage: "gearshape")
             } description: {
-                Text("\(problem)\n\nPut OPENTODO_URL and OPENTODO_TOKEN in ~/.config/dustpan/config, then reopen Dustpan.")
+                Text("\(problem)\n\nDustpan couldn't open its database in ~/Library/Application Support/Dustpan.")
             }
             .frame(minWidth: 480, minHeight: 320)
         } else {
@@ -36,7 +36,9 @@ struct ContentView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) { CalendarButton(model: model) }
-                ToolbarItem(placement: .primaryAction) { SyncStatus() }
+                if model.isConnected {
+                    ToolbarItem(placement: .primaryAction) { SyncStatus() }
+                }
             }
             .overlay(alignment: .bottom) { ToastView() }
             .sheet(item: $model.editing, content: TaskEditor.init)

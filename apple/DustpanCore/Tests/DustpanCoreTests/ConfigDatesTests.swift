@@ -100,3 +100,53 @@ import Testing
         #expect(fmt(["date": "2026-11-04", "time": "09:00"]) == "Wed 09:00 later")
     }
 }
+
+@Suite struct ConfigStandalone {
+    let path = FileManager.default.temporaryDirectory.appending(path: "dustpan-config-\(UUID().uuidString)")
+
+    func write(_ text: String) throws { try text.write(to: path, atomically: true, encoding: .utf8) }
+
+    @Test func noFileOrBlankValuesRunStandalone() throws {
+        defer { try? FileManager.default.removeItem(at: path) }
+        #expect(Config.loadOptional(from: path) == (nil, nil))
+        try write("# standalone\nOPENTODO_URL=\nOPENTODO_TOKEN=\n")
+        #expect(Config.loadOptional(from: path) == (nil, nil))
+    }
+
+    @Test func aBadFileWarnsButStillOpens() throws {
+        defer { try? FileManager.default.removeItem(at: path) }
+        try write("OPENTODO_URL=https://todo.example.com\n")
+        let missing = Config.loadOptional(from: path)
+        #expect(missing.config == nil && missing.warning?.contains("OPENTODO_TOKEN") == true)
+        try write("OPENTODO_URL=http://todo.example.com\nOPENTODO_TOKEN=ot_abc\n")
+        let insecure = Config.loadOptional(from: path)
+        #expect(insecure.config == nil && insecure.warning?.contains("https") == true)
+    }
+
+    @Test func saveAndClearKeepTheFilePrivateAndItsOtherLines() throws {
+        defer { try? FileManager.default.removeItem(at: path) }
+        try write("# my comment\nOTHER_KEY=keep\n")
+        let config = Config(url: URL(string: "https://todo.example.com")!, token: "ot_secret")
+        try config.save(to: path)
+        let mode = try FileManager.default.attributesOfItem(atPath: path.path)[.posixPermissions] as? Int
+        #expect(mode == 0o600)
+        #expect(Config.loadOptional(from: path) == (config, nil))
+        let text = try String(contentsOf: path, encoding: .utf8)
+        #expect(text.contains("# my comment") && text.contains("OTHER_KEY=keep"))
+
+        try Config.clear(at: path)
+        #expect(Config.loadOptional(from: path) == (nil, nil))
+        #expect(try String(contentsOf: path, encoding: .utf8).contains("OTHER_KEY=keep"))
+
+        try FileManager.default.removeItem(at: path)
+        try Config(url: URL(string: "http://localhost:8080")!, token: "ot_dev").save(to: path)
+        try Config.clear(at: path)
+        #expect(!FileManager.default.fileExists(atPath: path.path))
+    }
+
+    @Test func multilineOrEmptyValuesAreRefused() {
+        for (url, token) in [("", "ot"), ("https://todo.example.com", ""), ("https://a.com\nx", "ot"), ("https://a.com", "ot\nx")] {
+            #expect(throws: ConfigError.self) { try Config.validate(url: url, token: token) }
+        }
+    }
+}

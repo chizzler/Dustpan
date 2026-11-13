@@ -8,26 +8,30 @@ func remote(_ entityId: String, _ field: String, _ value: JSON, _ ts: Int64, dev
 
 /// Answers sync requests from a list of prepared responses.
 final class FakeServer: SyncServer {
-    var responses: [(JSON) -> JSON]
+    var responses: [(JSON) throws -> JSON]
     var requests: [JSON] = []
     var encrypted = false
+    var userId = "me"
+    var accountKey: JSON?
     var generation = "g1"
     /// Permanent deletes asked for, in order.
     var purges: [TrashItem.Target] = []
     /// Runs on each purge: throw to fail it.
     var onPurge: (TrashItem.Target) throws -> Void = { _ in }
 
-    init(_ responses: [JSON], encrypted: Bool = false) {
+    init(_ responses: [JSON], encrypted: Bool = false, userId: String = "me", accountKey: JSON? = nil) {
         self.responses = responses.map { r in { _ in r } }
         self.encrypted = encrypted
+        (self.userId, self.accountKey) = (userId, accountKey)
     }
 
-    init(planned: [(JSON) -> JSON]) {
+    init(planned: [(JSON) throws -> JSON], userId: String = "me", accountKey: JSON? = nil) {
         responses = planned
+        (self.userId, self.accountKey) = (userId, accountKey)
     }
 
     func me() async throws -> JSON {
-        ["user": ["id": "me"], "encryption": ["enabled": .bool(encrypted)]]
+        ["user": ["id": .string(userId)], "encryption": ["enabled": .bool(encrypted)]]
     }
 
     func purge(entity: String, id: String) async throws {
@@ -38,7 +42,7 @@ final class FakeServer: SyncServer {
 
     func sync(_ body: JSON) async throws -> JSON {
         requests.append(body)
-        let planned = responses.isEmpty ? [:] : responses.removeFirst()(body)
+        let planned = responses.isEmpty ? [:] : try responses.removeFirst()(body)
         // Like a real server, a new generation sticks once announced.
         generation = planned["generation"].string ?? generation
         var res: [String: JSON] = ["ops": [], "cursor": body["cursor"], "hasMore": false, "serverTime": 1_000,
@@ -186,6 +190,43 @@ final class FakeServer: SyncServer {
     @Test func clockSkewFeatureIsAnnounced() async throws {
         let (server, _) = try await runSync()
         #expect(server.requests[0]["features"].array?.contains("clock_skew") == true)
+    }
+
+    @Test func restoreDownloadsOwnFieldsMissingAfterAPurge() async throws {
+        let device = try store.transaction { try store.device() }
+        let own = remote("t1", "title", "Back in the archive", 5, device: device)
+        try await runSync(["ops": [own], "cursor": 9])
+        try store.purge(entity: "task", id: "t1")
+        let server = FakeServer(planned: [
+            { _ in ["generation": "g2"] },
+            // The real server skips ops authored by the request's device.
+            { body in ["ops": body["device"].string == device ? [] : [own], "cursor": 1] },
+        ])
+        _ = try await Syncer(store: store, server: server).run()
+        #expect(server.requests[1]["device"].string != device)
+        let task = try #require(try store.rows("task")["t1"])
+        #expect(task["title"] == "Back in the archive")
+        #expect(try store.device() == device && task.clocks["title"]?.device == device)
+        #expect(try store.meta("reseed_device").isNull)
+        let (again, _) = try await runSync()
+        #expect(again.requests[0]["device"].string == device)
+    }
+
+    @Test func recoveryIdentitySurvivesInterruptionAndPaging() async throws {
+        try await runSync(["ops": [remote("t1", "title", "Keep", 5)], "cursor": 9])
+        let device = try store.device()
+        let lost = FakeServer(planned: [{ _ in ["generation": "g2"] }, { _ in throw ApiError.offline("lost acknowledgement") }])
+        await #expect(throws: ApiError.self) { try await Syncer(store: store, server: lost).run() }
+        let replay = try #require(try store.meta("reseed_device").string)
+        #expect(replay != device)
+        #expect(try store.outboxCount() > 0)
+        let resumed = FakeServer([["hasMore": true, "cursor": 1], ["cursor": 2]])
+        resumed.generation = "g2"
+        _ = try await Syncer(store: store, server: resumed).run()
+        #expect(resumed.requests.map { $0["device"].string } == [replay, replay])
+        #expect(try store.device() == device)
+        #expect(try store.meta("reseed_device").isNull)
+        #expect(try store.outboxCount() == 0)
     }
 
     @Test func reservedDevices() {

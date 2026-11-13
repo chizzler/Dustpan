@@ -33,7 +33,9 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `DustpanCore/Sources/DustpanCore/Clock.swift` | Hybrid logical clock |
 | `DustpanCore/Sources/DustpanCore/Sync.swift` | The sync exchange, refused ops, purge and re-seed |
 | `DustpanCore/Sources/DustpanCore/Api.swift` | HTTP client, `URLSession` |
-| `DustpanCore/Sources/DustpanCore/Config.swift` | The config file and where the database lives |
+| `DustpanCore/Sources/DustpanCore/Config.swift` | The config file (optional: without one Dustpan runs standalone), saving and clearing it, and where the database lives |
+| `DustpanCore/Sources/DustpanCore/Accounts.swift` | Standalone data joining an account, uploading into another account or replacing with it, and the account epoch that stops a sync mixing two |
+| `DustpanCore/Sources/DustpanCore/Prefs.swift` | Preferences on user_prefs as Settings writes them, and their choices |
 | `DustpanCore/Sources/DustpanCore/Model.swift` | Display rules: trees, sections, the Inbox, counts |
 | `DustpanCore/Sources/DustpanCore/Dates.swift` | Due date display, the instant a due denotes, and the editor's due |
 | `DustpanCore/Sources/DustpanCore/Writes.swift` | Local edits: one batch per action, applied and queued, with Undo. Labels too |
@@ -52,7 +54,7 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `DustpanCore/Sources/DustpanCore/Filter.swift` | The filter language: parser, error messages, evaluation, blocked tasks |
 | `DustpanCore/Sources/DustpanCore/Views.swift` | Today, Upcoming, Anytime, Completed, the Filter page's results, and saved views: sorting and grouping |
 | `DustpanCore/Sources/DustpanCore/QueryTools.swift` | Help writing a query: suggestions for the word being typed, and the builder's conditions |
-| `DustpanCore/Sources/DustpanCore/Trash.swift` | The Trash's items, days left, and permanent deletes queued for the next sync |
+| `DustpanCore/Sources/DustpanCore/Trash.swift` | The Trash's items, days left, permanent deletes queued for the next sync, and deleting here at once when the data has never been on a server |
 | `DustpanCore/Sources/DustpanCore/CalendarRules.swift` | The calendar's rules: the month's weeks, which tasks show on which day and in what order, deadlines, a day's load, a task's block and the side-by-side layout of blocks, stretching and the moves by key (`gridMoves`), the grid settings |
 | `DustpanCore/Sources/DustpanCore/MonthPage.swift` | A month's days with their tasks, deadlines and load, for the calendar's Month |
 | `DustpanCore/Sources/DustpanCore/TimeGridPage.swift` | Week and Day's days: each one's Unscheduled lane, deadlines, load and laid-out blocks |
@@ -71,6 +73,7 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `Dustpan/QueryField.swift` | A filter query with suggestions, Not and + Condition: the Filter page's and the view editor's |
 | `Dustpan/FilterBar.swift` | The Filter page's query, its match count or error, and Save as View |
 | `Dustpan/TrashPage.swift` | The Trash: Restore, Delete for Good and Empty Trash |
+| `Dustpan/SettingsView.swift` | Dustpan ▸ Settings (⌘,): General (`PreferencesForm`, with `DefaultReminderPicker`) and Sync (`SyncSettings`) |
 | `Dustpan/ArchivedPage.swift` | An archived project's page: Unarchive or Delete |
 | `Dustpan/MoveCommands.swift` | Edit ▸ Move Up to Outdent, for whichever list has the focus (`ListMoves` in `Moves.swift`) |
 | `Dustpan/FoldCommand.swift` | View ▸ Fold Subtasks (⌘←) and Unfold Subtasks (⌘→), for the selected task (`TaskFold` in `TaskFold.swift`) |
@@ -92,7 +95,8 @@ the main actor in the app, and only the network waits happen elsewhere.
 
 ## Real use
 
-Put `OPENTODO_URL=…` and `OPENTODO_TOKEN=…` in `~/.config/dustpan/config` (mode 600), as on the desktop.
+Dustpan works standalone with no setup. To sync, connect in Settings ▸ Sync, which writes `OPENTODO_URL` and
+`OPENTODO_TOKEN` to `~/.config/dustpan/config` (mode 600), the file the desktop reads too; Disconnect takes them out.
 The URL must be https. Plain http works only for this machine (`localhost`, `127.0.0.1`, `::1`).
 Data goes in `~/Library/Application Support/Dustpan/`. The app isn't sandboxed, so it can read the config file.
 
@@ -115,6 +119,7 @@ Before 1.0 the minor number follows the Mac client's own slices.
 
 | Version | Date | What |
 | --- | --- | --- |
+| 0.18.0 | 2026-11-13 | Catching up with the desktop's standalone support. Dustpan opens without a server and keeps everything on this Mac; a config file that's wrong opens standalone too, with a note saying why. Settings (⌘,): default reminders (with a custom offset), time format, date order, week and day start, and quick add's language and switches, stored as the desktop stores them; Sync connects to an OpenTodo server, uploading the tasks here, and Disconnect goes back to standalone. Connecting with data from another account asks whether to upload it into the new one or replace it. An account change waits for a running sync, and a sync caught by one keeps nothing. Delete for Good deletes at once when the data has never been on a server, and otherwise waits for the server, after reconnecting if need be. Ticked subtasks settle after 2 s, not 3. |
 | 0.17.0 | 2026-11-13 | Catching up with the desktop's 0.12.4. A parent's check circle holds a pie of its done subtasks (a faint ring for none, a disc for all), with "3/5" on the row and the count in the tooltip. Completing the last open subtask offers to complete the parent in a banner: Complete (⌘Return) or Esc. Completed subtasks stay under their parent, below its open ones, until the broom on the parent clears them from this Mac's lists, with Undo; a ticked or reopened subtask keeps its place until the page has been still for 3 s. A row's project label on Today and the other grouped pages opens the task in its project, unfolded. |
 | 0.16.0 | 2026-11-13 | Slice 12c on the calendar: drag a block's bottom edge to change its estimate in 15-minute steps. Select with a click or j and k; Return opens, c completes, Delete deletes, Esc unselects. On the grid ↑ ↓ move 15 minutes, ← → a day, ⇧↑ ⇧↓ shorter or longer, ⌥⇧↑ ⌥⇧↓ the start, u back to the lane; in Month ← → keep the time. Each with Edit ▸ Undo, and the view follows a task moved off it. Right-click for the row menu with the moves. The gear sets the grid's hours and day length for this Mac. |
 | 0.15.0 | 2026-11-12 | Slice 12b, the calendar's Week and Day: Day, Week and Month in the toolbar, or d, w and m, remembered on this Mac. A time grid from 6:00, blocks as tall as their estimate in their project's colour (dashed without one), side by side when they overlap, "+N more" past four. Each day's header has its load, deadlines and the Unscheduled lane; today has the line for now. Drop a task on a 15-minute slot (a ghost shows where) or on the lane to drop its time. [ ] step by a day or a week. |

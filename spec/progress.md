@@ -88,7 +88,7 @@ record, with their tests; `projectSections` takes the swept subtasks and the set
   Return took the Add field's own, and the list's table keeps Return to itself. Esc dismisses it.
 - **The broom** on an open parent with completed subtasks showing, in project and Inbox lists. Undo in the toast and
   Edit ▸ Undo. Stored in the desktop's `meta.cleared_completed_subtasks`.
-- **Settling:** a ticked or reopened subtask keeps its place until 3 s after the last tick on the page, then they all
+- **Settling:** a ticked or reopened subtask keeps its place until 2 s after the last tick on the page (3 s before 0.18.0), then they all
   move together, animated. Another page settles at once.
 - **The project label** on Today, Upcoming and the other grouped pages is a button: it opens the task's project or the
   Inbox, unfolds the way down to the task, and selects and flashes it.

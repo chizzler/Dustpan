@@ -108,8 +108,10 @@ final class AppModel {
     private(set) var trash: [TrashItem] = []
     /// Trash items whose permanent delete waits for the next sync.
     private(set) var purging: Set<TrashItem.Target> = []
-    /// Days the server keeps an item in the Trash; 0 is until deleted for good.
+    /// Days the server keeps an item in the Trash; 0 is until deleted for good, as standalone.
     private(set) var trashRetention = defaultTrashRetention
+    /// Deleting for good happens here and now: the data has never been on a server.
+    private(set) var purgesLocally = false
     private(set) var status = Status.idle
     private(set) var lastSynced: Date?
     /// Local changes not yet accepted by the server.
@@ -144,7 +146,7 @@ final class AppModel {
     var labelling: String?
     /// The window's, so Undo works from the toast, Edit ▸ Undo and the editor alike.
     @ObservationIgnored weak var undoManager: UndoManager?
-    /// Why the app can't start: no config, or no database.
+    /// Why the app can't start: no database.
     private(set) var setupProblem: String?
     var page: Page? = .today {
         didSet {
@@ -186,9 +188,14 @@ final class AppModel {
     @ObservationIgnored private var syncAfterDrag = false
 
     private let store: Store?
-    private let api: Api?
-    private let syncer: Syncer?
     private let writer: Writer?
+    /// The OpenTodo server, while sync is on. Without one Dustpan runs standalone.
+    private(set) var config: Config?
+    @ObservationIgnored private var api: Api?
+    @ObservationIgnored private var syncer: Syncer?
+    @ObservationIgnored private var liveStream: Task<Void, Never>?
+    /// An account change waits for the running sync to end. No sync starts meanwhile.
+    private(set) var changingAccount = false
     private var syncAgain = false
     private var lastSync = ContinuousClock.now
     private var editSync: Task<Void, Never>?
@@ -198,15 +205,15 @@ final class AppModel {
 
     init() {
         do {
-            let config = try Config.load()
             let store = try Store(path: try databasePath())
-            let api = Api(config: config)
-            (self.store, self.api) = (store, api)
-            syncer = Syncer(store: store, server: api)
+            self.store = store
             writer = Writer(store: store)
+            let (config, warning) = Config.loadOptional()
+            if let config { use(config) }
+            if let warning { toast = Toast(message: warning) }
             refresh()
         } catch {
-            (store, api, syncer, writer) = (nil, nil, nil, nil)
+            (store, writer) = (nil, nil)
             setupProblem = "\(error)"
         }
         notifier.model = self
@@ -214,9 +221,18 @@ final class AppModel {
 
     // MARK: sync
 
-    /// Sync at start, then every 30 seconds, or every 5 minutes while the live stream is up.
+    var isConnected: Bool { config != nil }
+
+    private func use(_ config: Config?) {
+        self.config = config
+        api = config.map { Api(config: $0) }
+        syncer = api.flatMap { api in store.map { Syncer(store: $0, server: api) } }
+    }
+
+    /// Sync at start, then every 30 seconds, or every 5 minutes while the live stream is up. Standalone, it waits.
     func start() async {
-        guard syncer != nil else { return }
+        guard store != nil else { return }
+        startLive()
         await sync()
         #if DEBUG
         await screenshotsIfAsked()
@@ -224,29 +240,38 @@ final class AppModel {
         while !Task.isCancelled {
             try? await Task.sleep(for: Self.pollInterval)
             let interval = live ? Self.livePollInterval : Self.pollInterval
-            if lastSync.duration(to: .now) >= interval - .seconds(1) { await sync() }
+            if isConnected, lastSync.duration(to: .now) >= interval - .seconds(1) { await sync() }
         }
     }
 
-    /// Keep the live stream open: sync on connecting, and when another device writes.
-    func listen() async {
+    /// Keep the live stream open while connected: sync on connecting, and when another device writes.
+    private func startLive() {
+        stopLive()
         guard let api, let store, let device = try? store.transaction({ try store.device() }) else { return }
-        for await event in api.liveEvents(device: device) {
-            switch event {
-            case .connected:
-                live = true
-                await sync()
-            case .ops(let cursor):
-                if cursor.map({ $0 > (try? store.meta("cursor").int) ?? 0 }) ?? true { await sync() }
-            case .disconnected:
-                live = false
+        liveStream = Task {
+            for await event in api.liveEvents(device: device) {
+                switch event {
+                case .connected:
+                    live = true
+                    await sync()
+                case .ops(let cursor):
+                    if cursor.map({ $0 > (try? store.meta("cursor").int) ?? 0 }) ?? true { await sync() }
+                case .disconnected:
+                    live = false
+                }
             }
         }
     }
 
+    private func stopLive() {
+        liveStream?.cancel()
+        liveStream = nil
+        live = false
+    }
+
     /// Exchange with the server. A call while one runs makes it go round again.
     func sync() async {
-        guard let syncer else { return }
+        guard syncer != nil, !changingAccount else { return }
         guard drag == nil && projectDrag == nil else {
             syncAfterDrag = true
             return
@@ -257,6 +282,7 @@ final class AppModel {
         }
         repeat {
             syncAgain = false
+            guard let syncer, !changingAccount else { break }
             status = .syncing
             do {
                 let result = try await syncer.run()
@@ -265,6 +291,10 @@ final class AppModel {
                 if result.refused > 0 {
                     show(Toast(message: "\(result.refused) change\(result.refused == 1 ? "" : "s") not accepted by the server"))
                 }
+            } catch Syncer.Failure.accountChanged {
+                // Changed elsewhere, by the command line say: go again under the new account.
+                status = .idle
+                syncAgain = true
             } catch ApiError.offline(let message) {
                 status = .offline(message)
             } catch {
@@ -272,7 +302,94 @@ final class AppModel {
             }
             refresh()
         } while syncAgain
+        if status == .syncing { status = .idle }
         lastSync = .now
+    }
+
+    // MARK: the OpenTodo account
+
+    /// What connecting to an account would do with the data here.
+    enum AccountPlan {
+        /// Standalone data joins the account, or it's the account the data already belongs to.
+        case join
+        /// The data here belongs to another account: Settings asks whether to upload it or replace it.
+        case choose
+    }
+
+    /// Ask the server whose token it is.
+    func verify(_ config: Config) async throws -> (userId: String, key: JSON?) {
+        try await verifyAccount(Api(config: config))
+    }
+
+    func plan(for userId: String) throws -> AccountPlan {
+        guard let store else { throw CannotEdit("Dustpan isn't set up") }
+        let stored = try store.meta("user_id").string
+        let empty = try store.allFields().isEmpty
+        if stored == nil || stored == localUser || stored == userId || empty { return .join }
+        return .choose
+    }
+
+    enum AccountChoice {
+        /// Re-key the data here and upload it into the new account.
+        case upload
+        /// Drop the data here and pull the new account's.
+        case replace
+    }
+
+    /// Connect to config's account, changing the data here as the plan or choice says, once no sync is running.
+    func connect(_ config: Config, userId: String, key: JSON?, choice: AccountChoice? = nil) async throws {
+        guard let store else { throw CannotEdit("Dustpan isn't set up") }
+        try await changeAccount(to: config) {
+            let stored = try store.meta("user_id").string
+            switch choice {
+            case .upload: try migrateAccount(store, userId: userId, accountKey: key)
+            case .replace: try resetForAccount(store, userId: userId, accountKey: key)
+            case nil:
+                if stored == nil || stored == localUser {
+                    try adoptStandalone(store, userId: userId, accountKey: key)
+                } else if stored != userId {
+                    // Only when the data here is empty: nothing to lose.
+                    try resetForAccount(store, userId: userId, accountKey: key)
+                } else if let key {
+                    try store.transaction { try store.setMeta("account_key", key) }
+                }
+            }
+        }
+    }
+
+    /// Run change, then sync with config. No sync starts meanwhile, and a running one ends first.
+    private func changeAccount(to config: Config, _ change: () throws -> Void) async throws {
+        changingAccount = true
+        stopLive()
+        editSync?.cancel()
+        editSync = nil
+        while status == .syncing { try? await Task.sleep(for: .milliseconds(50)) }
+        do {
+            try change()
+            try config.save()
+        } catch {
+            changingAccount = false
+            startLive()
+            throw error
+        }
+        use(config)
+        changingAccount = false
+        status = .idle
+        refresh()
+        startLive()
+        await sync()
+    }
+
+    /// Stop syncing and keep everything here: Dustpan runs standalone.
+    func disconnect() throws {
+        try Config.clear()
+        stopLive()
+        editSync?.cancel()
+        editSync = nil
+        use(nil)
+        syncAgain = false
+        status = .idle
+        refresh()
     }
 
     private func syncSoon() {
@@ -290,7 +407,8 @@ final class AppModel {
             snapshot = try DustpanCore.snapshot(store)
             trash = trashItems(tasks: snapshot.allTasks, projects: try store.rows("project"))
             purging = try pendingPurges(store)
-            trashRetention = try DustpanCore.trashRetention(store)
+            trashRetention = isConnected ? try DustpanCore.trashRetention(store) : 0
+            purgesLocally = try !isConnected && neverConnected(store)
             waiting = try store.outboxCount()
             hiddenPages = Set(try store.meta(hiddenPagesKey).array?.compactMap(\.string) ?? [])
             foldedTasks = try store.meta(foldedTasksKey).array?.compactMap(\.string) ?? []
@@ -407,6 +525,11 @@ final class AppModel {
             show(Toast(message: (error as? CannotEdit)?.message ?? "\(error)"))
             return nil
         }
+    }
+
+    /// Settings: write changed preferences. Throws CannotEdit saying what's wrong.
+    func setPrefs(_ changes: [String: JSON]) throws {
+        try apply { try $0.setPrefs(changes) }
     }
 
     /// Add a task from a quick-add line at the end of a list. The page's place, due and labels fill in
@@ -558,11 +681,17 @@ final class AppModel {
         }
     }
 
-    /// Queue a permanent delete for each item, then sync to send them. No Undo.
+    /// Delete each item for good. No Undo. Data never connected to an account goes at once. Otherwise the server
+    /// may hold a copy, which would come back, so the request is queued for the next sync, after reconnecting if
+    /// need be.
     func deleteForGood(_ items: [TrashItem]) {
         guard let store else { return }
         do {
-            try queuePurges(store, items.map(\.target))
+            if purgesLocally {
+                try purgeLocal(store, items.map(\.target))
+            } else {
+                try queuePurges(store, items.map(\.target))
+            }
         } catch {
             show(Toast(message: "\(error)"))
             return

@@ -1,9 +1,9 @@
 import Foundation
 
-// The Trash: deleted tasks and projects, and permanent deletes waiting for the server. See spec/trash.md.
-// Restoring is an ordinary write (Writer.restoreTask). A permanent delete is not: the server removes the data,
-// and every device, this one included, drops it when the next sync names it in `purged`.
-// So a request is only queued here, and sent after a sync has pushed the outbox.
+// The Trash: deleted tasks and projects, and deleting them for good. See spec/trash.md.
+// Restoring is an ordinary write (Writer.restoreTask). A permanent delete is not. Data never connected to an account
+// is deleted here at once (purgeLocal). Otherwise the server removes it, and every device, this one included, drops
+// it when the next sync names it in `purged`, so the request is queued and sent after a sync has pushed the outbox.
 
 let dayMs: Int64 = 86_400_000
 public let defaultTrashRetention: Int64 = 30
@@ -134,4 +134,87 @@ func sendPurges(_ store: Store, _ server: any SyncServer) async throws -> Int {
         if let refused { throw refused }
     }
     return sent
+}
+
+let projectChildren = ["section", "field", "note", "rule"]
+let taskChildren = ["reminder", "comment", "attachment", "time_entry"]
+
+/// The trashed targets with what goes with them, as OpenTodo's expandPurge has it. A missing or restored target is
+/// skipped. A project takes all its tasks, its sections and its project-scoped rows. A task takes its deleted
+/// descendants, even ones deleted separately, and its reminders, comments, attachments and time entries.
+func expandPurge(_ store: Store, _ targets: [TrashItem.Target]) throws -> [TrashItem.Target] {
+    var cache: [String: [String: Row]] = [:]
+    func rows(_ entity: String) throws -> [String: Row] {
+        if let have = cache[entity] { return have }
+        let fresh = try store.rows(entity)
+        cache[entity] = fresh
+        return fresh
+    }
+    var seen: Set<TrashItem.Target> = [], out: [TrashItem.Target] = [], tasks: [String] = []
+    func add(_ entity: String, _ id: String) -> Bool {
+        let target = TrashItem.Target(entity: entity, id: id)
+        guard seen.insert(target).inserted else { return false }
+        out.append(target)
+        return true
+    }
+    for target in targets where ["task", "project", "note"].contains(target.entity) {
+        guard let row = try rows(target.entity)[target.id], !row["deleted_at"].isNull,
+              add(target.entity, target.id) else { continue }
+        if target.entity == "task" { tasks.append(target.id) }
+        guard target.entity == "project" else { continue }
+        for task in try rows("task").values.sorted(by: { $0.id < $1.id })
+        where task["project_id"].string == target.id && add("task", task.id) {
+            tasks.append(task.id)
+        }
+        for child in projectChildren {
+            for row in try rows(child).values.sorted(by: { $0.id < $1.id }) where row["project_id"].string == target.id {
+                _ = add(child, row.id)
+            }
+        }
+        if try rows("project_prefs")[target.id] != nil { _ = add("project_prefs", target.id) }
+    }
+    var deletedChildren: [String: [String]] = [:]
+    for task in try rows("task").values.sorted(by: { $0.id < $1.id }) where !task["deleted_at"].isNull {
+        if let parent = task["parent_id"].string { deletedChildren[parent, default: []].append(task.id) }
+    }
+    var i = 0
+    while i < tasks.count {
+        for child in deletedChildren[tasks[i]] ?? [] where add("task", child) { tasks.append(child) }
+        i += 1
+    }
+    let taskSet = Set(tasks)
+    if !taskSet.isEmpty {
+        for child in taskChildren {
+            for row in try rows(child).values.sorted(by: { $0.id < $1.id })
+            where row["task_id"].string.map(taskSet.contains) == true {
+                _ = add(child, row.id)
+            }
+        }
+    }
+    return out
+}
+
+/// Delete trashed targets for good here, with what goes with them, in one transaction. Returns how many entities went.
+@discardableResult
+public func purgeLocal(_ store: Store, _ targets: [TrashItem.Target]) throws -> Int {
+    try store.transaction {
+        let expanded = try expandPurge(store, targets)
+        let gone = Set(expanded)
+        for target in expanded { try store.purge(entity: target.entity, id: target.id) }
+        let held = (try store.meta("held_ops").array ?? []).compactMap(Op.init(json:))
+        if !held.isEmpty {
+            try store.setMeta("held_ops", .array(held.filter {
+                !gone.contains(.init(entity: $0.entity, id: $0.entityId))
+            }.map(\.json)))
+        }
+        let drop = gone.union(targets)
+        try setPending(store, try pendingList(store).filter { !drop.contains($0) })
+        return expanded.count
+    }
+}
+
+/// True when the data here has never belonged to an OpenTodo account, so nothing of it can be on a server.
+public func neverConnected(_ store: Store) throws -> Bool {
+    let user = try store.meta("user_id").string
+    return user == nil || user == localUser
 }

@@ -21,7 +21,7 @@ desktop/install.sh                # launcher entry, icon, and start hidden at lo
 deploy/pull-backups.sh --install  # daily copies of the server's archives and the client's database
 ```
 
-Both clients read their URL and token from `~/.config/dustpan/config`.
+Both clients work standalone, and read their URL and token from `~/.config/dustpan/config` once connected in Settings.
 
 Linux AUR release preparation is in [packaging/](packaging/README.md). It builds a Linux-only source
 archive and Arch package locally; no release has been submitted or uploaded.

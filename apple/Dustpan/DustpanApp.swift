@@ -19,7 +19,6 @@ struct DustpanApp: App {
             ContentView()
                 .environment(model)
                 .task { await model.start() }
-                .task { await model.listen() }
                 .task { await model.remind() }
         }
         Window("Calendar", id: CalendarWindow.id) {
@@ -27,6 +26,10 @@ struct DustpanApp: App {
                 .environment(model)
         }
         .defaultSize(width: 900, height: 700)
+        Settings {
+            SettingsView()
+                .environment(model)
+        }
         .commands {
             TextEditingCommands()
             CommandGroup(after: .newItem) {
@@ -60,7 +63,7 @@ struct DustpanApp: App {
                 Toggle("Outline Task List (Spike)", isOn: $outlineSpike)
                 Button("Sync Now") { Task { await model.sync() } }
                     .keyboardShortcut("r")
-                    .disabled(model.setupProblem != nil)
+                    .disabled(!model.isConnected)
             }
         }
     }
