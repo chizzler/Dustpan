@@ -96,6 +96,11 @@ Lucide files the briefcase under transport, the star under weather.
 - **A new project's colour** is chosen by the writer when none is picked, so its icon previews in grey until then.
 - **Shown in** the sidebar (projects and Archived) and Trash. The dot sits in an icon-wide slot,
   so names line up whether their projects have icons or not.
+- **Labels draw as Lucide's tag, solid**: filled in the label's colour with its hole cut out, so it never looks like
+  a project's line icon. It's grey for a label without a colour. It shows in the sidebar, a label's heading and
+  the label picker, and small (10 px) in the chips on task rows and in the editor. A project without an icon keeps its dot, so the two never look alike. So the picker
+  doesn't offer the tag to projects, in browsing, search or suggestions. One stored by another client still draws.
+  The calendar's 7 px dots stay dots: too small for a shape.
 - **Not shown in** the calendar's 7 px dots or the task editor's project list.
 
 ## Not yet

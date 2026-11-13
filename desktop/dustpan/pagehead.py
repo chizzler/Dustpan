@@ -32,13 +32,10 @@ def page_head(title, mark=None, eyebrow=None, meta=None, places=(), up=None):
     """
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, css_classes=["page-head"])
     if eyebrow:
-        text = Gtk.Label(label=eyebrow.upper(), xalign=0, ellipsize=Pango.EllipsizeMode.END,
-                         css_classes=["page-eyebrow"])
+        text = Gtk.Label(label=eyebrow.upper(), xalign=0, wrap=True, css_classes=["page-eyebrow"])
         if up is None:
             box.append(text)
         else:
-            text.set_ellipsize(Pango.EllipsizeMode.NONE)  # a button would shrink it to its ellipsis
-            text.set_wrap(True)
             link = Gtk.Button(child=text, halign=Gtk.Align.START, css_classes=["flat", "page-up"],
                               tooltip_text=f"Open {eyebrow.rsplit(' › ', 1)[-1]}")
             link.connect("clicked", lambda _b: up())

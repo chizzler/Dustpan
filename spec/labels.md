@@ -8,7 +8,7 @@ OpenTodo's rules are in `openspec/specs/labels/spec.md` and `docs/sync.md` ("Tas
 
 ## On a task
 
-- **Rows show chips:** the label's colour as a dot, then its name. Two at most, then "+n", whose tooltip names them all.
+- **Rows show chips:** the label's solid tag in its colour, 10 px, then its name. The editor's chips match. Two at most, then "+n", whose tooltip names them all.
   On a label's own page, that label's chip is left out. Ids of deleted or unknown labels are kept but not shown.
 - **The picker** opens with `L` (or Shift+L) on a selected task, "Labels…" in its menu, or + in the task editor.
   - Type to find: name start first, then word start, then anywhere, then the letters in order. Case and accents are ignored.
@@ -28,6 +28,8 @@ OpenTodo's rules are in `openspec/specs/labels/spec.md` and `docs/sync.md` ("Tas
 
 - **Labels**, between Projects and Views, lists live labels by position, with their open-task count.
   + makes a new label. A label whose name another shares shows a warning: merge them from its menu.
+- **Each label shows a solid tag** in its colour, not a dot or a line icon, so it never looks like a project.
+  The label picker and a label's page heading show the same tag ([icons.md](icons.md#the-desktop)).
 - **A label's page** lists its open tasks across projects. They're grouped by project unless the label's own
   `group_by`, `sort_by` and `sort_dir` say otherwise, as the web app reads them. An empty page says how to add tasks.
 - **The menu** (right-click): Edit label…, Move up, Move down, Merge into…, Delete….

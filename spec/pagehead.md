@@ -20,7 +20,7 @@ From top to bottom, all left-aligned with the tasks:
 | Inbox | none | Symbol | Open tasks on the page, planned or not |
 | A project | "Project", or its parent's path | Its icon in its colour, or its dot | Open tasks, as the sidebar counts them |
 | An archived project | "Archived project" | As above | none |
-| A label | "Label" | Its dot | Its open tasks |
+| A label | "Label" | Its solid tag, in its colour | Its open tasks |
 | A saved view | "Saved view" | Symbol | none |
 | Upcoming, Anytime, Completed, Filter, Trash | none | Symbol | none |
 

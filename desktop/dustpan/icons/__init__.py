@@ -6,6 +6,7 @@ the web app shows a project's dot for one outside its catalogue. The icons are L
 LICENSE-lucide.txt).
 """
 
+import functools
 import json
 import pathlib
 import re
@@ -16,6 +17,12 @@ LUCIDE = json.loads((HERE / "lucide.json").read_text())
 ALIASES = LUCIDE["aliases"]  # Lucide's old names, still drawn: a stored name stays good
 CATALOGUE = json.loads((HERE / "catalogue.json").read_text())
 SERVER = {e["name"] for e in CATALOGUE}  # the names OpenTodo's REST, MCP and web app know
+LABEL_MARK = "tag"  # labels draw as this, so the picker doesn't offer it to projects (a stored one still draws)
+# Solid versions, filled with the hole cut out, so a label's tag never looks like a project's line icon.
+# The hole's radius is 2.25: the 1.5 px line round its edge leaves 1.5 open.
+SOLID = {"tag": '<path fill-rule="evenodd" d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 '
+                '.586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z'
+                'M7.5 5.25a2.25 2.25 0 1 0 0 4.5a2.25 2.25 0 1 0 0-4.5z"/>'}
 
 # The picker's categories, in order: (id, label, Lucide's categories, the icon beside the label).
 # OpenTodo's 411 icons keep OpenTodo's categories (OPENTODO maps them): they're chosen with care.
@@ -61,17 +68,14 @@ OPENTODO = {"work": "work", "home": "home", "people": "people", "travel": "trave
             "health": "health", "money": "money", "learning": "learning", "nature": "nature", "animals": "animals",
             "tools": "tools", "tech": "devices", "time": "time", "communication": "communication",
             "symbols": "shapes", "leisure": "leisure"}
-CATEGORIES = tuple((group, label) for group, label, _c, _i in GROUPS)
-LABELS = dict(CATEGORIES)
-SYMBOLS = {group: icon for group, _l, _c, icon in GROUPS}
+LABELS = {group: label for group, label, _c, _i in GROUPS}
 MEMBERS = {group: set(members) for group, _l, members, _i in GROUPS}
 
 
 def group_of(name, categories):
     """The group for one of Lucide's icons outside OpenTodo's catalogue."""
-    if "account" in categories and "user" in name.split("-"):
-        return "people"
-    return next(group for group in PRIORITY if MEMBERS[group] & set(categories))
+    group = next(group for group in PRIORITY if MEMBERS[group] & set(categories))
+    return "people" if group == "account" and "user" in name.split("-") else group
 
 
 def entries():
@@ -88,14 +92,19 @@ def entries():
     found = []
     for lucide_name, info in LUCIDE["icons"].items():
         name = old.get(lucide_name, lucide_name)
-        found.append({"name": name, "category": curated.get(name) or group_of(lucide_name, info["categories"]), "categories": info["categories"],
-                      "keywords": list(dict.fromkeys([*words.get(name, []), *info["tags"]])),
-                      "server": name in SERVER})
+        group = curated.get(name) or group_of(lucide_name, info["categories"])
+        found.append({"name": name, "category": group, "server": name in SERVER,
+                      "keywords": [k.lower() for k in dict.fromkeys([*words.get(name, []), *info["tags"]])],
+                      # what a query can match as the category: our group, its label, Lucide's categories
+                      "categories": (group, LABELS[group].lower(), *info["categories"])})
     found.sort(key=lambda e: (order[e["category"]], not e["server"], place.get(e["name"], 0), e["name"]))
     return found
 
 
 ENTRIES = entries()
+OFFERED = [e for e in ENTRIES if e["name"] != LABEL_MARK]  # what the picker shows: all but the labels' tag
+GROUP_OF = {e["name"]: e["category"] for e in ENTRIES}
+IN_GROUP = {group: [e["name"] for e in OFFERED if e["category"] == group] for group in LABELS}
 
 
 def known(name):
@@ -122,17 +131,24 @@ def rank(entry, query):
         return 1
     if q in name:
         return 2
-    if any(q in k.lower() for k in entry["keywords"]):
+    if any(q in k for k in entry["keywords"]):
         return 3
-    if any(q in c for c in (entry["category"], LABELS[entry["category"]].lower(), *entry["categories"])):
+    if any(q in c for c in entry["categories"]):
         return 4
     return -1
 
 
 def search(query):
-    """The entries matching query, best first; in a tie OpenTodo's icons first, then picker order."""
-    hits = sorted((r, not e["server"], i) for i, e in enumerate(ENTRIES) if (r := rank(e, query)) >= 0)
-    return [ENTRIES[i] for _r, _s, i in hits]
+    """The offered entries matching query, best first; in a tie OpenTodo's icons first, then picker order."""
+    hits = sorted((r, not e["server"], i) for i, e in enumerate(OFFERED) if (r := rank(e, query)) >= 0)
+    return [OFFERED[i] for _r, _s, i in hits]
+
+
+@functools.cache
+def word_sets():
+    """For each offered entry: (the words of its name, of its keywords, its category texts). Built once, when needed."""
+    return [(set(e["name"].split("-")), {w for k in e["keywords"] for w in re.findall(r"[a-z0-9]+", k)},
+             set(e["categories"])) for e in OFFERED]
 
 
 def suggest(project_name, limit=8):
@@ -146,18 +162,21 @@ def suggest(project_name, limit=8):
     if not words:
         return []
 
-    def score(entry):
-        keywords = {w for k in entry["keywords"] for w in re.findall(r"[a-z0-9]+", k.lower())}
-        category = {entry["category"], LABELS[entry["category"]].lower(), *entry["categories"]}
-        return min((0 if entry["name"] == w else 1 if w in entry["name"].split("-") else
+    def score(entry, parts, keywords, category):
+        return min((0 if entry["name"] == w else 1 if w in parts else
                     2 if w in keywords else 3 if w in category else 4) for w in words)
 
-    hits = sorted((s, not e["server"], i) for i, e in enumerate(ENTRIES) if (s := score(e)) < 4)
-    return [ENTRIES[i]["name"] for _s, _k, i in hits[:limit]]
+    hits = sorted((s, not e["server"], i) for i, (e, sets) in enumerate(zip(OFFERED, word_sets()))
+                  if (s := score(e, *sets)) < 4)
+    return [OFFERED[i]["name"] for _s, _k, i in hits[:limit]]
 
 
-def svg(name, color, size):
-    """The icon as SVG bytes, size pixels square, its lines in color. 1.5 px lines: lighter than Lucide's 2."""
+def svg(name, color, size, solid=False):
+    """The icon as SVG bytes, size pixels square, its lines in color. 1.5 px lines: lighter than Lucide's 2.
+
+    solid draws its SOLID version, filled in color: the same outline, so it's the same size.
+    """
+    fill, body = (color, SOLID[name]) if solid else ("none", path(name))
     return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{size}" height="{size}" viewBox="0 0 24 24" '
-            f'fill="none" stroke="{color}" stroke-width="1.5" stroke-linecap="round" '
-            f'stroke-linejoin="round">{path(name)}</svg>').encode()
+            f'fill="{fill}" stroke="{color}" stroke-width="1.5" stroke-linecap="round" '
+            f'stroke-linejoin="round">{body}</svg>').encode()

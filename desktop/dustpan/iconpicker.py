@@ -24,10 +24,10 @@ class IconPicker(Gtk.Popover):
         super().__init__(css_classes=["icon-picker"])
         self.context, self.choose = context, choose
         self.name = self.color = self.current = None
-        self.suggested, self.first, self.shown = [], None, None
+        self.suggested, self.first, self.shown, self.row_for = [], None, None, {}
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self.entry = Gtk.SearchEntry(search_delay=0, placeholder_text=f"Find among {len(icons.ENTRIES):,} icons")
+        self.entry = Gtk.SearchEntry(search_delay=0, placeholder_text=f"Find among {len(icons.OFFERED):,} icons")
         self.entry.connect("search-changed", lambda _e: self.fill())
         self.entry.connect("activate", lambda _e: self.pick_first())
         self.entry.connect("stop-search", lambda _e: self.popdown())
@@ -57,6 +57,7 @@ class IconPicker(Gtk.Popover):
         self.suggested = icons.suggest(self.name or "")
         self.clear.set_visible(self.current is not None)
         self.fill_sidebar()
+        self.shown = self.opening()
         self.entry.set_text("")
         self.fill()
         focus_soon(self.entry)
@@ -64,11 +65,9 @@ class IconPicker(Gtk.Popover):
     def fill_sidebar(self):
         """Suggested first when the name gives any, then each category with its count."""
         self.sidebar.remove_all()
+        self.row_for = {}
         rows = [(SUGGESTED, "Suggested", "sparkles", len(self.suggested))] if self.suggested else []
-        counts = {}
-        for entry in icons.ENTRIES:
-            counts[entry["category"]] = counts.get(entry["category"], 0) + 1
-        rows += [(group, label, icons.SYMBOLS[group], counts[group]) for group, label in icons.CATEGORIES]
+        rows += [(group, label, symbol, len(icons.IN_GROUP[group])) for group, label, _c, symbol in icons.GROUPS]
         for key, label, symbol, count in rows:
             line = Gtk.Box(spacing=10, margin_top=2, margin_bottom=2)
             line.append(IconMark(symbol, None, 16))
@@ -76,16 +75,15 @@ class IconPicker(Gtk.Popover):
             line.append(Gtk.Label(label=str(count), css_classes=["dim-label", "caption"]))
             row = Gtk.ListBoxRow(child=line)
             row.key = key
+            self.row_for[key] = row
             row.update_property([Gtk.AccessibleProperty.LABEL], [f"{label}, {count} icons"])
             self.sidebar.append(row)
-        self.shown = self.opening()
 
     def opening(self):
         """Where the picker opens: the current icon's category, else the suggestions, else the first category."""
-        current = next((e for e in icons.ENTRIES if e["name"] == self.current), None)
-        if current is not None:
-            return current["category"]
-        return SUGGESTED if self.suggested else icons.CATEGORIES[0][0]
+        if self.current in icons.GROUP_OF:
+            return icons.GROUP_OF[self.current]
+        return SUGGESTED if self.suggested else icons.GROUPS[0][0]
 
     # ---- what the grid shows ----
 
@@ -102,20 +100,13 @@ class IconPicker(Gtk.Popover):
                     if len(found) > MOST_FOUND else None
                 self.show_grid(f"{len(found):,} found" if len(found) > 1 else "1 found", found[:MOST_FOUND], note)
             return
-        row = next((r for r in self.rows() if r.key == self.shown), None) or self.sidebar.get_row_at_index(0)
+        row = self.row_for.get(self.shown)
         if row is None:  # not opened yet
             return
         if self.sidebar.get_selected_row() is row:
             self.show_category(row.key)
         else:
             self.sidebar.select_row(row)  # on_category shows it
-
-    def rows(self):
-        row, index = self.sidebar.get_row_at_index(0), 0
-        while row is not None:
-            yield row
-            index += 1
-            row = self.sidebar.get_row_at_index(index)
 
     def on_category(self, _list, row):
         if row is None:
@@ -130,7 +121,7 @@ class IconPicker(Gtk.Popover):
         if key == SUGGESTED:
             self.show_grid(f"Suggested for “{self.name}”", self.suggested)
         else:
-            self.show_grid(icons.LABELS[key], [e["name"] for e in icons.ENTRIES if e["category"] == key])
+            self.show_grid(icons.LABELS[key], icons.IN_GROUP[key])
 
     def show_grid(self, heading, names, note=None, empty=None):
         while child := self.content.get_first_child():

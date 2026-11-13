@@ -227,12 +227,10 @@ class Dot(Gtk.Widget):
     theme: a colour of None means the theme's text colour (a project's "Theme" colour, spec/icons.md).
     """
 
-    def __init__(self, color, size=10, hexpand=False, theme=False):
-        super().__init__(valign=Gtk.Align.CENTER, hexpand=hexpand)
+    def __init__(self, color, size=10, theme=False):
+        super().__init__(valign=Gtk.Align.CENTER)
         self.set_size_request(size, size)
-        self.rgba = None if theme and color is None else Gdk.RGBA()
-        if self.rgba is not None and not (isinstance(color, str) and self.rgba.parse(color)):
-            self.rgba.parse(NO_COLOUR)
+        self.rgba = None if theme and color is None else parse_colour(color)
 
     def do_snapshot(self, snap):
         width, height = self.get_width(), self.get_height()
@@ -245,6 +243,14 @@ class Dot(Gtk.Widget):
         snap.pop()
 
 
+def parse_colour(color):
+    """An OpenTodo hex colour as Gdk.RGBA; the grey for a missing or bad one."""
+    rgba = Gdk.RGBA()
+    if not (isinstance(color, str) and rgba.parse(color)):
+        rgba.parse(NO_COLOUR)
+    return rgba
+
+
 class IconMark(Gtk.Widget):
     """A catalogue icon in a colour (spec/icons.md), drawn sharp at the screen's scale.
 
@@ -252,22 +258,24 @@ class IconMark(Gtk.Widget):
     """
 
     textures = {}  # (name, colour, pixels): Gdk.Texture, shared by every mark
+    MOST_TEXTURES = 1024  # browsing the picker in many colours would grow it without end
 
-    def __init__(self, name, color, size=16):
+    def __init__(self, name, color, size=16, solid=False):
         super().__init__(valign=Gtk.Align.CENTER, halign=Gtk.Align.CENTER)
         self.set_size_request(size, size)
-        self.name, self.size = name, size
-        rgba = Gdk.RGBA()
-        self.color = None if color is None else rgba.to_string() if isinstance(color, str) and rgba.parse(color) \
-            else NO_COLOUR
+        self.name, self.size, self.solid = name, size, solid
+        self.color = None if color is None else parse_colour(color).to_string()
 
     def do_snapshot(self, snap):
         surface = (native := self.get_native()) and native.get_surface()
         pixels = math.ceil(self.size * (surface.get_scale() if surface else self.get_scale_factor()))
         color = self.color or self.get_color().to_string()
-        key = (self.name, color, pixels)
+        key = (self.name, color, pixels, self.solid)
         if key not in self.textures:
-            self.textures[key] = Gdk.Texture.new_from_bytes(GLib.Bytes.new(icons.svg(self.name, color, pixels)))
+            if len(self.textures) >= self.MOST_TEXTURES:
+                self.textures.clear()
+            drawn = icons.svg(self.name, color, pixels, self.solid)
+            self.textures[key] = Gdk.Texture.new_from_bytes(GLib.Bytes.new(drawn))
         x, y = (self.get_width() - self.size) / 2, (self.get_height() - self.size) / 2
         snap.append_texture(self.textures[key], Graphene.Rect().init(x, y, self.size, self.size))
 
@@ -275,14 +283,22 @@ class IconMark(Gtk.Widget):
 def project_mark(project, size=16):
     """A project's icon in its colour, or its dot when it has none or this client can't draw it.
 
-    The dot sits in an icon-wide slot, so names line up whether their projects have icons or not.
+    The dot is as wide as an icon, drawn in its middle, so names line up whether their projects have icons or not.
     """
     name, color = project.get("icon"), project.get("color")
     if icons.known(name):
         return IconMark(name, color, size)
-    slot = Gtk.Box(width_request=size, valign=Gtk.Align.CENTER, hexpand=False)  # stops the dot's hexpand spreading
-    slot.append(Dot(color, max(10, size // 2), hexpand=True, theme=True))
-    return slot
+    dot = Dot(color, max(10, size // 2), theme=True)
+    dot.set_size_request(size, max(10, size // 2))
+    return dot
+
+
+def label_mark(color, size=16):
+    """A label's solid tag in its colour, so a label never looks like a project's dot or line icon.
+
+    Grey without a colour.
+    """
+    return IconMark(icons.LABEL_MARK, color or NO_COLOUR, size, solid=True)
 
 
 class Pie(Gtk.Widget):
@@ -353,10 +369,13 @@ def broom_button():
                       valign=Gtk.Align.CENTER, css_classes=["flat", "circular", "subtask-broom"])
 
 
+CHIP_TAG_PX = 10  # small: the chip's text is the point, the tag only says "label"
+
+
 def label_chip(name, color, on_remove=None):
-    """A label as a small tag: its colour as a dot, then its name. on_remove adds an × that calls it."""
+    """A label as a small chip: its solid tag in its colour, then its name. on_remove adds an × that calls it."""
     chip = Gtk.Box(spacing=5, valign=Gtk.Align.CENTER, css_classes=["label-chip"])
-    chip.append(Dot(color, 8))
+    chip.append(label_mark(color, CHIP_TAG_PX))
     chip.append(Gtk.Label(label=name, ellipsize=Pango.EllipsizeMode.END, max_width_chars=24))
     if on_remove is not None:
         remove = Gtk.Button(icon_name="window-close-symbolic", tooltip_text=f"Remove {name}",

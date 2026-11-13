@@ -18,7 +18,7 @@ from .calendar_rules import DAY_MINUTES, MIN_BLOCK_MINUTES, SLOT_MINUTES, hhmm  
 from .dates import format_minutes, format_time, uses_12h  # noqa: E402
 from .dragdrop import Stretch, ToDay, ToSlot  # noqa: E402
 from .rowactions import CALENDAR_KEYS, CALENDAR_MOVES, RowActions, TaskRow  # noqa: E402
-from .widgets import Dot  # noqa: E402
+from .widgets import Dot, parse_colour  # noqa: E402
 
 MOST_ROWS = 4  # task lines a Month day shows before "+N more"
 MOST_LANE = 3  # untimed tasks a Week or Day header shows before "+N more"
@@ -80,11 +80,7 @@ class TimeColumn(Gtk.Widget):
 
     def add(self, child, top, length, lane=0, lanes=1, color=None, dashed=False, done=False):
         child.set_parent(self)
-        rgba = None
-        if color is not None:
-            rgba = Gdk.RGBA()
-            if not (isinstance(color, str) and rgba.parse(color)):
-                rgba.parse("#94a3b8")
+        rgba = None if color is None else parse_colour(color)
         self.items.append((child, top, length, lane, lanes, rgba, dashed, done))
 
     def stretch(self, child, length):

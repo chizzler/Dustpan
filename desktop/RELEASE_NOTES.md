@@ -20,6 +20,8 @@ so it works standalone out of the box, with optional sync to your own OpenTodo s
 - Project icons: pick one of Lucide's 1,854 line icons for a project, with suggestions from its name.
   The picker browses 30 categories from a sidebar, or searches them all. They sync through OpenTodo;
   its web app shows the 411 in its own catalogue, and the project's dot for the rest.
+- Labels show as a solid tag in their colour, so they never look like a project's dot or line icon.
+  Task rows and the editor show a small one in each label chip.
 - A Theme colour for projects: no colour of their own, drawn in the theme's text colour.
 - A large heading on every page. A project shows its icon, where it sits and its sub-projects.
 - Fixed: after choosing an icon or a label, the picker kept taking the focus, so a name couldn't be typed.

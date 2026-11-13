@@ -47,7 +47,7 @@ class CatalogueTest(unittest.TestCase):
     def test_categories(self):
         groups = {e["category"] for e in icons.ENTRIES}
         self.assertEqual(groups, set(icons.LABELS))
-        self.assertTrue(all(icons.known(icon) for icon in icons.SYMBOLS.values()))
+        self.assertTrue(all(icons.known(icon) for icon in (symbol for *_rest, symbol in icons.GROUPS)))
         where = {e["name"]: e["category"] for e in icons.ENTRIES}
         # OpenTodo's own: Lucide files the briefcase under transport.
         self.assertEqual((where["briefcase"], where["house"], where["dog"]), ("work", "home", "animals"))
@@ -77,7 +77,7 @@ class SearchTest(unittest.TestCase):
         self.assertIn("paw-print", dog)
         self.assertTrue({"sprout", "flower"} <= set(self.names("plant")))
         self.assertIn("pizza", self.names("food"))
-        self.assertEqual(len(self.names("")), len(icons.ENTRIES))
+        self.assertEqual(len(self.names("")), len(icons.OFFERED))
         self.assertEqual(self.names("zzzz-no-such-icon"), [])
 
     def test_ranks(self):
@@ -166,17 +166,9 @@ class ThemeColourTest(WriterCase):
             self.writer.edit_project("p1", {"color": "red"})
 
 
-try:
-    import gi
+from .test_standalone import HAS_DISPLAY  # noqa: E402  (it sets the GTK version)
 
-    gi.require_version("Gtk", "4.0")
-    gi.require_version("Adw", "1")
-    from gi.repository import Adw, Gdk, Gtk
-    HAS_DISPLAY = bool(Gtk.init_check() and Gdk.Display.get_default() is not None)
-    if HAS_DISPLAY:
-        Adw.init()
-except (ImportError, ValueError):
-    HAS_DISPLAY = False
+from gi.repository import Gtk  # noqa: E402
 
 
 class WindowCase(unittest.TestCase):
@@ -214,10 +206,10 @@ class IconWindowTest(WindowCase):
         self.assertIsInstance(self.mark(garden), IconMark)
         self.assertEqual(self.mark(garden).name, "sprout")
         slot = self.mark(plain)
-        self.assertIsInstance(slot.get_first_child(), Dot)
+        self.assertIsInstance(slot, Dot)
         self.assertEqual(slot.get_size_request()[0], self.mark(garden).get_size_request()[0])
         # A name a newer client stored, which this one can't draw: the dot.
-        self.assertIsInstance(project_mark({"icon": "from-the-future"}).get_first_child(), Dot)
+        self.assertIsInstance(project_mark({"icon": "from-the-future"}), Dot)
 
     def test_dialog_picks_an_icon_and_saves_it(self):
         from dustpan.dialogs import ProjectDialog
@@ -241,16 +233,33 @@ class IconWindowTest(WindowCase):
         dialog.save()
         self.assertIsNone(self.window.store.rows("project")[project_id].get("icon"))
 
+    def test_labels_draw_as_tags_not_dots(self):
+        """A project without an icon has a dot; a label has the tag, so the two never look alike."""
+        from dustpan.app import LABEL
+        from dustpan.labelpicker import LabelPicker
+        from dustpan.widgets import NO_COLOUR, IconMark, label_mark
+
+        plain = self.window.writer.add_project("Plain")
+        label_id = self.window.writer.add_label("Errands", color="#2563eb")
+        self.window.after_edit()
+        self.assertNotIsInstance(self.mark(plain), IconMark)
+        tag = self.mark(LABEL + label_id)
+        self.assertIsInstance(tag, IconMark)
+        self.assertEqual((tag.name, tag.color, tag.solid), ("tag", "rgb(37,99,235)", True))  # solid, not line work
+        self.assertIn(b'fill="rgb(37,99,235)"', icons.svg("tag", tag.color, 16, solid=True))
+        self.assertIn(b'fill="none"', icons.svg("tag", tag.color, 16))  # a project's icons stay lines
+        picker = LabelPicker(self.window.labels_for_picker())
+        self.assertIsInstance(picker.list.get_row_at_index(0).get_child().get_first_child(), IconMark)
+        self.assertEqual(label_mark(None).color, IconMark("tag", NO_COLOUR).color)  # labels keep the grey
+        from dustpan.widgets import CHIP_TAG_PX, label_chip
+        chip_tag = label_chip("Errands", "#2563eb").get_first_child()  # task rows' chips show a small tag too
+        self.assertEqual((chip_tag.name, chip_tag.solid, chip_tag.size), ("tag", True, CHIP_TAG_PX))
+        self.assertNotIn("tag", [e["name"] for e in icons.search("tag")])  # not offered to projects
+        self.assertNotIn("tag", icons.suggest("Price tag"))
+        self.assertTrue(icons.known("tag"))  # one stored by another client still draws
+
     def test_picker_browses_by_category_and_searches_everything(self):
         from dustpan.iconpicker import MOST_FOUND, SUGGESTED, IconPicker
-
-        from gi.repository import Gtk
-
-        def iter_children(widget):
-            child = widget.get_first_child()
-            while child is not None:
-                yield child
-                child = child.get_next_sibling()
 
         def shown(picker):
             grid = [c for c in iter_children(picker.content) if isinstance(c, Gtk.FlowBox)][0]
@@ -259,12 +268,12 @@ class IconWindowTest(WindowCase):
         picked = []
         picker = IconPicker(lambda: ("Dog walking", "#16a34a", None), picked.append)
         picker.on_show(picker)
-        keys = [row.key for row in picker.rows()]
+        keys = list(picker.row_for)
         self.assertEqual(keys, [SUGGESTED, *icons.LABELS])
         self.assertEqual(picker.sidebar.get_selected_row().key, SUGGESTED)
         self.assertEqual(shown(picker)[0], "dog")
 
-        picker.sidebar.select_row(next(r for r in picker.rows() if r.key == "animals"))
+        picker.sidebar.select_row(picker.row_for["animals"])
         animals = [icons.title(e["name"]) for e in icons.ENTRIES if e["category"] == "animals"]
         self.assertEqual(shown(picker), animals)
 
@@ -279,16 +288,16 @@ class IconWindowTest(WindowCase):
         # With an icon set, the picker opens on its category. No name: no Suggested.
         picker = IconPicker(lambda: ("", None, "zodiac-leo"), picked.append)
         picker.on_show(picker)
-        self.assertNotIn(SUGGESTED, [row.key for row in picker.rows()])
+        self.assertNotIn(SUGGESTED, list(picker.row_for))
         self.assertEqual(picker.sidebar.get_selected_row().key, "people")
 
     def test_theme_colour_draws_in_the_text_colour(self):
         from dustpan.dialogs import ProjectDialog
-        from dustpan.widgets import NO_COLOUR, Dot, project_mark
+        from dustpan.widgets import Dot, project_mark
 
         self.assertIsNone(project_mark({"icon": "house", "color": None}).color)  # read from the theme at each draw
-        self.assertIsNone(project_mark({"color": None}).get_first_child().rgba)
-        self.assertEqual(project_mark({"icon": "house", "color": "oops"}).color, NO_COLOUR)
+        self.assertIsNone(project_mark({"color": None}).rgba)
+        self.assertEqual(project_mark({"icon": "house", "color": "oops"}).color, Dot(None).rgba.to_string())  # the grey
         self.assertIsNotNone(Dot(None).rgba)  # other dots keep the grey
 
         project_id = self.window.writer.add_project("Home")
@@ -298,7 +307,7 @@ class IconWindowTest(WindowCase):
         dialog.pick(None)
         dialog.save()
         self.assertIsNone(self.window.store.rows("project")[project_id].get("color"))
-        self.assertIsInstance(self.mark(project_id).get_first_child(), Dot)
+        self.assertIsInstance(self.mark(project_id), Dot)
 
     def test_pickers_focus_their_search_once(self):
         """Regression: an idle grab_focus repeated forever, so a project's name couldn't be typed after picking an icon.
@@ -324,15 +333,20 @@ class IconWindowTest(WindowCase):
         self.assertEqual(len(calls), 1)
 
 
+def iter_children(widget):
+    child = widget.get_first_child()
+    while child is not None:
+        yield child
+        child = child.get_next_sibling()
+
+
 def texts(widget):
     """Every label's text under widget, in order."""
     found = []
-    child = widget.get_first_child()
-    while child is not None:
+    for child in iter_children(widget):
         if isinstance(child, Gtk.Label):
             found.append(child.get_label())
         found += texts(child)
-        child = child.get_next_sibling()
     return found
 
 

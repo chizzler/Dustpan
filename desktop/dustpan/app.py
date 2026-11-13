@@ -38,9 +38,9 @@ from .sync import AccountChanged, ClockSkew, Syncer, UnsupportedAccount  # noqa:
 from .views import (LOGBOOK_PAGE, WEEK_START, compare_tasks, group_tasks, in_anytime, in_today,  # noqa: E402
                     logbook, manual_order, open_count, run_query, run_view, sorted_tasks, today_groups,
                     upcoming_groups, view_options)
-from .widgets import (CSS, FOLD_PX, INDENT_PX, BrandDust, BrandMark, Dot, Pie, ThemeFollower,  # noqa: E402
-                      broom_button, escape, flash, label_chip, on_right_click, popup_menu, project_mark, save_screenshot,
-                      scroll_into_view)
+from .widgets import (CSS, FOLD_PX, INDENT_PX, BrandDust, BrandMark, Pie, ThemeFollower,  # noqa: E402
+                      broom_button, escape, flash, label_chip, label_mark, on_right_click, popup_menu, project_mark,
+                      save_screenshot, scroll_into_view)
 from .writes import LOCAL_USER, CannotEdit, Writer, descendants, live, project_descendants  # noqa: E402
 
 SYNC_INTERVAL_S = 30
@@ -63,18 +63,9 @@ RECENT_LABELS = "recent_labels"  # store meta: labels assigned lately on this de
 STALE_REMINDER_MS = 24 * 60 * 60_000
 
 
-def open_text(count, what="open"):
-    """A page's count: "3 open tasks", "1 to do", or "Nothing open"."""
-    if not count:
-        return f"Nothing {what}" if what == "open" else "Nothing to do"
-    return f"{count} {what} task{'s' if count != 1 else ''}" if what == "open" else f"{count} {what}"
-
-
-def walk_nodes(nodes):
-    """Every node of a project tree, depth first."""
-    for node in nodes:
-        yield node
-        yield from walk_nodes(node.children)
+def open_text(count):
+    """A page's count: "3 open tasks", or "Nothing open"."""
+    return f"{count} open task{'s' if count != 1 else ''}" if count else "Nothing open"
 
 
 class Window(Adw.ApplicationWindow):
@@ -525,7 +516,7 @@ class Window(Adw.ApplicationWindow):
                     counts[label_id] = counts.get(label_id, 0) + 1
         twins = duplicates(self.snap.labels.values())
         for label in in_order(self.snap.labels.values()):
-            self.add_sidebar_row(LABEL + label.id, label.get("name", ""), 0, color=label.get("color"),
+            self.add_sidebar_row(LABEL + label.id, label.get("name", ""), 0, mark=label_mark(label.get("color")),
                                  count=counts.get(label.id, 0), menu=lambda lid=label.id: self.label_menu(lid),
                                  item=("label", label.id, None, []),
                                  warning="Another label has this name. Merge them from this label's menu."
@@ -571,16 +562,15 @@ class Window(Adw.ApplicationWindow):
             box.append(button)
         self.sidebar.append(Gtk.ListBoxRow(child=box, selectable=False, activatable=False))
 
-    def add_sidebar_row(self, key, name, depth, icon=None, color=None, mark=None, count=0, menu=None, warning=None,
-                        item=None):
-        """Before the name: mark, else the named icon, else a dot in color.
+    def add_sidebar_row(self, key, name, depth, icon=None, mark=None, count=0, menu=None, warning=None, item=None):
+        """Before the name: mark, else the named icon. The page heading reads count back from the row.
 
         menu() gives the sections of the row's right-click menu, for popup_menu. warning: a marker's tooltip.
 
         item: (kind, id, parent id, child ids) for a row that can be dragged to reorder it among its kind.
         """
         box = Gtk.Box(spacing=10, margin_start=6 + depth * INDENT_PX // 2)
-        box.append(mark or (Gtk.Image(icon_name=icon) if icon else Dot(color)))
+        box.append(mark or Gtk.Image(icon_name=icon))
         box.append(Gtk.Label(label=name, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END))
         if warning:
             box.append(Gtk.Image(icon_name="dialog-warning-symbolic", tooltip_text=warning, css_classes=["warning"]))
@@ -592,6 +582,7 @@ class Window(Adw.ApplicationWindow):
         row.key = key
         row.name = name
         row.icon = icon
+        row.count = count
         if menu:
             on_right_click(row, lambda x, y: popup_menu(row, menu(), x, y))
         row.item = item
@@ -731,36 +722,34 @@ class Window(Adw.ApplicationWindow):
         """The large title at the top of the page: a project's icon, name and where it sits, or a page's symbol."""
         symbol = Gtk.Image(icon_name=row.icon, pixel_size=MARK_PX - 2, css_classes=["page-symbol"]) if row.icon else None
         if key == TODAY:
+            count = sum(in_today(t, self.today) for t in self.snap.tasks)
             return page_head("Today", symbol, eyebrow=f"{date.fromisoformat(self.today):%A %-d %B}",
-                             meta=open_text(sum(in_today(t, self.today) for t in self.snap.tasks), "to do"))
+                             meta=f"{count} to do" if count else "Nothing to do")
         if key == INBOX:
             # Everything open on the page, planned or not. The sidebar counts only the unplanned.
             count = sum(open_count(t, self.today) for t in self.snap.tasks_by_project.get(None, []))
             return page_head("Inbox", symbol, meta=open_text(count))
         if key.startswith(LABEL):
             label = self.snap.labels[key[len(LABEL):]]
-            count = sum(1 for t in self.snap.tasks if open_count(t, self.today) and label.id in (t.get("labels") or []))
-            return page_head(label.get("name", ""), Dot(label.get("color"), 14), eyebrow="Label", meta=open_text(count))
+            return page_head(label.get("name", ""), label_mark(label.get("color"), MARK_PX), eyebrow="Label",
+                             meta=open_text(row.count))
         if key.startswith(VIEW):
             return page_head(row.name, symbol, eyebrow="Saved view")
-        project_id = key[len(ARCHIVED):] if key.startswith(ARCHIVED) else None if key in BUILT_IN else key
+        archived = key.startswith(ARCHIVED)
+        project_id = key[len(ARCHIVED):] if archived else None if key in BUILT_IN else key
         if project_id is None:  # Upcoming, Anytime, Completed, Filter, Trash
             return page_head(row.name, symbol)
-        project = self.store.rows("project")[project_id]
-        path = dict(self.project_paths).get(project_id, "")
-        if key.startswith(ARCHIVED):
-            eyebrow = "Archived project"
-        else:
-            eyebrow = path.rsplit(" › ", 1)[0] if " › " in path else "Project"
-        node = next((n for n in walk_nodes(self.snap.projects) if n.id == project_id), None)
-        places = [(project_mark(c.row), c.row.get("name", ""), lambda pid=c.id: self.open_page(pid))
-                  for c in (node.children if node else [])]
+        projects = self.store.rows("project")
+        project = projects[project_id]
+        if archived:
+            return page_head(project.get("name", ""), project_mark(project, MARK_PX), eyebrow="Archived project")
         parent_id = project.get("parent_id")
-        up = (lambda: self.open_page(parent_id)) if parent_id in self.rows_by_key and not key.startswith(ARCHIVED) \
-            else None
-        return page_head(project.get("name", ""), project_mark(project, MARK_PX), eyebrow=eyebrow,
-                         places=places, up=up,
-                         meta=None if key.startswith(ARCHIVED) else open_text(count_open(self.snap, project_id, self.today)))
+        places = [(project_mark(projects[cid]), projects[cid].get("name", ""), lambda pid=cid: self.open_page(pid))
+                  for cid in row.item[3]]  # the sidebar row's child ids
+        up = (lambda: self.open_page(parent_id)) if parent_id in self.rows_by_key else None
+        return page_head(project.get("name", ""), project_mark(project, MARK_PX),
+                         eyebrow=project_path(parent_id, projects) or "Project", places=places, up=up,
+                         meta=open_text(row.count))
 
     def show_header_title(self):
         """The header bar names the page only once its heading has scrolled out of sight."""

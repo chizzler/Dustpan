@@ -9,9 +9,9 @@ gi.require_version("Gtk", "4.0")
 from gi.repository import Gdk, GLib, Gtk, Pango  # noqa: E402
 
 from .labels import exact, find, key  # noqa: E402
-from .widgets import Dot, focus_soon, scroll_into_view  # noqa: E402
+from .widgets import NO_COLOUR, focus_soon, label_mark, scroll_into_view  # noqa: E402
 
-NEW_LABEL_COLOUR = "#94a3b8"  # a created label's dot until the writer gives it its colour
+NEW_LABEL_COLOUR = NO_COLOUR  # a created label's tag until the writer gives it its colour
 MAX_HEIGHT = 320
 
 
@@ -81,7 +81,7 @@ class LabelPicker(Gtk.Popover):
             box.append(text)
             spoken = f"Create label {name}"
         else:
-            box.append(Dot(color))
+            box.append(label_mark(color))
             box.append(Gtk.Label(label=name, xalign=0, hexpand=True, ellipsize=Pango.EllipsizeMode.END))
             on = ref in self.selected
             if not self.choose:
