@@ -121,7 +121,7 @@ Lucide files the briefcase under transport, the star under weather.
 
 ## Not yet
 
-- **Section icons.** The field exists, and the web app sets it. The desktop keeps it when editing a section, and
-  doesn't show it.
+- **Section icons on the desktop.** The Mac shows and edits them ([projects.md](projects.md#sections)). The desktop
+  keeps them when renaming a section, and doesn't show them.
 - **Marking which icons the web app shows.** It draws OpenTodo's 411 only. The picker doesn't say which those are.
 - **Keyboard into the grid.** Arrow keys from the search box into the icons.

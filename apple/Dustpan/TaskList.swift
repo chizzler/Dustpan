@@ -100,27 +100,31 @@ struct TaskList: View {
         }
     }
 
-    /// A section's heading: a drop there goes to the top of the section. Its menu renames, moves and deletes it.
+    /// A section's heading, after its mark: a drop there goes to the top of the section. Its menu edits, moves and
+    /// deletes it.
     private func heading(_ section: DustpanCore.Section, in projectId: String?, _ list: DropList?) -> some View {
         let sections = projectId.flatMap { model.snapshot.sectionsByProject[$0] } ?? []
         let index = sections.firstIndex { $0.id == section.id }
-        return Text(section.name)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(.rect)
-            .listDrop(list, at: .head)
-            .contextMenu {
-                if let projectId, let index {
-                    let row = sections[index]
-                    Button("Rename Section…") { model.editingSection = SectionDraft(projectId: projectId, section: row) }
-                    Divider()
-                    Button("Move Up") { model.moveSection(row.id, step: -1) }
-                        .disabled(index == 0)
-                    Button("Move Down") { model.moveSection(row.id, step: 1) }
-                        .disabled(index == sections.count - 1)
-                    Divider()
-                    Button("Delete Section", role: .destructive) { model.deleteSection(row) }
-                }
+        let row = index.map { sections[$0] }
+        return HStack(spacing: 6) {
+            SectionMark(color: row?["color"].string, icon: row?["icon"].string)
+            Text(section.name)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(.rect)
+        .listDrop(list, at: .head)
+        .contextMenu {
+            if let projectId, let index, let row {
+                Button("Edit Section…") { model.editingSection = SectionDraft(projectId: projectId, section: row) }
+                Divider()
+                Button("Move Up") { model.moveSection(row.id, step: -1) }
+                    .disabled(index == 0)
+                Button("Move Down") { model.moveSection(row.id, step: 1) }
+                    .disabled(index == sections.count - 1)
+                Divider()
+                Button("Delete Section", role: .destructive) { model.deleteSection(row) }
             }
+        }
     }
 
     /// What View ▸ Fold Subtasks acts on: the one selected task, when it has subtasks.

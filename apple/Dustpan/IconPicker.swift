@@ -1,13 +1,13 @@
 import DustpanCore
 import SwiftUI
 
-/// Picks a project's icon: a search across all of them, and a sidebar of categories beside the chosen one's icons.
+/// Picks a project's or section's icon: a search across all of them, and a sidebar of categories beside the chosen one's icons.
 /// Opens on the current icon's category, else on Suggested when the name gives any, else on Work (spec/icons.md).
 struct IconPicker: View {
     @Binding var icon: String?
     /// Shows the picker. A popover's own dismiss would close the editor's sheet around it.
     @Binding var isPresented: Bool
-    /// The project's colour, to draw the icons in. Nil is Theme.
+    /// The colour to draw the icons in. Nil is the text colour.
     let color: String?
     @State private var query = ""
     @State private var group: String?
@@ -18,11 +18,11 @@ struct IconPicker: View {
     private static let searchLimit = 240
     private static let suggestedId = "suggested"
 
-    init(icon: Binding<String?>, isPresented: Binding<Bool>, color: String?, projectName: String) {
+    init(icon: Binding<String?>, isPresented: Binding<Bool>, color: String?, name: String) {
         _icon = icon
         _isPresented = isPresented
         self.color = color
-        suggested = Icons.suggest(projectName)
+        suggested = Icons.suggest(name)
         let current = icon.wrappedValue.flatMap { Icons.groupOf[$0] }
         _group = State(initialValue: current ?? (suggested.isEmpty ? "work" : Self.suggestedId))
     }

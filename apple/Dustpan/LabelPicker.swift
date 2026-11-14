@@ -308,15 +308,21 @@ struct Swatch: ButtonStyle {
     let hex: String?
     let name: String
     let chosen: Bool
+    /// A nil hex is no colour at all, a dashed ring, rather than the text colour.
+    var none = false
 
     func makeBody(configuration: Configuration) -> some View {
         Circle()
-            .fill(hex.map { Color(hex: $0) ?? .gray } ?? .primary)
+            .fill(hex.map { Color(hex: $0) ?? .gray } ?? (none ? .clear : .primary))
+            .overlay {
+                if none { Circle().strokeBorder(.secondary, style: StrokeStyle(lineWidth: 1, dash: [2, 2])) }
+            }
             .frame(width: 18, height: 18)
             .overlay {
                 if chosen {
                     Image(systemName: "checkmark").font(.caption2.bold())
-                        .foregroundStyle(hex == nil ? AnyShapeStyle(.background) : AnyShapeStyle(.white))
+                        .foregroundStyle(none ? AnyShapeStyle(.primary)
+                                         : hex == nil ? AnyShapeStyle(.background) : AnyShapeStyle(.white))
                 }
             }
             .opacity(configuration.isPressed ? 0.6 : 1)

@@ -53,7 +53,7 @@ struct ProjectEditor: View {
                     }
                 }
                 .popover(isPresented: $picksIcon, arrowEdge: .trailing) {
-                    IconPicker(icon: $icon, isPresented: $picksIcon, color: color, projectName: name)
+                    IconPicker(icon: $icon, isPresented: $picksIcon, color: color, name: name)
                 }
             }
             Picker("Inside", selection: $parentId) {

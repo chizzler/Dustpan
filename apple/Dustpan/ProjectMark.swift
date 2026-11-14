@@ -23,6 +23,19 @@ struct ProjectMark: View {
     }
 }
 
+/// Before a section's name: its icon, in its colour or the text colour; a dot of its colour; or, with neither,
+/// nothing, so it looks as it always has (spec/projects.md).
+struct SectionMark: View {
+    let color: String?
+    let icon: String?
+
+    var body: some View {
+        if color != nil || icon.map(Icons.known) == true {
+            ProjectMark(color: color, icon: icon, size: 14)
+        }
+    }
+}
+
 extension ProjectMark {
     init(_ project: Row, size: Double = 16) {
         self.init(color: project["color"].string, icon: project["icon"].string, size: size)

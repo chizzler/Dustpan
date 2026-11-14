@@ -1035,7 +1035,7 @@ public struct ProjectEdit: Equatable, Sendable {
 }
 
 extension Writer {
-    /// A project's colour is "#rrggbb", or nil for the theme's text colour (spec/icons.md).
+    /// A project's or section's colour is "#rrggbb", or nil for none (spec/icons.md).
     func checkColour(_ color: String?) throws {
         if let color, color.wholeMatch(of: /#[0-9a-fA-F]{6}/) == nil { throw CannotEdit("Not a colour: \(color)") }
     }
@@ -1128,28 +1128,50 @@ extension Writer {
         return name
     }
 
-    /// A section, last in its project. Returns its id.
+    /// A section, last in its project. Returns its id. Without a colour or icon it writes neither field, as the
+    /// web app's new sections don't.
     @discardableResult
-    public func addSection(_ name: String, to projectId: String?) throws -> String {
+    public func addSection(_ name: String, to projectId: String?, color: String? = nil, icon: String? = nil) throws
+        -> String {
         let name = try sectionName(name)
+        try checkColour(color)
+        try checkIcon(icon)
         let sectionId = newId()
         try commit {
             guard let projectId else { throw CannotEdit("The Inbox has no sections") }
             try checkProject(projectId)
             let last = try liveSections(projectId).compactMap { $0["position"].number }.max()
-            return [Change("section", sectionId, [
+            var fields: [String: JSON] = [
                 "name": .string(name), "project_id": .string(projectId),
                 "position": last.map { position($0 + positionGap) } ?? .int(now()),
                 "created_at": .int(now()), "deleted_at": nil,
-            ])]
+            ]
+            if let color { fields["color"] = .string(color) }
+            if let icon { fields["icon"] = .string(icon) }
+            return [Change("section", sectionId, fields)]
         }
         return sectionId
     }
 
-    public func renameSection(_ sectionId: String, to name: String) throws -> Done {
+    /// Write a section's changed name, colour and icon, as one batch. `.some(nil)` clears a colour or icon. Without
+    /// a colour its icon draws in the text colour; with neither, its heading shows the name alone.
+    public func editSection(_ sectionId: String, name: String, color: String?? = nil, icon: String?? = nil) throws
+        -> Done {
         let name = try sectionName(name)
         return try undoable {
-            try liveSection(sectionId)["name"].string == name ? [] : [Change("section", sectionId, ["name": .string(name)])]
+            let section = try liveSection(sectionId)
+            var patch: [String: JSON] = [:]
+            if name != section["name"].string { patch["name"] = .string(name) }
+            if let color, color != section["color"].string {
+                try checkColour(color)
+                patch["color"] = color.map(JSON.string) ?? .null
+            }
+            // Compared before checking: a newer client's icon survives an edit that leaves it alone.
+            if let icon, icon != section["icon"].string {
+                try checkIcon(icon)
+                patch["icon"] = icon.map(JSON.string) ?? .null
+            }
+            return patch.isEmpty ? [] : [Change("section", sectionId, patch)]
         }
     }
 

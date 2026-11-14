@@ -35,7 +35,8 @@ and `sections.ts` (v0.18.0). Every action is one batch, as in [writes.md](writes
 On the Mac (0.10.0), all of it. Create from the + on the sidebar's Projects heading, File ▸ New Project… (⌥⌘N), or
 New Sub-project… in a project's menu. Edit Project… (its menu, or the pencil on its page) holds name, colour, parent,
 Archive and Delete. Delete asks first when the project has open tasks, since the Mac has no Trash yet; Undo works
-either way. A section heading's menu renames, moves and deletes it; Add Section is at the end of a project.
+either way. A section heading's menu edits (name, colour, icon), moves and deletes it; Add Section is at the end of
+a project.
 The page follows its project: archiving it shows the archived page, deleting it shows Today.
 The writes are in `Writes.swift`, tests in `ProjectsTests.swift`, all ported from the desktop's.
 
@@ -46,8 +47,8 @@ The sidebar lists them under "Archived", flat, with their path. Their page offer
 
 | Action | Ops |
 | --- | --- |
-| Create | `name`, `project_id`, `position`, `created_at`, `deleted_at: null` |
-| Rename | `name`, trimmed, never empty. An unchanged name writes nothing |
+| Create | `name`, `project_id`, `position`, `created_at`, `deleted_at: null`; `color` and `icon` only when chosen |
+| Edit | The changed fields of `name` (trimmed, never empty), `color` and `icon`. An unchanged edit writes nothing |
 | Move up or down | `position`, with the manual-order rule ([writes.md](writes.md#manual-order)): usually one op |
 | Delete | `deleted_at: now`, and `section_id: null` on each live open task that names it, in one batch |
 
@@ -56,7 +57,12 @@ The sidebar lists them under "Archived", flat, with their path. Their page offer
 - **Completed tasks keep `section_id`** when their section is deleted. If reopened they show under "No section",
   by the display rule for stale references.
 - **The project** must be live and not archived.
-- **Not written:** section colour and icon. A section edited here keeps them.
+- **Colour and icon**, as OpenTodo's "Section colour and icon" (`sections-and-boards`). `color` is a palette hex or
+  null; `icon` an icon's name or null ([icons.md](icons.md)). The heading shows the icon before the name, in the
+  colour, or in the text colour without one. A colour alone is a small dot. With neither, the name alone, as before.
+  "No section" never has either. The editor's colour row starts with None, a dashed ring: no dot, unlike a project's
+  Theme. An icon this client can't draw survives an edit that leaves it alone. On the Mac since 2026-11-14; the
+  desktop keeps them when renaming and doesn't show them yet.
 
 ## Not in this slice
 

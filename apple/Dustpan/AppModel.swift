@@ -629,13 +629,13 @@ final class AppModel {
         undoable("Delete Project", { try $0.deleteProject(projectId) }) { _ in "Deleted “\(path)”" }
     }
 
-    /// Name a new section, last in its project, or rename one.
-    func saveSection(_ draft: SectionDraft, name: String) throws {
+    /// Add a section, last in its project, or edit one. color nil is none. icon nil is none.
+    func saveSection(_ draft: SectionDraft, name: String, color: String?, icon: String?) throws {
         if let section = draft.section {
-            let done = try apply { try $0.renameSection(section.id, to: name) }
-            if !done.undo.isEmpty { registerUndo("Rename Section", done) }
+            let done = try apply { try $0.editSection(section.id, name: name, color: .some(color), icon: .some(icon)) }
+            if !done.undo.isEmpty { registerUndo("Edit Section", done) }
         } else {
-            try apply { try $0.addSection(name, to: draft.projectId) }
+            try apply { try $0.addSection(name, to: draft.projectId, color: color, icon: icon) }
         }
     }
 

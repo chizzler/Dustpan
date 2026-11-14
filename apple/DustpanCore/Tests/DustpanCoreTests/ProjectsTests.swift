@@ -171,12 +171,34 @@ import Testing
 
     @Test func renameSection() throws {
         try seed("section", "s1", ["name": "Old", "project_id": "p1"])
-        _ = try writer.renameSection("s1", to: "Old")
+        _ = try writer.editSection("s1", name: "Old")
         #expect(try outbox().isEmpty)
-        let done = try writer.renameSection("s1", to: " New ")
+        let done = try writer.editSection("s1", name: " New ")
         #expect(try section("s1")["name"].string == "New")
         try writer.revert(done.undo)
         #expect(try section("s1")["name"].string == "Old")
+    }
+
+    @Test func sectionColourAndIcon() throws {
+        try seed("project", "p1", ["name": "Home"])
+        let plain = try writer.addSection("Backlog", to: "p1")
+        #expect(try section(plain).values["color"] == nil && section(plain).values["icon"] == nil)
+        let styled = try writer.addSection("Waiting", to: "p1", color: "#f59e0b", icon: "hourglass")
+        #expect(try section(styled)["color"] == "#f59e0b" && section(styled)["icon"] == "hourglass")
+
+        let done = try writer.editSection(styled, name: "Waiting", color: .some(nil), icon: .some(nil))
+        #expect(try section(styled)["color"].isNull && section(styled)["icon"].isNull)
+        try writer.revert(done.undo)
+        #expect(try section(styled)["icon"] == "hourglass")
+
+        #expect(throws: CannotEdit.self) { try writer.editSection(styled, name: "Waiting", icon: "no-such-icon") }
+        #expect(throws: CannotEdit.self) { try writer.addSection("x", to: "p1", color: "amber") }
+    }
+
+    @Test func sectionEditKeepsAnIconThisClientCantDraw() throws {
+        try seed("section", "s1", ["name": "Old", "project_id": "p1", "icon": "from-the-future"])
+        _ = try writer.editSection("s1", name: "New", color: .some(nil), icon: .some("from-the-future"))
+        #expect(try section("s1")["icon"] == "from-the-future" && section("s1")["name"] == "New")
     }
 
     @Test func moveSectionStepsOnePlace() throws {
