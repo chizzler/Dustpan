@@ -89,8 +89,10 @@ body::before {
 @media (max-width: 760px) { .bar nav { display: none; } .bar .status { margin-left: auto; } }
 
 /* ---- hero ---- */
-.hero { position: relative; border-bottom: 1px solid var(--line); overflow: hidden; }
-.hero::before {  /* perforated metal */
+.hero { border-bottom: 1px solid var(--line); }
+/* Perforated metal: the hero, Sync and Platforms carry a dotted backdrop that lights up round the mouse. */
+.dotted { position: relative; overflow: hidden; }
+.dotted::before {
   content: ""; position: absolute; inset: 0; pointer-events: none;
   background-image: radial-gradient(var(--grille) 1.2px, transparent 1.4px);
   background-size: 12px 12px;
@@ -100,9 +102,10 @@ body::before {
 /* The dots near the mouse, drawn brighter with an orange halo by the script below. Each dot fades on its
    own after the mouse moves on, so the light trails a little behind it. Layers, back to front:
    the plain dots, the lit dots, then the text and buttons. */
-.hero::before { z-index: 0; }
-.hero .lights { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
-.hero .wrap { position: relative; z-index: 2; padding-block: clamp(56px, 9vw, 120px); }
+.dotted::before { z-index: 0; }
+.dotted .lights { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+.dotted > .wrap { position: relative; z-index: 2; }
+.hero .wrap { padding-block: clamp(56px, 9vw, 120px); }
 /* Blocked-out type: each line of text sits on its own orange slab, like a label-maker strip.
    box-decoration-break gives every line its own padding, so the slabs stack with a clean ragged edge. */
 .slab {
@@ -132,14 +135,6 @@ body::before {
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .btn.primary:hover { background: color-mix(in srgb, var(--accent) 86%, var(--fg)); }
 
-/* ---- modules ---- */
-.module {
-  background: var(--panel); border: 1px solid var(--line); border-radius: 4px; position: relative;
-}
-.module .screw { position: absolute; width: 9px; height: 9px; border-radius: 50%; background: var(--line); }
-.module .screw::after { content: ""; position: absolute; left: 2px; right: 2px; top: 4px; height: 1px; background: var(--bg); transform: rotate(35deg); }
-.module .screw:nth-of-type(1) { top: 10px; left: 10px; } .module .screw:nth-of-type(2) { top: 10px; right: 10px; }
-.module .screw:nth-of-type(3) { bottom: 10px; left: 10px; } .module .screw:nth-of-type(4) { bottom: 10px; right: 10px; }
 .k1 { background: var(--p1); } .k2 { background: var(--p2); } .k3 { background: var(--p3); } .k4 { background: var(--p4); }
 
 
@@ -147,7 +142,7 @@ body::before {
 section.block { padding-block: clamp(64px, 9vw, 120px); border-bottom: 1px solid var(--line); }
 .head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 24px 64px; align-items: end; margin-bottom: 48px; }
 .head .legend { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
-.head h2 { font: 400 clamp(1.6rem, 3.4vw, 2.6rem)/1.1 var(--display); text-transform: uppercase; margin: 0; text-wrap: balance; }
+.head h2 { font: 400 clamp(1.28rem, 2.72vw, 2.08rem)/1.1 var(--display); text-transform: uppercase; margin: 0; text-wrap: balance; }
 .head p { margin: 0; color: var(--dim); max-width: 36em; font-size: 1.05rem; }
 @media (max-width: 820px) { .head { grid-template-columns: minmax(0, 1fr); } }
 
@@ -182,26 +177,48 @@ section.block { padding-block: clamp(64px, 9vw, 120px); border-bottom: 1px solid
 @media (max-width: 560px) { .priority { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
 /* sync */
-.signal { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 1fr); align-items: stretch; gap: 0; }
-.node { padding: 26px 22px; display: grid; gap: 8px; align-content: start; min-width: 0; }
-.node .legend { display: flex; gap: 10px; align-items: center; }
-.node h3 { margin: 6px 0 0; font: 400 1.05rem/1.25 var(--display); text-transform: uppercase; letter-spacing: 0.04em; }
-.node p { margin: 0; color: var(--dim); font-size: 0.92rem; }
-.wire { display: grid; place-items: center; position: relative; padding: 26px 22px; }
-.wire::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: repeating-linear-gradient(90deg, var(--accent) 0 8px, transparent 8px 14px); }
-.wire .module { padding: 22px 20px; text-align: center; position: relative; z-index: 1; width: 100%; max-width: 300px; }
-.wire .module h3 { margin: 10px 0 6px; font: 400 1rem/1.2 var(--display); text-transform: uppercase; }
-.wire .module p { margin: 0; font-size: 0.86rem; color: var(--dim); }
-@media (max-width: 820px) {
-  .signal { grid-template-columns: minmax(0, 1fr); }
-  .wire::before { left: 50%; right: auto; top: 0; bottom: 0; width: 1px; height: auto; background: repeating-linear-gradient(180deg, var(--accent) 0 8px, transparent 8px 14px); }
+/* A mind map: the server in the middle, a branch out to each device. The branches are grid cells,
+   so they stay joined to the nodes whatever the text length. Below 820px it becomes a tree. */
+.map {
+  display: grid; align-items: center;
+  grid-template-columns: minmax(0, 1fr) minmax(32px, 0.35fr) minmax(0, 1.1fr) minmax(32px, 0.35fr) minmax(0, 1fr);
+  grid-template-areas: "linux b1 hub b2 mac" ". . b3 . ." ". . ios . .";
 }
-.steps { list-style: none; padding: 0; margin: 56px 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; counter-reset: step; }
-.steps li { border-top: 2px solid var(--fg); padding-top: 18px; display: grid; gap: 8px; counter-increment: step; min-width: 0; }
-.steps li::before { content: "Step " counter(step); font: 500 0.72rem/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent-ink); }
-.steps h3 { margin: 0; font: 600 1.04rem/1.3 var(--body); }
-.steps p { margin: 0; color: var(--dim); font-size: 0.94rem; }
-@media (max-width: 760px) { .steps { grid-template-columns: minmax(0, 1fr); gap: 28px; } }
+.node {
+  position: relative; min-width: 0; padding: 20px 20px 18px; display: grid; gap: 6px; align-content: start;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--panel);
+}
+.node .legend { display: flex; gap: 10px; align-items: center; }
+.node h3 { margin: 4px 0 0; font: 400 1rem/1.25 var(--display); text-transform: uppercase; letter-spacing: 0.04em; }
+.node p { margin: 0; color: var(--dim); font-size: 0.9rem; }
+.node .leaf { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.node .leaf span { font: 500 0.66rem/1 var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); border: 1px solid var(--line); border-radius: 999px; padding: 5px 9px; }
+.node.hub { grid-area: hub; border-color: var(--accent); text-align: center; justify-items: center; padding: 26px 22px; box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 14%, transparent); }
+.node.hub h3 { font-size: 1.2rem; }
+.node.planned { border-style: dashed; background: transparent; }
+.n-linux { grid-area: linux; } .n-mac { grid-area: mac; } .n-ios { grid-area: ios; }
+.branch { position: relative; align-self: stretch; }
+.branch::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 1px dashed var(--accent); }
+.branch::after { content: ""; position: absolute; top: 50%; width: 7px; height: 7px; margin-top: -3px; border-radius: 50%; background: var(--accent); }
+.b1 { grid-area: b1; } .b1::after { left: -4px; }
+.b2 { grid-area: b2; } .b2::after { right: -4px; }
+.b3 { grid-area: b3; height: 40px; }
+.b3::before { left: 50%; right: auto; top: 0; bottom: 0; border-top: 0; border-left: 1px dashed var(--accent); }
+.b3::after { top: auto; bottom: -4px; left: 50%; margin: 0 0 0 -3px; }
+@media (max-width: 820px) {
+  .map { grid-template-columns: minmax(0, 1fr); grid-template-areas: "hub" "linux" "mac" "ios"; row-gap: 14px; }
+  .branch { display: none; }
+  .node.hub { text-align: left; justify-items: start; }
+  /* Tree: each device hangs off a spine that runs down from the server. */
+  .n-linux, .n-mac, .n-ios { margin-left: 40px; }
+  .n-linux::before, .n-mac::before, .n-ios::before {
+    content: ""; position: absolute; left: -27px; width: 26px; top: -15px; height: calc(50% + 15px);
+    border-left: 1px dashed var(--accent); border-bottom: 1px dashed var(--accent);
+  }
+  .n-mac::after, .n-linux::after {  /* carry the spine past this node to the next one */
+    content: ""; position: absolute; left: -27px; top: 50%; bottom: -15px; border-left: 1px dashed var(--accent);
+  }
+}
 
 /* privacy */
 .ledger { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 56px; }
@@ -213,8 +230,10 @@ section.block { padding-block: clamp(64px, 9vw, 120px); border-bottom: 1px solid
 
 /* platforms */
 .platforms { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.plat { padding: 30px 26px 26px; display: grid; gap: 14px; align-content: start; min-width: 0; }
-.plat .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0 4px; }
+.plat { position: relative; padding: 22px 22px 20px; display: grid; gap: 14px; align-content: start; min-width: 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.plat.planned { border-style: dashed; background: transparent; }
+.plat .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .plat h3 { margin: 6px 0 0; font: 400 1.25rem/1.2 var(--display); text-transform: uppercase; }
 .plat p { margin: 0; color: var(--dim); font-size: 0.94rem; }
 .plat dl { margin: 6px 0 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 16px; font: 400 0.84rem/1.4 var(--mono); }
@@ -250,7 +269,7 @@ footer .brand b { font-size: 0.8rem; }
 </header>
 
 <main id="top">
-  <section class="hero">
+  <section class="hero dotted">
     <canvas class="lights" aria-hidden="true"></canvas>
     <div class="wrap">
       <div>
@@ -272,31 +291,31 @@ footer .brand b { font-size: 0.8rem; }
       <div class="head">
         <div>
           <span class="legend"><span class="led on"></span>Features</span>
-          <h2>Projects, repeats, filters. All of it offline.</h2>
+          <h2>Tasks, Projects, Sections &amp; more</h2>
         </div>
-        <p>Dustpan covers the habits people move to Todoist for: projects, sections, subtasks, repeats and saved filters.
-          It's written natively for each desktop, so it starts fast and feels like part of the system.</p>
+        <p>Dustpan has all the modern features a to-do app should have. Heaps of options to customise your workflows.
+          Both keyboard and mouse are first-class citizens, with drag and drop onto a calendar window for rapid date &amp; task length changes.</p>
       </div>
 
       <div class="rack">
         <div class="unit"><span class="tag">Projects</span><h3>Nested as deep as you like</h3>
           <p>Projects hold sub-projects, sections and tasks. Give each one a colour and an icon, and drag to reorder or nest.</p></div>
-        <div class="unit"><span class="tag">every!</span><h3>Repeats that wait for you</h3>
-          <p><code>every 3 days</code> runs on the calendar. <code>every! 3 days</code> counts from when you finish, so a late task never piles up.</p></div>
-        <div class="unit"><span class="tag">Quick add</span><h3>Write it the way you'd say it</h3>
-          <p>Dates, times, repeats, priority, project, labels and durations, pulled from one line of text. Works offline.</p></div>
-        <div class="unit"><span class="tag">Subtasks</span><h3>Progress you can see</h3>
+        <div class="unit"><span class="tag">every!</span><h3>Repeats, repeat</h3>
+          <p><code>every 3 days</code> runs on the calendar. <code>every! 3 days</code> counts from when you finish.</p></div>
+        <div class="unit"><span class="tag">Quick add</span><h3>Rapid disclosures</h3>
+          <p>Dates, times, repeats, priority, project, labels and durations, pulled from one line of text.</p></div>
+        <div class="unit"><span class="tag">Subtasks</span><h3>Micro progress graph</h3>
           <p>A pie on each parent fills as subtasks are done. Tick the last one and Dustpan offers to finish the parent.</p></div>
         <div class="unit"><span class="tag">Views</span><h3>Today, Upcoming, Anytime</h3>
           <p>Plus Completed, and saved views built from a filter language, like <code>p1 &amp; overdue</code>.</p></div>
         <div class="unit"><span class="tag">Calendar</span><h3>Month, Week and Day</h3>
-          <p>Drag tasks onto a day or a time slot. Stretch a block to set how long it takes. Every move has a key.</p></div>
+          <p>Drag tasks onto a day or a time slot. Stretch a block to set how long it takes. Optional keys for every action.</p></div>
         <div class="unit"><span class="tag">Reminders</span><h3>Desktop notifications</h3>
           <p>Fixed times or relative to the due date. They move when the due date moves.</p></div>
         <div class="unit"><span class="tag">Notes</span><h3>Markdown on every task</h3>
           <p>Lists, links and headings in a task's notes, stored as plain text you can read anywhere.</p></div>
         <div class="unit"><span class="tag">Undo</span><h3>Nothing is lost by accident</h3>
-          <p>Undo for every edit, and a Trash that keeps deleted tasks and projects until you restore or clear them.</p></div>
+          <p>Undo for every edit, and a Trash that keeps deleted tasks and projects for restore or permanent clearance.</p></div>
       </div>
 
       <div class="priority" aria-label="Priorities">
@@ -308,45 +327,46 @@ footer .brand b { font-size: 0.8rem; }
     </div>
   </section>
 
-  <section class="block" id="sync">
+  <section class="block dotted" id="sync">
+    <canvas class="lights" aria-hidden="true"></canvas>
     <div class="wrap">
       <div class="head">
         <div>
           <span class="legend"><span class="led on"></span>Sync</span>
-          <h2>Works alone. Syncs when you say.</h2>
+          <h2>Works stand-alone. Sync to a server if you need.</h2>
         </div>
-        <p>Every device keeps a full copy of your tasks and works without a connection. When you want sync,
-          point Dustpan at your own OpenTodo server. Edits merge field by field, so two devices can change
+        <p>Add an OpenTodo server to keep every device in sync. Clients keep a full copy of your tasks and work without a connection. Edits merge field by field, so two devices can change
           one task without losing either change.</p>
       </div>
 
-      <div class="signal">
-        <div class="node module">
-          <i class="screw"></i><i class="screw"></i><i class="screw"></i><i class="screw"></i>
+      <div class="map" role="img" aria-label="Diagram: an OpenTodo server you run sits in the middle. Linux, Mac and, later, iPhone each connect to it, and each keeps a full copy of your tasks.">
+        <div class="node hub">
+          <span class="legend">Your server</span>
+          <h3>OpenTodo</h3>
+          <p>Open source, one small binary. It holds the log of changes and passes them on.</p>
+        </div>
+        <span class="branch b1" aria-hidden="true"></span>
+        <span class="branch b2" aria-hidden="true"></span>
+        <span class="branch b3" aria-hidden="true"></span>
+        <div class="node n-linux">
           <span class="legend"><span class="led on"></span>Linux</span>
           <h3>Omarchy desktop</h3>
-          <p>GTK 4 and libadwaita. Follows your Omarchy theme as it changes.</p>
+          <p>GTK 4 and libadwaita. Follows your Omarchy theme.</p>
+          <div class="leaf"><span>Full copy</span><span>Works offline</span></div>
         </div>
-        <div class="wire">
-          <div class="module">
-            <span class="legend">Your server</span>
-            <h3>OpenTodo</h3>
-            <p>Open source, one small binary. It holds the log of changes and passes them on. Your clients do the rest.</p>
-          </div>
-        </div>
-        <div class="node module">
-          <i class="screw"></i><i class="screw"></i><i class="screw"></i><i class="screw"></i>
+        <div class="node n-mac">
           <span class="legend"><span class="led on"></span>macOS</span>
           <h3>Mac</h3>
-          <p>SwiftUI. Same data, same rules, checked against the same tests.</p>
+          <p>SwiftUI. Same data, same rules, same tests.</p>
+          <div class="leaf"><span>Full copy</span><span>Works offline</span></div>
+        </div>
+        <div class="node n-ios planned">
+          <span class="legend"><span class="led"></span>iOS · Planned</span>
+          <h3>iPhone</h3>
+          <p>Shares the Mac's core.</p>
         </div>
       </div>
 
-      <ol class="steps">
-        <li><h3>Start on your own</h3><p>Install and start typing. No account, no sign-up, no server.</p></li>
-        <li><h3>Connect when ready</h3><p>Add your server's address and a token in Settings. Dustpan checks it, then uploads what you've made.</p></li>
-        <li><h3>Stay in step</h3><p>Changes go out a moment after you make them and arrive live on your other devices.</p></li>
-      </ol>
     </div>
   </section>
 
@@ -355,7 +375,7 @@ footer .brand b { font-size: 0.8rem; }
       <div class="head">
         <div>
           <span class="legend"><span class="led on"></span>Privacy</span>
-          <h2>Your tasks stay in your house.</h2>
+          <h2>Escape the platform ecosystem clutches.</h2>
         </div>
         <p>A task list knows a lot about you: where you're going, who you owe and what's worrying you.
           Dustpan keeps that between your devices and your server.</p>
@@ -369,7 +389,8 @@ footer .brand b { font-size: 0.8rem; }
     </div>
   </section>
 
-  <section class="block" id="platforms">
+  <section class="block dotted" id="platforms">
+    <canvas class="lights" aria-hidden="true"></canvas>
     <div class="wrap">
       <div class="head">
         <div>
@@ -379,22 +400,19 @@ footer .brand b { font-size: 0.8rem; }
         <p>Each client is written for its own system, not wrapped in a browser. They share one data model and one set of tests.</p>
       </div>
       <div class="platforms">
-        <div class="module plat">
-          <i class="screw"></i><i class="screw"></i><i class="screw"></i><i class="screw"></i>
+        <div class="plat">
           <div class="top"><span class="legend">Linux</span><span class="state"><span class="led on"></span>Release soon</span></div>
           <h3>Omarchy &amp; Arch</h3>
           <p>Coming to the AUR. Built from official Arch packages only.</p>
           <dl><dt>Version</dt><dd>0.12.5</dd><dt>Built with</dt><dd>Python, GTK 4, libadwaita</dd></dl>
         </div>
-        <div class="module plat">
-          <i class="screw"></i><i class="screw"></i><i class="screw"></i><i class="screw"></i>
+        <div class="plat">
           <div class="top"><span class="legend">macOS</span><span class="state"><span class="led on"></span>In development</span></div>
           <h3>Mac</h3>
           <p>Nearly feature for feature with the Linux client, and in daily use.</p>
           <dl><dt>Version</dt><dd>0.18.0</dd><dt>Built with</dt><dd>Swift, SwiftUI</dd></dl>
         </div>
-        <div class="module plat">
-          <i class="screw"></i><i class="screw"></i><i class="screw"></i><i class="screw"></i>
+        <div class="plat planned">
           <div class="top"><span class="legend">iOS</span><span class="state"><span class="led"></span>Planned</span></div>
           <h3>iPhone</h3>
           <p>Next in line. It will share the Mac's core, so it starts with the same rules and tests.</p>
@@ -419,11 +437,10 @@ footer .brand b { font-size: 0.8rem; }
 </footer>
 
 <script>
-// Light the hero's dots round the mouse: each brighter, with an orange halo under it.
+// Light the dots of each dotted section (section, Sync, Platforms) round the mouse: each brighter, with an orange halo under it.
 // A dot that the mouse has left fades out over a moment instead of at once. Mouse only: a touch has no hover.
-(() => {
-  const hero = document.querySelector(".hero");
-  const canvas = hero.querySelector(".lights");
+document.querySelectorAll(".dotted").forEach((section) => {
+  const canvas = section.querySelector(".lights");
   const ctx = canvas.getContext("2d");
   const STEP = 12, MID = STEP / 2;   // the CSS dot grid: a dot in the middle of every 12 px square
   const REACH = 260, HALO_REACH = 120;
@@ -442,7 +459,7 @@ footer .brand b { font-size: 0.8rem; }
 
   // One lit dot and one halo, drawn once per theme and stamped onto the canvas.
   function sprites() {
-    const css = getComputedStyle(hero), scale = devicePixelRatio || 1;
+    const css = getComputedStyle(section), scale = devicePixelRatio || 1;
     const make = (paint) => {
       const c = document.createElement("canvas");
       c.width = c.height = Math.ceil(STEP * scale);
@@ -467,7 +484,7 @@ footer .brand b { font-size: 0.8rem; }
 
   function resize() {
     const scale = devicePixelRatio || 1;
-    w = hero.clientWidth; h = hero.clientHeight;
+    w = section.clientWidth; h = section.clientHeight;
     canvas.width = Math.round(w * scale); canvas.height = Math.round(h * scale);
     ctx.setTransform(scale, 0, 0, scale, 0, 0);
     cols = Math.ceil(w / STEP); rows = Math.ceil(h / STEP);
@@ -500,14 +517,14 @@ footer .brand b { font-size: 0.8rem; }
 
   const kick = () => { if (!frame) frame = requestAnimationFrame(draw); };
 
-  hero.addEventListener("pointermove", (e) => {
+  section.addEventListener("pointermove", (e) => {
     if (e.pointerType !== "mouse") return;
-    const box = hero.getBoundingClientRect();
+    const box = section.getBoundingClientRect();
     mouse = { x: e.clientX - box.left, y: e.clientY - box.top };
     kick();
   });
-  hero.addEventListener("pointerleave", () => { mouse = null; kick(); });
-  new ResizeObserver(() => { resize(); kick(); }).observe(hero);
+  section.addEventListener("pointerleave", () => { mouse = null; kick(); });
+  new ResizeObserver(() => { resize(); kick(); }).observe(section);
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { sprites(); kick(); });
-})();
+});
 </script>
