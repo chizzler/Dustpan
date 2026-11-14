@@ -169,6 +169,23 @@ section.block { padding-block: clamp(64px, 9vw, 120px); border-bottom: 1px solid
   .unit:last-child { border-bottom: 0; }
 }
 
+/* screenshots */
+.shot { margin: 0; }
+.shot img {
+  display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 12px; background: #15121c;
+  box-shadow: 0 30px 70px -30px rgba(0, 0, 0, 0.55);
+}
+.shot figcaption { margin-top: 14px; color: var(--dim); font-size: 0.9rem; }
+.hero-shot { margin-top: clamp(40px, 6vw, 72px); }
+.gallery { margin-bottom: 56px; }
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+.tabs button {
+  font: 500 0.72rem/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim);
+  background: transparent; border: 1px solid var(--line); border-radius: 999px; padding: 10px 14px; cursor: pointer;
+}
+.tabs button:hover { color: var(--fg); border-color: var(--fg); }
+.tabs button[aria-selected="true"] { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+
 /* priorities */
 .priority { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 56px; }
 .pkey { border-radius: 3px; padding: 18px 16px 14px; color: #151514; display: grid; gap: 22px; box-shadow: inset 0 -4px 0 rgba(0,0,0,.2); min-width: 0; }
@@ -275,13 +292,17 @@ footer .brand b { font-size: 0.8rem; }
       <div>
         <span class="legend">Task manager · Linux · Mac</span>
         <h1><span class="slab"><span class="ink">Private, free task management</span></span></h1>
-        <p class="lede">A free, private solution for task management. Dustpan is a native task manager for Linux and Mac. <strong>Everything lives on your machine.</strong>
-          It works on its own, or syncs through an opensource server you run wherever you like. when you want your other devices in step.</p>
+        <p class="lede">A free, private solution for task management. Dustpan is a native task manager for Linux and Mac. <strong>Works offline.</strong>
+         But when you want your other devices in sync, it can work through an open-source server you can run anywhere.</p>
         <div class="actions">
           <a class="btn primary" href="#platforms">Get Dustpan</a>
           <a class="btn" href="#features">See what it does</a>
         </div>
       </div>
+      <figure class="shot hero-shot">
+        <img src="screenshots/03-work.png" width="1600" height="900"
+          alt="A Work project in Dustpan: Doing and Next sections, a roadmap task two-thirds done, with nested subtasks and progress pies, a sub-project, labels and a repeating task.">
+      </figure>
 
     </div>
   </section>
@@ -297,11 +318,46 @@ footer .brand b { font-size: 0.8rem; }
           Both keyboard and mouse are first-class citizens, with drag and drop onto a calendar window for rapid date &amp; task length changes.</p>
       </div>
 
+      <div class="gallery">
+        <div class="tabs" role="tablist" aria-label="Screenshots">
+          <button role="tab" aria-selected="true" aria-controls="shot-today" id="tab-today">Today</button>
+          <button role="tab" aria-selected="false" aria-controls="shot-upcoming" id="tab-upcoming" tabindex="-1">Upcoming</button>
+          <button role="tab" aria-selected="false" aria-controls="shot-project" id="tab-project" tabindex="-1">Project</button>
+          <button role="tab" aria-selected="false" aria-controls="shot-week" id="tab-week" tabindex="-1">Week</button>
+          <button role="tab" aria-selected="false" aria-controls="shot-month" id="tab-month" tabindex="-1">Month</button>
+          <button role="tab" aria-selected="false" aria-controls="shot-details" id="tab-details" tabindex="-1">Task details</button>
+        </div>
+        <figure class="shot" role="tabpanel" id="shot-today" aria-labelledby="tab-today">
+          <img src="screenshots/01-today.png" width="1600" height="900" loading="lazy" alt="The Today page: today's tasks, each with its time, length, repeat and project.">
+          <figcaption>Today: everything due, from every project.</figcaption>
+        </figure>
+        <figure class="shot" role="tabpanel" id="shot-upcoming" aria-labelledby="tab-upcoming" hidden>
+          <img src="screenshots/02-upcoming.png" width="1600" height="900" loading="lazy" alt="The Upcoming page: tasks grouped by day, with times, lengths, labels and projects.">
+          <figcaption>Upcoming: the days ahead, one heading per day.</figcaption>
+        </figure>
+        <figure class="shot" role="tabpanel" id="shot-project" aria-labelledby="tab-project" hidden>
+          <img src="screenshots/04-home.png" width="1600" height="900" loading="lazy" alt="The Home project: a bill with one of two subtasks done, repeating chores, labels, and a Garden sub-project.">
+          <figcaption>A project with a sub-project, repeating chores and labels.</figcaption>
+        </figure>
+        <figure class="shot" role="tabpanel" id="shot-week" aria-labelledby="tab-week" hidden>
+          <img src="screenshots/calendar-week.png" width="1600" height="900" loading="lazy" alt="The calendar's week view: timed tasks as blocks on a grid, all-day tasks along the top, and hours planned per day.">
+          <figcaption>The week. Drag a task to a time slot, and stretch it to set how long it takes.</figcaption>
+        </figure>
+        <figure class="shot" role="tabpanel" id="shot-month" aria-labelledby="tab-month" hidden>
+          <img src="screenshots/calendar-month.png" width="1600" height="900" loading="lazy" alt="The calendar's month view, with each day's tasks listed in its square.">
+          <figcaption>The month at a glance.</figcaption>
+        </figure>
+        <figure class="shot" role="tabpanel" id="shot-details" aria-labelledby="tab-details" hidden>
+          <img src="screenshots/task-details.png" width="1600" height="900" loading="lazy" alt="Editing a task: title, priority, labels, estimate, Markdown notes with a preview, and a due date picker.">
+          <figcaption>Every detail of a task in one place, with notes in Markdown.</figcaption>
+        </figure>
+      </div>
+
       <div class="rack">
         <div class="unit"><span class="tag">Projects</span><h3>Nested as deep as you like</h3>
           <p>Projects hold sub-projects, sections and tasks. Give each one a colour and an icon, and drag to reorder or nest.</p></div>
-        <div class="unit"><span class="tag">every!</span><h3>Repeats, repeat</h3>
-          <p><code>every 3 days</code> runs on the calendar. <code>every! 3 days</code> counts from when you finish.</p></div>
+        <div class="unit"><span class="tag">Repeats</span><h3>Repeats, repeat</h3>
+          <p><code>every 3 days</code> runs on the calendar. <code>every 3 days after completion</code> counts from when you finish.</p></div>
         <div class="unit"><span class="tag">Quick add</span><h3>Rapid disclosures</h3>
           <p>Dates, times, repeats, priority, project, labels and durations, pulled from one line of text.</p></div>
         <div class="unit"><span class="tag">Subtasks</span><h3>Micro progress graph</h3>
@@ -375,13 +431,13 @@ footer .brand b { font-size: 0.8rem; }
       <div class="head">
         <div>
           <span class="legend"><span class="led on"></span>Privacy</span>
-          <h2>Escape the platform ecosystem clutches.</h2>
+          <h2>Escape the clutches of platform ecosystems.</h2>
         </div>
-        <p>A task list knows a lot about you: where you're going, who you owe and what's worrying you.
-          Dustpan keeps that between your devices and your server.</p>
+        <p>OpenTodo and Dustpan build on open standards, with CalDAV as an option.
+          Dustpan keeps your tasks between your devices and your server.</p>
       </div>
       <div class="ledger">
-        <div><span class="led on"></span><span><h3>No telemetry</h3><p>No analytics, no crash reporting, no accounts with us. Nothing leaves your machine unless you set up sync.</p></span></div>
+        <div><span class="led on"></span><span><h3>Just an app</h3><p>Download it and use it. There is no account to make, unless you want to hook it up to your own OpenToDo Server.</p></span></div>
         <div><span class="led on"></span><span><h3>Your server, your rules</h3><p>Sync runs through a server you host. Lose it and you lose nothing: every device holds the whole list.</p></span></div>
         <div><span class="led on"></span><span><h3>Encrypted in transit</h3><p>Dustpan refuses plain http to any machine but your own, and won't follow a redirect, so your token can't leak.</p></span></div>
         <div><span class="led on"></span><span><h3>A short supply chain</h3><p>No PyPI packages on Linux and no third-party Swift packages on the Mac. Less code you didn't ask for.</p></span></div>
@@ -437,6 +493,29 @@ footer .brand b { font-size: 0.8rem; }
 </footer>
 
 <script>
+// Screenshot tabs: click, or use the arrow keys, Home and End once a tab has focus.
+(() => {
+  const tabs = [...document.querySelectorAll('.tabs [role="tab"]')];
+  const show = (tab, focus) => {
+    for (const t of tabs) {
+      const on = t === tab;
+      t.setAttribute("aria-selected", on);
+      t.tabIndex = on ? 0 : -1;
+      document.getElementById(t.getAttribute("aria-controls")).hidden = !on;
+    }
+    if (focus) tab.focus();
+  };
+  tabs.forEach((tab, i) => {
+    tab.addEventListener("click", () => show(tab));
+    tab.addEventListener("keydown", (e) => {
+      const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[e.key];
+      if (to === undefined) return;
+      e.preventDefault();
+      show(tabs[(to + tabs.length) % tabs.length], true);
+    });
+  });
+})();
+
 // Light the dots of each dotted section (section, Sync, Platforms) round the mouse: each brighter, with an orange halo under it.
 // A dot that the mouse has left fades out over a moment instead of at once. Mouse only: a touch has no hover.
 document.querySelectorAll(".dotted").forEach((section) => {
