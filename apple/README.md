@@ -28,8 +28,8 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | Path | Role |
 | --- | --- |
 | `DustpanCore/` | The Swift package: everything without UI, for Mac and iPhone |
-| `DustpanCore/Sources/DustpanCore/JSON.swift` | Any JSON value, read and written with `JSONSerialization` |
-| `DustpanCore/Sources/DustpanCore/Store.swift` | SQLite: one last-writer-wins register per field, outbox, meta. The desktop's schema |
+| `DustpanCore/Sources/DustpanCore/JSON.swift` | Any JSON value, read and written with `JSONSerialization`. The store's plain values (null, booleans, integers, strings without escapes) are read without it |
+| `DustpanCore/Sources/DustpanCore/Store.swift` | SQLite: one last-writer-wins register per field, outbox, meta. The desktop's schema. `changes` counts rows written, and `setMeta` doesn't rewrite a value already there, so a sync that changed nothing leaves the pages alone |
 | `DustpanCore/Sources/DustpanCore/Clock.swift` | Hybrid logical clock |
 | `DustpanCore/Sources/DustpanCore/Sync.swift` | The sync exchange, refused ops, purge and re-seed |
 | `DustpanCore/Sources/DustpanCore/Api.swift` | HTTP client, `URLSession` |
@@ -40,7 +40,7 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `DustpanCore/Sources/DustpanCore/Dates.swift` | Due date display, the instant a due denotes, and the editor's due |
 | `DustpanCore/Sources/DustpanCore/Writes.swift` | Local edits: one batch per action, applied and queued, with Undo. Labels too |
 | `DustpanCore/Sources/DustpanCore/Markdown.swift` | Notes: the web app's Markdown subset, parsed to blocks, inline text as `AttributedString`, and a note's first line |
-| `DustpanCore/Sources/DustpanCore/Icons.swift` | Project icons: all of Lucide, the picker's categories, search and suggestions. `IconPath.swift`: an icon's SVG as a `CGPath` |
+| `DustpanCore/Sources/DustpanCore/Icons.swift` | Project icons: all of Lucide, the picker's categories, search and suggestions. Drawing loads only the SVG bodies; the picker's keywords and catalogue load when it opens. `IconPath.swift`: an icon's SVG as a `CGPath` |
 | `DustpanCore/Sources/DustpanCore/Resources/icons/` | The desktop's icon files and Lucide's licence (ISC), copied unchanged; a test checks they match |
 | `DustpanCore/Sources/DustpanCore/Labels.swift` | Finding labels as you type, the picker's order, duplicates, the chips a row shows |
 | `DustpanCore/Sources/DustpanCore/Ordering.swift` | Manual order: the positions a move writes |
@@ -63,7 +63,7 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `DustpanCore/Sources/DustpanCore/Subtasks.swift` | Completed subtasks in lists: the broom's record, sinking below open siblings, a parent's progress and when it's ready to complete |
 | `DustpanCore/Sources/DustpanCore/Folding.swift` | Folding subtasks away: the stored list after a fold, and unfolding the way down to a new parent |
 | `DustpanCore/Sources/DustpanCore/Sectors.swift` | The part of time sectors the filter language needs |
-| `DustpanCore/Sources/DustpanCore/Reminders.swift` | Reminders that follow their dates, default reminders, and which are due to show |
+| `DustpanCore/Sources/DustpanCore/Reminders.swift` | Reminders that follow their dates, default reminders, and which are due to show. The check reads only fired reminders' tasks, by id |
 | `DustpanCore/Sources/DustpanCore/Ids.swift` | Deterministic ids |
 | `DustpanCore/Sources/DustpanCore/Events.swift` | The live update stream |
 | `DustpanCore/Sources/dustpan-cli/` | `sync` and `tree`, for checking against the desktop client |
@@ -78,6 +78,7 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `Dustpan/FilterBar.swift` | The Filter page's query, its match count or error, and Save as View |
 | `Dustpan/TrashPage.swift` | The Trash: Restore, Delete for Good and Empty Trash |
 | `Dustpan/SettingsView.swift` | Dustpan ▸ Settings (⌘,): General (`PreferencesForm`, with `DefaultReminderPicker`) and Sync (`SyncSettings`) |
+| `Dustpan/LoginItem.swift` | Opening at login (`SMAppService`), for the copy in Applications only: offered once when a reminder first waits to fire, and switched in Settings ▸ General (`OpenAtLoginSection`). Mac only |
 | `Dustpan/ArchivedPage.swift` | An archived project's page: Unarchive or Delete |
 | `Dustpan/MoveCommands.swift` | Edit ▸ Move Up to Outdent, for whichever list has the focus (`ListMoves` in `Moves.swift`) |
 | `Dustpan/FoldCommand.swift` | View ▸ Fold Subtasks (⌘←) and Unfold Subtasks (⌘→), for the selected task (`TaskFold` in `TaskFold.swift`) |
@@ -106,6 +107,10 @@ Data goes in `~/Library/Application Support/Dustpan/`. The app isn't sandboxed, 
 
 Give each device its own token: Settings → Integrations → API tokens in the web app.
 
+Reminders only fire while Dustpan is running. The first time one is waiting, Dustpan offers to open at login;
+Settings ▸ General ▸ Open at login changes it later. Only the copy in `/Applications` can do this, so a development
+build never opens at login on the real data.
+
 Install or update the app in `/Applications`, from the repo root. Quit Dustpan first.
 
 ```sh
@@ -123,8 +128,7 @@ Before 1.0 the minor number follows the Mac client's own slices.
 
 | Version | Date | What |
 | --- | --- | --- |
-| Unreleased | | Quick add's preview starts with the title it will save. "sun", "sat" and "wed" are read as days only with a cue, as on the desktop ([spec](../spec/quickadd.md#where-we-differ)). Not yet built on a Mac. |
-| 0.19.0 | 2026-11-14 | Catching up with the desktop's 0.12.5. Projects can carry any of Lucide's 1,854 icons, in their colour, in the sidebar, Trash and headings: Edit Project has an Icon row with a picker (search, a category sidebar, and suggestions from the name). A project can take the Theme colour, drawn in the text colour. Every page opens with a large heading: the date on Today, a sub-project's parent (a link), the title with its icon or symbol, an open count, and the sub-projects to open; the window's title shows once it has scrolled away. Label chips show a small tag instead of a dot. |
+| 0.19.0 | 2026-11-14 | Catching up with the desktop's 0.12.5. Projects can carry any of Lucide's 1,854 icons, in their colour, in the sidebar, Trash and headings: Edit Project has an Icon row with a picker (search, a category sidebar, and suggestions from the name). A project can take the Theme colour, drawn in the text colour. Every page opens with a large heading: the date on Today, a sub-project's parent (a link), the title with its icon or symbol, an open count, and the sub-projects to open; the window's title shows once it has scrolled away. Label chips show a small tag instead of a dot. Quick add's preview starts with the title it will save, and "sun", "sat" and "wed" are read as days only with a cue, as on the desktop ([spec](../spec/quickadd.md#where-we-differ)). Reminders only fire while Dustpan runs, so the first time one is waiting it offers to open at login; Settings ▸ General has the switch. Lighter in the background: the 30-second reminder check reads only the tasks it needs (100 ms to 5 ms at 3,000 tasks), drawing icons no longer loads the picker's catalogue, and a sync that changes nothing doesn't rebuild the pages. |
 | 0.18.0 | 2026-11-13 | Catching up with the desktop's standalone support. Dustpan opens without a server and keeps everything on this Mac; a config file that's wrong opens standalone too, with a note saying why. Settings (⌘,): default reminders (with a custom offset), time format, date order, week and day start, and quick add's language and switches, stored as the desktop stores them; Sync connects to an OpenTodo server, uploading the tasks here, and Disconnect goes back to standalone. Connecting with data from another account asks whether to upload it into the new one or replace it. An account change waits for a running sync, and a sync caught by one keeps nothing. Delete for Good deletes at once when the data has never been on a server, and otherwise waits for the server, after reconnecting if need be. Ticked subtasks settle after 2 s, not 3. |
 | 0.17.0 | 2026-11-13 | Catching up with the desktop's 0.12.4. A parent's check circle holds a pie of its done subtasks (a faint ring for none, a disc for all), with "3/5" on the row and the count in the tooltip. Completing the last open subtask offers to complete the parent in a banner: Complete (⌘Return) or Esc. Completed subtasks stay under their parent, below its open ones, until the broom on the parent clears them from this Mac's lists, with Undo; a ticked or reopened subtask keeps its place until the page has been still for 3 s. A row's project label on Today and the other grouped pages opens the task in its project, unfolded. |
 | 0.16.0 | 2026-11-13 | Slice 12c on the calendar: drag a block's bottom edge to change its estimate in 15-minute steps. Select with a click or j and k; Return opens, c completes, Delete deletes, Esc unselects. On the grid ↑ ↓ move 15 minutes, ← → a day, ⇧↑ ⇧↓ shorter or longer, ⌥⇧↑ ⌥⇧↓ the start, u back to the lane; in Month ← → keep the time. Each with Edit ▸ Undo, and the view follows a task moved off it. Right-click for the row menu with the moves. The gear sets the grid's hours and day length for this Mac. |

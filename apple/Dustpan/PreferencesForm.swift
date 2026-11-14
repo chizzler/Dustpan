@@ -1,7 +1,7 @@
 import DustpanCore
 import SwiftUI
 
-/// Settings ▸ General: default reminders, dates and times, and what quick add understands.
+/// Settings ▸ General: opening at login, default reminders, dates and times, and what quick add understands.
 /// Stored on user_prefs, as on the desktop, so they sync once connected.
 struct PreferencesForm: View {
     @Environment(AppModel.self) private var model
@@ -34,6 +34,7 @@ struct PreferencesForm: View {
 
     var body: some View {
         Form {
+            OpenAtLoginSection()
             Section {
                 DefaultReminderPicker("Tasks with a time", presets: defaultTimedPresets, label: offsetLabel,
                                       minutes: $timed)

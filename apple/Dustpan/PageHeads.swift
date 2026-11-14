@@ -8,7 +8,7 @@ extension AppModel {
         switch page {
         case .today:
             let count = todayCount(snap.tasks, today: today)
-            return PageHead(eyebrow: today.date.formatted(.dateTime.weekday(.wide).day().month(.wide)), title: page.name,
+            return PageHead(eyebrow: today.noon.formatted(.dateTime.weekday(.wide).day().month(.wide)), title: page.name,
                             mark: .symbol(page.symbol), meta: count == 0 ? "Nothing to do" : "\(count) to do")
         case .inbox:
             // Everything open on the page, planned or not. The sidebar counts only the unplanned.
@@ -21,7 +21,7 @@ extension AppModel {
                             title: node.row["name"].string ?? "", mark: .project(node.row),
                             meta: PageHead.open(countOpen(snap, id, today: today.description)),
                             places: node.children.map(\.row),
-                            up: parentId.flatMap { projectsById[$0] == nil ? nil : .project($0) })
+                            parent: parentId.flatMap { projectsById[$0]?.row })
         case .archived(let id):
             guard let project = snap.archivedProjects.first(where: { $0.row.id == id })?.row else {
                 return PageHead(title: "Archived")

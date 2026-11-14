@@ -81,41 +81,31 @@ public enum Icons {
                                "time": "time", "communication": "communication", "symbols": "shapes",
                                "leisure": "leisure"]
 
-    private struct Files: Sendable {
-        let paths: [String: String]
-        let aliases: [String: String]
-        let catalogue: [[String: JSON]]
-        let lucide: [String: JSON]
-        let version: String
+    private static func load(_ name: String) -> JSON { JSON(any: loadAny(name)) }
 
-        init() {
-            func load(_ name: String) -> JSON {
-                guard let url = Bundle.module.url(forResource: name, withExtension: "json", subdirectory: "icons"),
-                      let data = try? Data(contentsOf: url), let json = try? JSON(parsing: data)
-                else { fatalError("Missing icons/\(name).json in DustpanCore's resources") }
-                return json
-            }
-            paths = (load("paths").object ?? [:]).compactMapValues(\.string)
-            let lucide = load("lucide")
-            aliases = (lucide["aliases"].object ?? [:]).compactMapValues(\.string)
-            self.lucide = lucide["icons"].object ?? [:]
-            version = lucide["version"].string ?? ""
-            catalogue = (load("catalogue").array ?? []).compactMap(\.object)
-        }
+    private static func loadAny(_ name: String) -> Any {
+        guard let url = Bundle.module.url(forResource: name, withExtension: "json", subdirectory: "icons"),
+              let data = try? Data(contentsOf: url), let any = try? JSONSerialization.jsonObject(with: data)
+        else { fatalError("Missing icons/\(name).json in DustpanCore's resources") }
+        return any
     }
 
-    private static let data = Files()
+    // Drawing needs only each icon's SVG body and Lucide's renames. The picker's tags and catalogue load when it
+    // opens, and only the entries built from them stay.
+    // Read straight from JSONSerialization: a JSON tree of the whole file would only be thrown away.
+    private static let paths = loadAny("paths") as? [String: String] ?? [:]
+    private static let aliases = (loadAny("lucide") as? [String: Any])?["aliases"] as? [String: String] ?? [:]
 
     /// Lucide's version, as sync.py wrote it.
-    public static var version: String { data.version }
+    public static var version: String { load("lucide")["version"].string ?? "" }
     /// The names OpenTodo's REST, MCP and web app know.
-    public static let server = Set(data.catalogue.compactMap { $0["name"]?.string })
+    public static let server = Set((load("catalogue").array ?? []).compactMap { $0["name"].string })
     /// Every icon, in picker order: by group; in each, OpenTodo's first in its order, then the rest by name.
     public static let entries = makeEntries()
     /// What the picker shows: all but the labels' tag.
     public static let offered = entries.filter { $0.name != labelMark }
     /// Each group's offered icons, in order.
-    public static let inGroup = Dictionary(grouping: offered.map(\.name)) { groupOf[$0] ?? "" }
+    public static let inGroup = Dictionary(grouping: offered, by: \.category).mapValues { $0.map(\.name) }
     /// Each icon's group, by name.
     public static let groupOf = Dictionary(uniqueKeysWithValues: entries.map { ($0.name, $0.category) })
     static let labels = Dictionary(uniqueKeysWithValues: groups.map { ($0.id, $0.label) })
@@ -128,16 +118,18 @@ public enum Icons {
     }
 
     private static func makeEntries() -> [IconEntry] {
-        let old = Dictionary(uniqueKeysWithValues: server.compactMap { name in data.aliases[name].map { ($0, name) } })
+        let catalogue = (load("catalogue").array ?? []).compactMap(\.object)
+        let lucide = load("lucide")["icons"].object ?? [:]
+        let old = Dictionary(uniqueKeysWithValues: server.compactMap { name in aliases[name].map { ($0, name) } })
         var words: [String: [String]] = [:], curated: [String: String] = [:], place: [String: Int] = [:]
-        for (i, entry) in data.catalogue.enumerated() {
+        for (i, entry) in catalogue.enumerated() {
             guard let name = entry["name"]?.string else { continue }
             words[name] = (entry["keywords"]?.array ?? []).compactMap(\.string)
             curated[name] = entry["category"]?.string.flatMap { fromOpenTodo[$0] }
             place[name] = i
         }
         let order = Dictionary(uniqueKeysWithValues: groups.enumerated().map { ($1.id, $0) })
-        let found = data.lucide.map { lucideName, info in
+        let found = lucide.map { lucideName, info in
             let name = old[lucideName] ?? lucideName
             let lucideCategories = (info["categories"].array ?? []).compactMap(\.string)
             let group = curated[name] ?? self.group(of: lucideName, Set(lucideCategories))
@@ -157,12 +149,12 @@ public enum Icons {
     /// True for a name this client can draw. A newer client may have stored one it can't.
     public static func known(_ name: String?) -> Bool {
         guard let name else { return false }
-        return data.paths[name] != nil || data.aliases[name] != nil
+        return paths[name] != nil || aliases[name] != nil
     }
 
     /// The icon's SVG body: its elements, without the `<svg>` around them.
     public static func body(_ name: String) -> String? {
-        data.paths[data.aliases[name] ?? name]
+        paths[aliases[name] ?? name]
     }
 
     /// An icon's readable name: "paw-print" is "paw print".
@@ -172,7 +164,10 @@ public enum Icons {
 
     /// OpenTodo's match order: 0 exact name, 1 name prefix, 2 in the name, 3 keyword, 4 category; nil for none.
     public static func rank(_ entry: IconEntry, _ query: String) -> Int? {
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        rank(entry, normalised: query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+    }
+
+    private static func rank(_ entry: IconEntry, normalised q: String) -> Int? {
         let name = entry.name
         if q.isEmpty || name == q { return 0 }
         if name.hasPrefix(q) { return 1 }
@@ -184,8 +179,9 @@ public enum Icons {
 
     /// The offered icons matching query, best first; in a tie OpenTodo's first, then picker order.
     public static func search(_ query: String) -> [IconEntry] {
-        offered.enumerated()
-            .compactMap { i, entry in rank(entry, query).map { ($0, entry.server ? 0 : 1, i) } }
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return offered.enumerated()
+            .compactMap { i, entry in rank(entry, normalised: q).map { ($0, entry.server ? 0 : 1, i) } }
             .sorted { $0 < $1 }
             .map { offered[$0.2] }
     }

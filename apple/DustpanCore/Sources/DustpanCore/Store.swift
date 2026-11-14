@@ -67,10 +67,16 @@ public final class Store {
         try query("SELECT value FROM meta WHERE key = ?", [.text(key)]) { try JSON(parsing: $0.text(0)) }.first ?? .null
     }
 
+    /// Writing the value already there changes nothing, so `changes` doesn't count it.
     public func setMeta(_ key: String, _ value: JSON) throws {
-        try run("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-                [.text(key), .text(value.text)])
+        try run("""
+            INSERT INTO meta (key, value) VALUES (?, ?)
+            ON CONFLICT (key) DO UPDATE SET value = excluded.value WHERE value != excluded.value
+            """, [.text(key), .text(value.text)])
     }
+
+    /// Rows written since the store opened: unchanged, nothing was.
+    public var changes: Int64 { sqlite3_total_changes64(db) }
 
     /// This device's id, created on first use.
     public func device() throws -> String {
@@ -137,12 +143,28 @@ public final class Store {
     /// Fold every field of one entity kind into rows, keyed by id.
     public func rows(_ entity: String) throws -> [String: Row] {
         var rows: [String: Row] = [:]
+        // A handful of devices write every field: share one copy of each id.
+        var devices: [String: String] = [:]
         try each("SELECT entity_id, field, value, ts, device FROM fields WHERE entity = ?", [.text(entity)]) { r in
-            let id = r.text(0), name = r.text(1)
+            let id = r.text(0), name = r.text(1), device = r.text(4)
             rows[id, default: Row(id: id)].values[name] = try JSON(parsing: r.text(2))
-            rows[id]!.clocks[name] = FieldClock(ts: r.int(3), device: r.text(4))
+            rows[id]!.clocks[name] = FieldClock(ts: r.int(3), device: devices[device, default: device])
+            if devices[device] == nil { devices[device] = device }
         }
         return rows
+    }
+
+    /// One entity's fields as a row, or nil when it has none.
+    public func row(_ entity: String, _ id: String) throws -> Row? {
+        var row: Row?
+        try each("SELECT field, value, ts, device FROM fields WHERE entity = ? AND entity_id = ?",
+                 [.text(entity), .text(id)]) { r in
+            let name = r.text(0)
+            if row == nil { row = Row(id: id) }
+            row!.values[name] = try JSON(parsing: r.text(1))
+            row!.clocks[name] = FieldClock(ts: r.int(2), device: r.text(3))
+        }
+        return row
     }
 
     // MARK: outbox

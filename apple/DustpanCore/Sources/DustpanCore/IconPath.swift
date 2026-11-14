@@ -6,9 +6,16 @@ import Foundation
 // Lucide's few filled dots (r 0.5) sit inside their own 1.5 px stroke, so stroking alone draws them.
 
 extension Icons {
+    /// Each icon's outline, parsed the first time it's drawn. NSCache is thread-safe.
+    nonisolated(unsafe) private static let outlines = NSCache<NSString, CGPath>()
+
     /// The icon's outline, or nil for a name this client doesn't know.
     public static func path(_ name: String) -> CGPath? {
-        body(name).map(svgPath)
+        if let found = outlines.object(forKey: name as NSString) { return found }
+        guard let body = body(name) else { return nil }
+        let outline = svgPath(body)
+        outlines.setObject(outline, forKey: name as NSString)
+        return outline
     }
 }
 
@@ -55,18 +62,18 @@ struct PathScanner {
 
     init(_ text: String) { bytes = Array(text.utf8) }
 
-    private mutating func skip() {
-        while i < bytes.count, bytes[i] == 0x20 || bytes[i] == 0x2C || bytes[i] == 0x0A || bytes[i] == 0x0D
-                || bytes[i] == 0x09 { i += 1 }
+    private func at(_ k: Int, _ characters: String) -> Bool {
+        k < bytes.count && characters.utf8.contains(bytes[k])
     }
 
-    private func isDigit(_ k: Int) -> Bool { k < bytes.count && bytes[k] >= 0x30 && bytes[k] <= 0x39 }
+    private mutating func skip() {
+        while at(i, " ,\n\r\t") { i += 1 }
+    }
 
-    /// The next command letter, if one comes next.
+    /// The next command letter, if one comes next. "e" is an exponent, never a command.
     mutating func command() -> UInt8? {
         skip()
-        guard i < bytes.count, (bytes[i] | 0x20) >= 0x61, (bytes[i] | 0x20) <= 0x7A, bytes[i] | 0x20 != 0x65
-        else { return nil }
+        guard i < bytes.count, at(i, "MmLlHhVvCcSsQqTtAaZz") else { return nil }
         defer { i += 1 }
         return bytes[i]
     }
@@ -74,13 +81,13 @@ struct PathScanner {
     mutating func number() -> CGFloat? {
         skip()
         let start = i
-        if i < bytes.count, bytes[i] == 0x2B || bytes[i] == 0x2D { i += 1 }
-        while isDigit(i) { i += 1 }
-        if i < bytes.count, bytes[i] == 0x2E { i += 1; while isDigit(i) { i += 1 } }
-        if i > start, i < bytes.count, bytes[i] | 0x20 == 0x65 {
+        if at(i, "+-") { i += 1 }
+        while at(i, "0123456789") { i += 1 }
+        if at(i, ".") { i += 1; while at(i, "0123456789") { i += 1 } }
+        if i > start, at(i, "eE") {
             i += 1
-            if i < bytes.count, bytes[i] == 0x2B || bytes[i] == 0x2D { i += 1 }
-            while isDigit(i) { i += 1 }
+            if at(i, "+-") { i += 1 }
+            while at(i, "0123456789") { i += 1 }
         }
         guard let value = Double(String(decoding: bytes[start..<i], as: UTF8.self)) else {
             i = start
@@ -92,9 +99,9 @@ struct PathScanner {
     /// An arc's flag: one digit, which may run into what follows ("011 2" is 0, 1, 1 2).
     mutating func flag() -> Bool? {
         skip()
-        guard i < bytes.count, bytes[i] == 0x30 || bytes[i] == 0x31 else { return nil }
+        guard at(i, "01") else { return nil }
         defer { i += 1 }
-        return bytes[i] == 0x31
+        return bytes[i] == UInt8(ascii: "1")
     }
 
     var atEnd: Bool {
@@ -105,73 +112,73 @@ struct PathScanner {
 /// Path data, appended to path.
 func addPathData(_ d: String, to path: CGMutablePath) {
     var s = PathScanner(d)
-    var command: UInt8 = 0
+    var command: Character = " "
     var point = CGPoint.zero, start = CGPoint.zero
     var lastCubic: CGPoint?, lastQuad: CGPoint?
 
     while !s.atEnd {
         if let next = s.command() {
-            command = next
-        } else if command == 0 || command | 0x20 == 0x7A {
+            command = Character(UnicodeScalar(next))
+        } else if command == " " || command.lowercased() == "z" {
             return  // numbers with no command to repeat
         }
-        let relative = command >= 0x61
+        let relative = command.isLowercase
         func at(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
             relative ? CGPoint(x: point.x + x, y: point.y + y) : CGPoint(x: x, y: y)
         }
         var cubic: CGPoint?, quad: CGPoint?
-        switch command | 0x20 {
-        case 0x6D:  // m: then implicit lines
+        switch command.lowercased() {
+        case "m":  // then implicit lines
             guard let x = s.number(), let y = s.number() else { return }
             point = at(x, y)
             start = point
             path.move(to: point)
-            command = relative ? 0x6C : 0x4C
-        case 0x6C:  // l
+            command = relative ? "l" : "L"
+        case "l":
             guard let x = s.number(), let y = s.number() else { return }
             point = at(x, y)
             path.addLine(to: point)
-        case 0x68:  // h
+        case "h":
             guard let x = s.number() else { return }
             point = CGPoint(x: relative ? point.x + x : x, y: point.y)
             path.addLine(to: point)
-        case 0x76:  // v
+        case "v":
             guard let y = s.number() else { return }
             point = CGPoint(x: point.x, y: relative ? point.y + y : y)
             path.addLine(to: point)
-        case 0x63:  // c
+        case "c":
             guard let x1 = s.number(), let y1 = s.number(), let x2 = s.number(), let y2 = s.number(),
                   let x = s.number(), let y = s.number() else { return }
             let c1 = at(x1, y1), c2 = at(x2, y2)
             point = at(x, y)
             path.addCurve(to: point, control1: c1, control2: c2)
             cubic = c2
-        case 0x73:  // s: the first control reflects the last curve's
+        case "s":  // the first control reflects the last curve's
             guard let x2 = s.number(), let y2 = s.number(), let x = s.number(), let y = s.number() else { return }
             let c1 = lastCubic.map { CGPoint(x: 2 * point.x - $0.x, y: 2 * point.y - $0.y) } ?? point
             let c2 = at(x2, y2)
             point = at(x, y)
             path.addCurve(to: point, control1: c1, control2: c2)
             cubic = c2
-        case 0x71:  // q
+        case "q":
             guard let x1 = s.number(), let y1 = s.number(), let x = s.number(), let y = s.number() else { return }
             let c = at(x1, y1)
             point = at(x, y)
             path.addQuadCurve(to: point, control: c)
             quad = c
-        case 0x74:  // t
+        case "t":
             guard let x = s.number(), let y = s.number() else { return }
             let c = lastQuad.map { CGPoint(x: 2 * point.x - $0.x, y: 2 * point.y - $0.y) } ?? point
             point = at(x, y)
             path.addQuadCurve(to: point, control: c)
             quad = c
-        case 0x61:  // a
+        case "a":
             guard let rx = s.number(), let ry = s.number(), let rotation = s.number(), let large = s.flag(),
                   let sweep = s.flag(), let x = s.number(), let y = s.number() else { return }
             let end = at(x, y)
             addArc(to: path, from: point, to: end, rx: rx, ry: ry, degrees: rotation, large: large, sweep: sweep)
             point = end
-        case 0x7A:  // z
+        case "z":
             path.closeSubpath()
             point = start
         default:

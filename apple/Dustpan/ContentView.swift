@@ -46,6 +46,12 @@ struct ContentView: View {
             .sheet(item: $model.editingProject, content: ProjectEditor.init)
             .sheet(item: $model.editingSection, content: SectionEditor.init)
             .sheet(item: $model.editingLabel, content: LabelEditor.init)
+            .alert("Open Dustpan at login?", isPresented: $model.offersOpenAtLogin) {
+                Button("Open at Login", action: model.openAtLogin)
+                Button("Not Now", role: .cancel) {}
+            } message: {
+                Text("Reminders only appear while Dustpan is running. Opening it at login keeps them coming after a restart. You can change this in Settings ▸ General.")
+            }
             .activeUndo()
             .task(reopenCalendar)
             .frame(minWidth: 640, minHeight: 400)

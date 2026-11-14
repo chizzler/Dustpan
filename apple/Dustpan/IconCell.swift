@@ -13,7 +13,7 @@ struct IconCell: View {
             IconImage(name: name, size: 22)
                 .foregroundStyle(color)
                 .frame(width: 40, height: 40)
-                .background(chosen ? AnyShapeStyle(.tint.opacity(0.25)) : AnyShapeStyle(.clear), in: .rect(cornerRadius: 8))
+                .background(.tint.opacity(chosen ? 0.25 : 0), in: .rect(cornerRadius: 8))
                 .contentShape(.rect)
         }
         .buttonStyle(.plain)

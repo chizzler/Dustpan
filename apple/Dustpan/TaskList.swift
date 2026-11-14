@@ -27,8 +27,6 @@ struct TaskList: View {
         ScrollViewReader { proxy in
             List(selection: $selection) {
                 PageHeading(head: model.pageHead(page))
-                    .selectionDisabled()
-                    .listRowSeparator(.hidden)
                 ForEach(sections.enumerated(), id: \.offset) { index, section in
                     let place = Place(projectId: projectId, sectionId: section.id)
                     let items = shown[index]

@@ -84,8 +84,33 @@ extension JSON {
         self = JSON(any: any)
     }
 
+    /// Most store values are null, a boolean, an integer or a string without escapes: those skip JSONSerialization,
+    /// which costs most of a full read of the store.
     public init(parsing text: String) throws {
-        try self.init(parsing: Data(text.utf8))
+        switch text {
+        case "null": self = .null
+        case "true": self = .bool(true)
+        case "false": self = .bool(false)
+        default:
+            if let int = Int64(text) {
+                self = .int(int)
+            } else if let string = Self.plainString(text) {
+                self = .string(string)
+            } else {
+                try self.init(parsing: Data(text.utf8))
+            }
+        }
+    }
+
+    /// The contents of a quoted string with no escapes, quotes or control characters inside.
+    private static func plainString(_ text: String) -> String? {
+        let bytes = text.utf8
+        guard bytes.count >= 2, bytes.first == UInt8(ascii: "\""), bytes.last == UInt8(ascii: "\"") else { return nil }
+        let inner = bytes.dropFirst().dropLast()
+        guard !inner.contains(where: { $0 < 0x20 || $0 == UInt8(ascii: "\"") || $0 == UInt8(ascii: "\\") }) else {
+            return nil
+        }
+        return String(decoding: inner, as: UTF8.self)
     }
 
     init(any: Any) {

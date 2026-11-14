@@ -213,7 +213,9 @@ let staleReminderMs: Int64 = 24 * 60 * 60_000
 /// The "notified" meta key maps reminder id to the fire_at already shown.
 public func checkReminders(_ store: Store, now: Int64) throws -> ReminderCheck {
     try store.transaction {
-        let tasks = try store.rows("task"), projects = try store.rows("project")
+        // Only fired reminders need their task, looked up by id: reading every task, completed ones too, costs more
+        // and more as they pile up.
+        var projects: [String: Row]?
         let stored = try store.meta("notified")
         let firstRun = stored.isNull
         let notified = stored.object ?? [:]
@@ -225,8 +227,10 @@ public func checkReminders(_ store: Store, now: Int64) throws -> ReminderCheck {
                 if isLive(reminder) { check.next = min(check.next ?? fireAt, fireAt) }
                 continue
             }
-            let task = reminder["task_id"].string.flatMap { tasks[$0] }
-            guard isDue(reminder, task: task, now: now), let task, !inTrash(task, projects) else { continue }
+            guard isLive(reminder), !isDismissed(reminder), let taskId = reminder["task_id"].string,
+                  let task = try store.row("task", taskId), isDue(reminder, task: task, now: now) else { continue }
+            projects = try projects ?? store.rows("project")
+            guard !inTrash(task, projects!) else { continue }
             current[reminder.id] = .int(fireAt)
             if notified[reminder.id]?.int == fireAt || (firstRun && now - fireAt > staleReminderMs) { continue }
             check.show.append(Alert(reminder: reminder, task: task))

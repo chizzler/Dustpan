@@ -23,6 +23,12 @@ public let projectColours: [(hex: String, name: String)] = [
     ("#14b8a6", "Teal"), ("#3b82f6", "Blue"), ("#8b5cf6", "Violet"), ("#ec4899", "Pink"),
 ]
 
+/// The first project colour no live project uses: a new project's.
+public func unusedProjectColour(_ projects: some Sequence<Row>) -> String {
+    let used = Set(projects.filter(isLive).compactMap { $0["color"].string })
+    return projectColours.first { !used.contains($0.hex) }?.hex ?? projectColours[0].hex
+}
+
 /// For matching: no case, no accents.
 func foldName(_ text: String) -> String {
     text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)

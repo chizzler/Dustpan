@@ -33,8 +33,6 @@ struct GroupedTaskList: View {
         ScrollViewReader { proxy in
             List(selection: $selection) {
                 PageHeading(head: model.pageHead(page))
-                    .selectionDisabled()
-                    .listRowSeparator(.hidden)
                 if let query = content.query {
                     Text(query)
                         .font(.callout.monospaced())

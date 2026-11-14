@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import DustpanCore
 
@@ -50,6 +51,26 @@ func memoryStore() throws -> Store { try Store(path: ":memory:") }
         let row = try #require(try store.rows("task")["t1"])
         #expect(row["title"] == "a" && row["priority"] == 1)
         #expect(row.clocks["priority"]?.device == "d2")
+    }
+
+    @Test func rowReadsOneEntity() throws {
+        let store = try memoryStore()
+        try store.apply(op("title", "a", 5, device: "d1"))
+        try store.apply(op("priority", 1, 2, device: "d2"))
+        try store.apply(op("title", "b", 1, id: "t2"))
+        #expect(try store.row("task", "t1") == store.rows("task")["t1"])
+        #expect(try store.row("task", "t3") == nil)
+    }
+
+    @Test func rewritingMetaChangesNothing() throws {
+        let store = try memoryStore()
+        try store.setMeta("cursor", 5)
+        let changes = store.changes
+        try store.setMeta("cursor", 5)
+        #expect(store.changes == changes)
+        try store.setMeta("cursor", 6)
+        #expect(store.changes == changes + 1)
+        #expect(try store.meta("cursor") == 6)
     }
 
     @Test func purgeRemovesFieldsAndQueuedOps() throws {
@@ -135,5 +156,23 @@ final class FakeTime: @unchecked Sendable {
         let second = try clock.stamp()
         #expect(first <= server + 5 * 60_000)
         #expect(second > first)
+    }
+}
+
+@Suite struct JSONParsing {
+    /// The shortcut for plain values reads them as JSONSerialization does.
+    @Test func plainValuesMatchJSONSerialization() throws {
+        let texts = ["null", "true", "false", "0", "-12", "9007199254740993", "12345678901234567890", "1.5", "-0",
+                     #""""#, #""abc""#, #""a\"b""#, #""a\/b""#, #""é ✓""#, "\"e\u{301}\"", "[1,\"a\"]",
+                     #"{"date":"2026-11-12"}"#]
+        for text in texts {
+            #expect(try JSON(parsing: text) == (try JSON(parsing: Data(text.utf8))), "\(text)")
+        }
+    }
+
+    @Test func invalidTextStillFails() {
+        for text in ["", "\"", "\"a\"b\"", "nul", "\"tab\there\""] {
+            #expect(throws: JSONError.self, "\(text)") { try JSON(parsing: text) }
+        }
     }
 }

@@ -317,9 +317,7 @@ private struct LabelRows: View {
                 }
             }
         } icon: {
-            Image(systemName: "tag.fill")
-                .foregroundStyle(Color(hex: label["color"].string) ?? .secondary)
-                .imageScale(.small)
+            LabelTag(color: label["color"].string, size: 9)
         }
         .sidebarDropArea()
         .taskDrop("label:\(label.id)", .label(label.id))

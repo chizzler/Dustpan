@@ -18,7 +18,7 @@ struct PageHead {
     /// Sub-projects to open.
     var places: [Row] = []
     /// Makes the eyebrow a link: the parent project.
-    var up: Page?
+    var parent: Row?
 
     /// "3 open tasks", or "Nothing open".
     static func open(_ count: Int) -> String {

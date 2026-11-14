@@ -818,7 +818,7 @@ extension Writer {
                 patch["name"] = .string(try labelName(name, for: labelId))
             }
             if let color, color != label["color"].string {
-                guard color.wholeMatch(of: /#[0-9a-fA-F]{6}/) != nil else { throw CannotEdit("That isn't a colour") }
+                try checkColour(color)
                 patch["color"] = .string(color)
             }
             return patch.isEmpty ? [] : [Change("label", labelId, patch)]
@@ -958,8 +958,7 @@ extension Writer {
         try commit {
             let projects = try store.rows("project")
             try checkParent(projects, parentId)
-            let used = Set(projects.values.filter(isLive).compactMap { $0["color"].string })
-            let chosen = color ?? projectColours.first { !used.contains($0.hex) }?.hex ?? projectColours[0].hex
+            let chosen = color ?? unusedProjectColour(projects.values)
             var fields: [String: JSON] = [
                 "name": .string(name), "color": chosen.map(JSON.string) ?? .null,
                 "position": lastProjectPosition(projects, parentId), "archived": false,

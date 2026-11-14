@@ -8,14 +8,6 @@ struct ProjectMark: View {
     let icon: String?
     var size: Double = 16
 
-    init(_ project: Row, size: Double = 16) {
-        self.init(color: project["color"].string, icon: project["icon"].string, size: size)
-    }
-
-    init(color: String?, icon: String?, size: Double = 16) {
-        (self.color, self.icon, self.size) = (color, icon, size)
-    }
-
     var body: some View {
         Group {
             if let icon, Icons.known(icon) {
@@ -28,5 +20,11 @@ struct ProjectMark: View {
             }
         }
         .foregroundStyle(Color(hex: color) ?? .primary)
+    }
+}
+
+extension ProjectMark {
+    init(_ project: Row, size: Double = 16) {
+        self.init(color: project["color"].string, icon: project["icon"].string, size: size)
     }
 }

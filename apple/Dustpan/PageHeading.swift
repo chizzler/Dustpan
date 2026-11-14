@@ -14,10 +14,10 @@ struct PageHeading: View {
                     .font(.caption.weight(.bold))
                     .tracking(0.8)
                     .foregroundStyle(.secondary)
-                if head.up != nil {
+                if let parent = head.parent {
                     Button(action: goUp) { text }
                         .buttonStyle(.plain)
-                        .help("Open \(eyebrow.components(separatedBy: " › ").last ?? eyebrow)")
+                        .help("Open \(parent["name"].string ?? "")")
                 } else {
                     text
                 }
@@ -42,7 +42,9 @@ struct PageHeading: View {
         .padding(.top, 10)
         .padding(.bottom, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .selectionDisabled()
+        .listRowSeparator(.hidden)
     }
 
-    private func goUp() { model.page = head.up }
+    private func goUp() { model.page = head.parent.map { .project($0.id) } }
 }

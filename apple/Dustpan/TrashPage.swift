@@ -12,7 +12,6 @@ struct TrashPage: View {
         let items = model.trash
         List {
             PageHeading(head: model.pageHead(.trash))
-                .listRowSeparator(.hidden)
             Text(items.isEmpty ? "The Trash is empty. \(retentionText)" : retentionText)
                 .foregroundStyle(.secondary)
             ForEach(items) { item in

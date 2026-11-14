@@ -13,10 +13,9 @@ import Testing
         return url.appending(path: "desktop/dustpan/icons")
     }()
 
-    static func resource(_ file: String) throws -> URL {
-        let url = URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+    static func resource(_ file: String) -> URL {
+        URL(filePath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().appending(path: "Sources/DustpanCore/Resources/icons/\(file)")
-        return url
     }
 
     @Test(arguments: ["paths.json", "lucide.json", "catalogue.json", "LICENSE-lucide.txt"])

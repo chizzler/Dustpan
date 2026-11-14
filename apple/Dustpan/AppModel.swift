@@ -209,6 +209,8 @@ final class AppModel {
     private let notifier = Notifier()
     /// Reminders are checked once notifications are allowed.
     private var reminding = false
+    /// Asks, once per Mac, whether to open at login: the first time a reminder is waiting to fire.
+    var offersOpenAtLogin = false
 
     init() {
         do {
@@ -289,7 +291,8 @@ final class AppModel {
         }
         repeat {
             syncAgain = false
-            guard let syncer, !changingAccount else { break }
+            guard let syncer, let store, !changingAccount else { break }
+            let changes = store.changes
             status = .syncing
             do {
                 let result = try await syncer.run()
@@ -307,7 +310,8 @@ final class AppModel {
             } catch {
                 status = .failed("\(error)")
             }
-            refresh()
+            // Nothing pulled, or the server out of reach: the pages stay as they are.
+            if store.changes != changes { refresh() }
         } while syncAgain
         if status == .syncing { status = .idle }
         lastSync = .now
@@ -434,10 +438,29 @@ final class AppModel {
                 notifier.show(alert, body: formatDue(alert.task["due"]).map { "Due \($0.text)" }
                     ?? describe(reminder: alert.reminder))
             }
+            if check.next != nil { offerOpenAtLogin() }
             return check.next
         } catch {
             status = .failed("\(error)")
             return nil
+        }
+    }
+
+    private func offerOpenAtLogin() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: LoginItem.offeredKey), LoginItem.canChange else { return }
+        defaults.set(true, forKey: LoginItem.offeredKey)
+        offersOpenAtLogin = !LoginItem.isOn
+    }
+
+    /// The offer's yes. Settings ▸ General can change it later.
+    func openAtLogin() {
+        do {
+            try LoginItem.set(true)
+            toast = Toast(message: LoginItem.needsApproval ? "Allow Dustpan in Login Items to finish"
+                                                            : "Dustpan opens at login")
+        } catch {
+            toast = Toast(message: "Couldn't open at login: \(error.localizedDescription)")
         }
     }
 

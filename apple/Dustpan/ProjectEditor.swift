@@ -97,8 +97,7 @@ struct ProjectEditor: View {
         shownParent = parentId
         // A new project starts with the first colour no project uses.
         if draft.project == nil {
-            let used = Set(model.snapshot.liveProjects.compactMap { $0["color"].string })
-            color = projectColours.first { !used.contains($0.hex) }?.hex ?? projectColours[0].hex
+            color = unusedProjectColour(model.snapshot.liveProjects)
         }
     }
 

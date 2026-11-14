@@ -56,7 +56,7 @@ struct IconPicker: View {
             }
             Divider()
             HStack {
-                Button("No Icon", action: clear)
+                Button("No Icon") { pick(nil) }
                     .disabled(icon == nil)
                 Spacer()
                 if let found, found.count > Self.searchLimit {
@@ -82,13 +82,8 @@ struct IconPicker: View {
         if let best = Icons.search(query).first, !query.isEmpty { pick(best.name) }
     }
 
-    private func pick(_ name: String) {
+    private func pick(_ name: String?) {
         icon = name
-        isPresented = false
-    }
-
-    private func clear() {
-        icon = nil
         isPresented = false
     }
 }
