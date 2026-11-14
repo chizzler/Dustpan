@@ -1,0 +1,513 @@
+<meta charset="utf-8">
+<title>Dustpan</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Dustpan is a native task manager for Linux and Mac. It keeps everything on your machine and syncs with a server you run.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Michroma&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: an equipment rack. Hairline-ruled modules on a graphite panel, labelled like hardware,
+   with the 808's four key colours standing in for p1–p4. Dark first; light is brushed aluminium. */
+:root {
+  --bg: #121211;        /* graphite panel */
+  --panel: #1a1a18;     /* a module's face */
+  --line: #2c2b28;      /* hairlines and seams */
+  --fg: #ecebe5;        /* silkscreen white */
+  --dim: #8e8c84;       /* secondary legend */
+  --accent: #e66d28;    /* Dustpan orange */
+  --accent-ink: #ef8a4e;/* orange text on the panel */
+  --on-accent: #121211;
+  --p1: #d8452f; --p2: #e66d28; --p3: #e5b62a; --p4: #e6e0cd;  /* the 808 keys */
+  --grille: rgba(236, 235, 229, 0.07);
+  --grille-lit: rgba(236, 235, 229, 0.3);  /* dots near the pointer */
+  --display: "Michroma", "Eurostile", "Microgramma", "Arial Black", sans-serif;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --wrap: 1180px;
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #e4e2dc; --panel: #efeee9; --line: #c6c3ba;
+    --fg: #151514; --dim: #5c5a54; --accent: #e66d28; --accent-ink: #a9440f; --on-accent: #151514;
+    --p4: #cfc8b0; --grille: rgba(21, 21, 20, 0.08); --grille-lit: rgba(21, 21, 20, 0.28); color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #e4e2dc; --panel: #efeee9; --line: #c6c3ba;
+  --fg: #151514; --dim: #5c5a54; --accent: #e66d28; --accent-ink: #a9440f; --on-accent: #151514;
+  --p4: #cfc8b0; --grille: rgba(21, 21, 20, 0.08); --grille-lit: rgba(21, 21, 20, 0.28); color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  background: var(--bg); color: var(--fg);
+  font: 400 1rem/1.6 var(--body);
+  -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+::selection { background: var(--accent); color: var(--on-accent); }
+
+.wrap {
+  max-width: var(--wrap); margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.legend {
+  font: 500 0.72rem/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim);
+}
+.led {
+  display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--line); box-shadow: inset 0 0 0 1px rgba(0,0,0,.25); flex: none;
+}
+.led.on { background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent), 0 0 10px var(--accent); }
+
+/* ---- top bar ---- */
+body::before {
+  content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg);
+}
+.bar {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+.bar .wrap { display: flex; align-items: center; gap: 24px; min-height: 60px; }
+.brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+.brand .tile {
+  width: 30px; height: 30px; border-radius: 7px; background: #f2efe6; display: grid; place-items: center; flex: none;
+}
+.brand .tile svg { width: 22px; height: 22px; }
+.brand b { font: 400 0.95rem/1 var(--display); letter-spacing: 0.22em; }
+.bar nav { display: flex; gap: 22px; margin-left: auto; }
+.bar nav a { text-decoration: none; font: 500 0.74rem/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); }
+.bar nav a:hover { color: var(--fg); }
+.bar .status { display: flex; align-items: center; gap: 8px; }
+@media (max-width: 760px) { .bar nav { display: none; } .bar .status { margin-left: auto; } }
+
+/* ---- hero ---- */
+.hero { position: relative; border-bottom: 1px solid var(--line); overflow: hidden; }
+.hero::before {  /* perforated metal */
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background-image: radial-gradient(var(--grille) 1.2px, transparent 1.4px);
+  background-size: 12px 12px;
+  mask-image: linear-gradient(100deg, transparent 0%, #000 55%, #000 100%);
+  -webkit-mask-image: linear-gradient(100deg, transparent 0%, #000 55%, #000 100%);
+}
+/* The dots near the mouse, drawn brighter with an orange halo by the script below. Each dot fades on its
+   own after the mouse moves on, so the light trails a little behind it. Layers, back to front:
+   the plain dots, the lit dots, then the text and buttons. */
+.hero::before { z-index: 0; }
+.hero .lights { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+.hero .wrap { position: relative; z-index: 2; padding-block: clamp(56px, 9vw, 120px); }
+/* Blocked-out type: each line of text sits on its own orange slab, like a label-maker strip.
+   box-decoration-break gives every line its own padding, so the slabs stack with a clean ragged edge. */
+.slab {
+  background: var(--accent); color: var(--on-accent);
+  -webkit-box-decoration-break: clone; box-decoration-break: clone;
+}
+/* The slabs overlap a little, and each line's slab would paint over the line above. Positioning the ink
+   lifts all the text above all the slabs, so no letter is clipped, whatever the font's metrics. */
+.slab .ink { position: relative; }
+.hero h1 {
+  font: 400 clamp(1.9rem, 5.6vw, 4.6rem)/1.22 var(--display); letter-spacing: 0.01em;
+  text-transform: uppercase; margin: 22px 0 0; max-width: 11em; text-wrap: balance;
+}
+.hero h1 .slab { padding: 0.1em 0.16em; }
+.hero h1 em { font-style: normal; }
+.hero .lede { max-width: 38em; font-size: 1.15rem; line-height: 1.65; color: var(--dim); margin: 30px 0 0; }
+.hero .lede strong { color: var(--fg); font-weight: 600; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 34px; }
+.btn {
+  display: inline-flex; align-items: center; gap: 10px; min-height: 46px; padding: 0 20px;
+  border: 1px solid var(--line); border-radius: 3px; text-decoration: none;
+  font: 500 0.78rem/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase;
+  background: var(--bg);  /* opaque, so the hero's dots and their glow stay behind it */
+  transition: border-color .15s, background .15s;
+}
+.btn:hover { border-color: var(--fg); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn.primary:hover { background: color-mix(in srgb, var(--accent) 86%, var(--fg)); }
+
+/* ---- modules ---- */
+.module {
+  background: var(--panel); border: 1px solid var(--line); border-radius: 4px; position: relative;
+}
+.module .screw { position: absolute; width: 9px; height: 9px; border-radius: 50%; background: var(--line); }
+.module .screw::after { content: ""; position: absolute; left: 2px; right: 2px; top: 4px; height: 1px; background: var(--bg); transform: rotate(35deg); }
+.module .screw:nth-of-type(1) { top: 10px; left: 10px; } .module .screw:nth-of-type(2) { top: 10px; right: 10px; }
+.module .screw:nth-of-type(3) { bottom: 10px; left: 10px; } .module .screw:nth-of-type(4) { bottom: 10px; right: 10px; }
+.k1 { background: var(--p1); } .k2 { background: var(--p2); } .k3 { background: var(--p3); } .k4 { background: var(--p4); }
+
+
+/* ---- sections ---- */
+section.block { padding-block: clamp(64px, 9vw, 120px); border-bottom: 1px solid var(--line); }
+.head { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: 24px 64px; align-items: end; margin-bottom: 48px; }
+.head .legend { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; }
+.head h2 { font: 400 clamp(1.6rem, 3.4vw, 2.6rem)/1.1 var(--display); text-transform: uppercase; margin: 0; text-wrap: balance; }
+.head p { margin: 0; color: var(--dim); max-width: 36em; font-size: 1.05rem; }
+@media (max-width: 820px) { .head { grid-template-columns: minmax(0, 1fr); } }
+
+/* features: a rack of modules */
+.rack { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.unit { padding: 26px 24px 28px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); background: var(--panel); display: grid; gap: 10px; align-content: start; min-width: 0; }
+.unit:nth-child(3n) { border-right: 0; }
+.unit:nth-last-child(-n+3) { border-bottom: 0; }
+.unit .tag { font: 500 0.72rem/1 var(--mono); letter-spacing: 0.1em; color: var(--accent-ink); }
+.unit h3 { margin: 4px 0 0; font: 600 1.06rem/1.3 var(--body); }
+.unit p { margin: 0; color: var(--dim); font-size: 0.94rem; }
+.unit code { font: 400 0.86em var(--mono); color: var(--fg); background: var(--bg); padding: 1px 5px; border-radius: 2px; }
+@media (max-width: 900px) {
+  .rack { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .unit:nth-child(3n) { border-right: 1px solid var(--line); }
+  .unit:nth-child(2n) { border-right: 0; }
+  .unit:nth-last-child(-n+3) { border-bottom: 1px solid var(--line); }
+  .unit:nth-last-child(-n+2) { border-bottom: 0; }
+}
+@media (max-width: 560px) {
+  .rack { grid-template-columns: minmax(0, 1fr); }
+  .unit, .unit:nth-child(3n) { border-right: 0; }
+  .unit:nth-last-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .unit:last-child { border-bottom: 0; }
+}
+
+/* priorities */
+.priority { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 56px; }
+.pkey { border-radius: 3px; padding: 18px 16px 14px; color: #151514; display: grid; gap: 22px; box-shadow: inset 0 -4px 0 rgba(0,0,0,.2); min-width: 0; }
+.pkey b { font: 400 1.3rem/1 var(--display); }
+.pkey span { font: 500 0.7rem/1.3 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; }
+@media (max-width: 560px) { .priority { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* sync */
+.signal { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) minmax(0, 1fr); align-items: stretch; gap: 0; }
+.node { padding: 26px 22px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.node .legend { display: flex; gap: 10px; align-items: center; }
+.node h3 { margin: 6px 0 0; font: 400 1.05rem/1.25 var(--display); text-transform: uppercase; letter-spacing: 0.04em; }
+.node p { margin: 0; color: var(--dim); font-size: 0.92rem; }
+.wire { display: grid; place-items: center; position: relative; padding: 26px 22px; }
+.wire::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: repeating-linear-gradient(90deg, var(--accent) 0 8px, transparent 8px 14px); }
+.wire .module { padding: 22px 20px; text-align: center; position: relative; z-index: 1; width: 100%; max-width: 300px; }
+.wire .module h3 { margin: 10px 0 6px; font: 400 1rem/1.2 var(--display); text-transform: uppercase; }
+.wire .module p { margin: 0; font-size: 0.86rem; color: var(--dim); }
+@media (max-width: 820px) {
+  .signal { grid-template-columns: minmax(0, 1fr); }
+  .wire::before { left: 50%; right: auto; top: 0; bottom: 0; width: 1px; height: auto; background: repeating-linear-gradient(180deg, var(--accent) 0 8px, transparent 8px 14px); }
+}
+.steps { list-style: none; padding: 0; margin: 56px 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; counter-reset: step; }
+.steps li { border-top: 2px solid var(--fg); padding-top: 18px; display: grid; gap: 8px; counter-increment: step; min-width: 0; }
+.steps li::before { content: "Step " counter(step); font: 500 0.72rem/1 var(--mono); letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent-ink); }
+.steps h3 { margin: 0; font: 600 1.04rem/1.3 var(--body); }
+.steps p { margin: 0; color: var(--dim); font-size: 0.94rem; }
+@media (max-width: 760px) { .steps { grid-template-columns: minmax(0, 1fr); gap: 28px; } }
+
+/* privacy */
+.ledger { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 56px; }
+.ledger div { display: grid; grid-template-columns: 7px minmax(0, 1fr); gap: 16px; padding: 20px 0; border-bottom: 1px solid var(--line); align-items: baseline; }
+.ledger .led { transform: translateY(-1px); }
+.ledger h3 { margin: 0 0 4px; font: 600 1rem/1.35 var(--body); }
+.ledger p { margin: 0; color: var(--dim); font-size: 0.93rem; }
+@media (max-width: 760px) { .ledger { grid-template-columns: minmax(0, 1fr); } }
+
+/* platforms */
+.platforms { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.plat { padding: 30px 26px 26px; display: grid; gap: 14px; align-content: start; min-width: 0; }
+.plat .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0 4px; }
+.plat h3 { margin: 6px 0 0; font: 400 1.25rem/1.2 var(--display); text-transform: uppercase; }
+.plat p { margin: 0; color: var(--dim); font-size: 0.94rem; }
+.plat dl { margin: 6px 0 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 16px; font: 400 0.84rem/1.4 var(--mono); }
+.plat dt { color: var(--dim); font-size: 0.7rem; letter-spacing: 0.14em; text-transform: uppercase; align-self: center; }
+.plat dd { margin: 0; }
+.state { display: inline-flex; gap: 8px; align-items: center; font: 500 0.68rem/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); }
+@media (max-width: 900px) { .platforms { grid-template-columns: minmax(0, 1fr); } }
+
+/* footer */
+footer { padding-block: 48px 64px; }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 20px 48px; justify-content: space-between; align-items: flex-start; }
+footer p { margin: 0; color: var(--dim); font-size: 0.88rem; max-width: 46em; }
+footer .brand b { font-size: 0.8rem; }
+
+</style>
+
+<header class="bar">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Dustpan, top of page">
+      <span class="tile" aria-hidden="true">
+        <svg viewBox="422.362 79.370 238.110 238.110"><defs><linearGradient id="lg-b" x1="691.654" y1="309.807" x2="691.654" y2="106.889" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff"/><stop offset=".2474" stop-color="#f3b693"/><stop offset="1" stop-color="#e66d28"/></linearGradient></defs><path d="M541.417 85.039C569.764 85.039 558.425 113.386 558.425 141.732C558.425 195.591 569.764 198.425 575.433 198.425C592.615 198.425 654.803 204.204 654.803 232.441V311.811H428.031V232.441C428.031 204.077 478.867 198.425 507.402 198.425C515.906 198.425 524.409 195.591 524.409 141.732C524.409 113.386 513.071 85.039 541.417 85.039Z" fill="url(#lg-b)" stroke="#000" stroke-width="11.339"/></svg>
+      </span>
+      <b>DUSTPAN</b>
+    </a>
+    <nav aria-label="Sections">
+      <a href="#features">Features</a>
+      <a href="#sync">Sync</a>
+      <a href="#privacy">Privacy</a>
+      <a href="#platforms">Platforms</a>
+    </nav>
+    <span class="status legend"><span class="led on"></span>Linux 0.12.5</span>
+  </div>
+</header>
+
+<main id="top">
+  <section class="hero">
+    <canvas class="lights" aria-hidden="true"></canvas>
+    <div class="wrap">
+      <div>
+        <span class="legend">Task manager · Linux · Mac</span>
+        <h1><span class="slab"><span class="ink">Private, free task management</span></span></h1>
+        <p class="lede">A free, private solution for task management. Dustpan is a native task manager for Linux and Mac. <strong>Everything lives on your machine.</strong>
+          It works on its own, or syncs through an opensource server you run wherever you like. when you want your other devices in step.</p>
+        <div class="actions">
+          <a class="btn primary" href="#platforms">Get Dustpan</a>
+          <a class="btn" href="#features">See what it does</a>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="block" id="features">
+    <div class="wrap">
+      <div class="head">
+        <div>
+          <span class="legend"><span class="led on"></span>Features</span>
+          <h2>Projects, repeats, filters. All of it offline.</h2>
+        </div>
+        <p>Dustpan covers the habits people move to Todoist for: projects, sections, subtasks, repeats and saved filters.
+          It's written natively for each desktop, so it starts fast and feels like part of the system.</p>
+      </div>
+
+      <div class="rack">
+        <div class="unit"><span class="tag">Projects</span><h3>Nested as deep as you like</h3>
+          <p>Projects hold sub-projects, sections and tasks. Give each one a colour and an icon, and drag to reorder or nest.</p></div>
+        <div class="unit"><span class="tag">every!</span><h3>Repeats that wait for you</h3>
+          <p><code>every 3 days</code> runs on the calendar. <code>every! 3 days</code> counts from when you finish, so a late task never piles up.</p></div>
+        <div class="unit"><span class="tag">Quick add</span><h3>Write it the way you'd say it</h3>
+          <p>Dates, times, repeats, priority, project, labels and durations, pulled from one line of text. Works offline.</p></div>
+        <div class="unit"><span class="tag">Subtasks</span><h3>Progress you can see</h3>
+          <p>A pie on each parent fills as subtasks are done. Tick the last one and Dustpan offers to finish the parent.</p></div>
+        <div class="unit"><span class="tag">Views</span><h3>Today, Upcoming, Anytime</h3>
+          <p>Plus Completed, and saved views built from a filter language, like <code>p1 &amp; overdue</code>.</p></div>
+        <div class="unit"><span class="tag">Calendar</span><h3>Month, Week and Day</h3>
+          <p>Drag tasks onto a day or a time slot. Stretch a block to set how long it takes. Every move has a key.</p></div>
+        <div class="unit"><span class="tag">Reminders</span><h3>Desktop notifications</h3>
+          <p>Fixed times or relative to the due date. They move when the due date moves.</p></div>
+        <div class="unit"><span class="tag">Notes</span><h3>Markdown on every task</h3>
+          <p>Lists, links and headings in a task's notes, stored as plain text you can read anywhere.</p></div>
+        <div class="unit"><span class="tag">Undo</span><h3>Nothing is lost by accident</h3>
+          <p>Undo for every edit, and a Trash that keeps deleted tasks and projects until you restore or clear them.</p></div>
+      </div>
+
+      <div class="priority" aria-label="Priorities">
+        <div class="pkey k1"><b>p1</b><span>Urgent</span></div>
+        <div class="pkey k2"><b>p2</b><span>High</span></div>
+        <div class="pkey k3"><b>p3</b><span>Medium</span></div>
+        <div class="pkey k4"><b>p4</b><span>Whenever</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="sync">
+    <div class="wrap">
+      <div class="head">
+        <div>
+          <span class="legend"><span class="led on"></span>Sync</span>
+          <h2>Works alone. Syncs when you say.</h2>
+        </div>
+        <p>Every device keeps a full copy of your tasks and works without a connection. When you want sync,
+          point Dustpan at your own OpenTodo server. Edits merge field by field, so two devices can change
+          one task without losing either change.</p>
+      </div>
+
+      <div class="signal">
+        <div class="node module">
+          <i class="screw"></i><i class="screw"></i><i class="screw"></i><i class="screw"></i>
+          <span class="legend"><span class="led on"></span>Linux</span>
+          <h3>Omarchy desktop</h3>
+          <p>GTK 4 and libadwaita. Follows your Omarchy theme as it changes.</p>
+        </div>
+        <div class="wire">
+          <div class="module">
+            <span class="legend">Your server</span>
+            <h3>OpenTodo</h3>
+            <p>Open source, one small binary. It holds the log of changes and passes them on. Your clients do the rest.</p>
+          </div>
+        </div>
+        <div class="node module">
+          <i class="screw"></i><i class="screw"></i><i class="screw"></i><i class="screw"></i>
+          <span class="legend"><span class="led on"></span>macOS</span>
+          <h3>Mac</h3>
+          <p>SwiftUI. Same data, same rules, checked against the same tests.</p>
+        </div>
+      </div>
+
+      <ol class="steps">
+        <li><h3>Start on your own</h3><p>Install and start typing. No account, no sign-up, no server.</p></li>
+        <li><h3>Connect when ready</h3><p>Add your server's address and a token in Settings. Dustpan checks it, then uploads what you've made.</p></li>
+        <li><h3>Stay in step</h3><p>Changes go out a moment after you make them and arrive live on your other devices.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="block" id="privacy">
+    <div class="wrap">
+      <div class="head">
+        <div>
+          <span class="legend"><span class="led on"></span>Privacy</span>
+          <h2>Your tasks stay in your house.</h2>
+        </div>
+        <p>A task list knows a lot about you: where you're going, who you owe and what's worrying you.
+          Dustpan keeps that between your devices and your server.</p>
+      </div>
+      <div class="ledger">
+        <div><span class="led on"></span><span><h3>No telemetry</h3><p>No analytics, no crash reporting, no accounts with us. Nothing leaves your machine unless you set up sync.</p></span></div>
+        <div><span class="led on"></span><span><h3>Your server, your rules</h3><p>Sync runs through a server you host. Lose it and you lose nothing: every device holds the whole list.</p></span></div>
+        <div><span class="led on"></span><span><h3>Encrypted in transit</h3><p>Dustpan refuses plain http to any machine but your own, and won't follow a redirect, so your token can't leak.</p></span></div>
+        <div><span class="led on"></span><span><h3>A short supply chain</h3><p>No PyPI packages on Linux and no third-party Swift packages on the Mac. Less code you didn't ask for.</p></span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="platforms">
+    <div class="wrap">
+      <div class="head">
+        <div>
+          <span class="legend"><span class="led on"></span>Platforms</span>
+          <h2>Native on every desk.</h2>
+        </div>
+        <p>Each client is written for its own system, not wrapped in a browser. They share one data model and one set of tests.</p>
+      </div>
+      <div class="platforms">
+        <div class="module plat">
+          <i class="screw"></i><i class="screw"></i><i class="screw"></i><i class="screw"></i>
+          <div class="top"><span class="legend">Linux</span><span class="state"><span class="led on"></span>Release soon</span></div>
+          <h3>Omarchy &amp; Arch</h3>
+          <p>Coming to the AUR. Built from official Arch packages only.</p>
+          <dl><dt>Version</dt><dd>0.12.5</dd><dt>Built with</dt><dd>Python, GTK 4, libadwaita</dd></dl>
+        </div>
+        <div class="module plat">
+          <i class="screw"></i><i class="screw"></i><i class="screw"></i><i class="screw"></i>
+          <div class="top"><span class="legend">macOS</span><span class="state"><span class="led on"></span>In development</span></div>
+          <h3>Mac</h3>
+          <p>Nearly feature for feature with the Linux client, and in daily use.</p>
+          <dl><dt>Version</dt><dd>0.18.0</dd><dt>Built with</dt><dd>Swift, SwiftUI</dd></dl>
+        </div>
+        <div class="module plat">
+          <i class="screw"></i><i class="screw"></i><i class="screw"></i><i class="screw"></i>
+          <div class="top"><span class="legend">iOS</span><span class="state"><span class="led"></span>Planned</span></div>
+          <h3>iPhone</h3>
+          <p>Next in line. It will share the Mac's core, so it starts with the same rules and tests.</p>
+          <dl><dt>Version</dt><dd>—</dd><dt>Built with</dt><dd>Swift, SwiftUI</dd></dl>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Dustpan, top of page">
+      <span class="tile" aria-hidden="true">
+        <svg viewBox="422.362 79.370 238.110 238.110"><path d="M541.417 85.039C569.764 85.039 558.425 113.386 558.425 141.732C558.425 195.591 569.764 198.425 575.433 198.425C592.615 198.425 654.803 204.204 654.803 232.441V311.811H428.031V232.441C428.031 204.077 478.867 198.425 507.402 198.425C515.906 198.425 524.409 195.591 524.409 141.732C524.409 113.386 513.071 85.039 541.417 85.039Z" fill="url(#lg-b)" stroke="#000" stroke-width="11.339"/></svg>
+      </span>
+      <b>DUSTPAN</b>
+    </a>
+    <p>Dustpan is free software under the GNU AGPL-3.0. Sync is powered by OpenTodo. Project icons are from Lucide.
+      A chipdust project.</p>
+  </div>
+</footer>
+
+<script>
+// Light the hero's dots round the mouse: each brighter, with an orange halo under it.
+// A dot that the mouse has left fades out over a moment instead of at once. Mouse only: a touch has no hover.
+(() => {
+  const hero = document.querySelector(".hero");
+  const canvas = hero.querySelector(".lights");
+  const ctx = canvas.getContext("2d");
+  const STEP = 12, MID = STEP / 2;   // the CSS dot grid: a dot in the middle of every 12 px square
+  const REACH = 260, HALO_REACH = 120;
+  const HALF_LIFE_MS = 150;          // how long a dot takes to fade to half once the mouse has left it
+  const calm = matchMedia("(prefers-reduced-motion: reduce)");
+  const GONE = 0.015;               // fainter than this, a dot is off: no barely-there tail
+  let w = 0, h = 0, cols = 0, rows = 0, lit, glow, dot, halo, mouse = null, frame = 0, last = 0;
+
+  // Sharp near the mouse, then a long, gentle tail; zero at the edge of its reach.
+  const falloff = (r, core, reach) => r >= reach ? 0 : (1 - r / reach) / (1 + (r / core) ** 2);
+
+  function rgba(hex, alpha) {
+    const n = parseInt(hex.trim().slice(1), 16);
+    return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+  }
+
+  // One lit dot and one halo, drawn once per theme and stamped onto the canvas.
+  function sprites() {
+    const css = getComputedStyle(hero), scale = devicePixelRatio || 1;
+    const make = (paint) => {
+      const c = document.createElement("canvas");
+      c.width = c.height = Math.ceil(STEP * scale);
+      const g = c.getContext("2d");
+      g.scale(scale, scale);
+      paint(g);
+      return c;
+    };
+    dot = make((g) => {
+      g.fillStyle = css.getPropertyValue("--grille-lit").trim();
+      g.beginPath(); g.arc(MID, MID, 1.3, 0, Math.PI * 2); g.fill();
+    });
+    const accent = css.getPropertyValue("--accent");
+    halo = make((g) => {
+      const fill = g.createRadialGradient(MID, MID, 0, MID, MID, 5);
+      fill.addColorStop(0, rgba(accent, 0.24));
+      fill.addColorStop(0.5, rgba(accent, 0.075));
+      fill.addColorStop(1, rgba(accent, 0));
+      g.fillStyle = fill; g.fillRect(0, 0, STEP, STEP);
+    });
+  }
+
+  function resize() {
+    const scale = devicePixelRatio || 1;
+    w = hero.clientWidth; h = hero.clientHeight;
+    canvas.width = Math.round(w * scale); canvas.height = Math.round(h * scale);
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    cols = Math.ceil(w / STEP); rows = Math.ceil(h / STEP);
+    lit = new Float32Array(cols * rows); glow = new Float32Array(cols * rows);
+    sprites();
+  }
+
+  function draw(now) {
+    frame = 0;
+    const keep = calm.matches ? 0 : 0.5 ** ((last ? now - last : 16) / HALF_LIFE_MS);
+    last = now;
+    ctx.clearRect(0, 0, w, h);
+    let fading = false;
+    for (let j = 0, k = 0; j < rows; j++) {
+      for (let i = 0; i < cols; i++, k++) {
+        const x = MID + i * STEP, y = MID + j * STEP;
+        const r = mouse ? Math.hypot(x - mouse.x, y - mouse.y) : Infinity;
+        const a = falloff(r, 25, REACH), b = falloff(r, 18, HALO_REACH);
+        const la = lit[k] * keep, gb = glow[k] * keep;
+        if (la > a + GONE || gb > b + GONE) fading = true;
+        lit[k] = Math.max(a, la); glow[k] = Math.max(b, gb);
+        if (glow[k] > GONE) { ctx.globalAlpha = glow[k]; ctx.drawImage(halo, x - MID, y - MID, STEP, STEP); }
+        if (lit[k] > GONE) { ctx.globalAlpha = lit[k]; ctx.drawImage(dot, x - MID, y - MID, STEP, STEP); }
+      }
+    }
+    ctx.globalAlpha = 1;
+    if (fading) frame = requestAnimationFrame(draw);
+    else last = 0;  // idle: the next move starts the clock afresh
+  }
+
+  const kick = () => { if (!frame) frame = requestAnimationFrame(draw); };
+
+  hero.addEventListener("pointermove", (e) => {
+    if (e.pointerType !== "mouse") return;
+    const box = hero.getBoundingClientRect();
+    mouse = { x: e.clientX - box.left, y: e.clientY - box.top };
+    kick();
+  });
+  hero.addEventListener("pointerleave", () => { mouse = null; kick(); });
+  new ResizeObserver(() => { resize(); kick(); }).observe(hero);
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { sprites(); kick(); });
+})();
+</script>
