@@ -13,7 +13,7 @@ let package = Package(
         .executable(name: "dustpan-cli", targets: ["dustpan-cli"]),
     ],
     targets: [
-        .target(name: "DustpanCore", resources: [.copy("Resources/vocab.json")], swiftSettings: settings,
+        .target(name: "DustpanCore", resources: [.copy("Resources/vocab.json"), .copy("Resources/icons")], swiftSettings: settings,
                 linkerSettings: [.linkedLibrary("sqlite3")]),
         .executableTarget(name: "dustpan-cli", dependencies: ["DustpanCore"], swiftSettings: settings),
         .testTarget(name: "DustpanCoreTests", dependencies: ["DustpanCore"], swiftSettings: settings),

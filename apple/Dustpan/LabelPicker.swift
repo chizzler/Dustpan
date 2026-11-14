@@ -80,11 +80,11 @@ struct LabelPicker: View {
             switch choice {
             case .label(let label):
                 Image(systemName: "checkmark").opacity(refs.contains(label.id) ? 1 : 0).frame(width: 14)
-                LabelDot(color: label["color"].string)
+                LabelTag(color: label["color"].string)
                 Text(label["name"].string ?? "")
             case .new(let name):
                 Image(systemName: "checkmark").frame(width: 14)
-                LabelDot(color: nil)
+                LabelTag(color: nil)
                 Text(name)
                 Text("new").foregroundStyle(.secondary)
             case .create(let name):
@@ -167,19 +167,7 @@ private struct LabelPickerAnchor: ViewModifier {
     }
 }
 
-/// A label's colour as a small dot.
-struct LabelDot: View {
-    let color: String?
-
-    var body: some View {
-        Circle()
-            .fill(Color(hex: color) ?? .secondary)
-            .frame(width: 8, height: 8)
-            .accessibilityHidden(true)
-    }
-}
-
-/// A label as a chip: its dot and name, and × to remove it when there's a remove action.
+/// A label as a chip: its tag and name, and × to remove it when there's a remove action.
 struct LabelChip: View {
     let name: String
     let color: String?
@@ -187,7 +175,7 @@ struct LabelChip: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            LabelDot(color: color)
+            LabelTag(color: color)
             Text(name)
             if let remove {
                 Button("Remove \(name)", systemImage: "xmark", action: remove)
@@ -315,16 +303,22 @@ struct LabelEditor: View {
     }
 }
 
+/// A colour to pick. Nil is Theme: the text colour, light on a dark theme and dark on a light one.
 struct Swatch: ButtonStyle {
-    let hex: String
+    let hex: String?
     let name: String
     let chosen: Bool
 
     func makeBody(configuration: Configuration) -> some View {
         Circle()
-            .fill(Color(hex: hex) ?? .gray)
+            .fill(hex.map { Color(hex: $0) ?? .gray } ?? .primary)
             .frame(width: 18, height: 18)
-            .overlay { if chosen { Image(systemName: "checkmark").font(.caption2.bold()).foregroundStyle(.white) } }
+            .overlay {
+                if chosen {
+                    Image(systemName: "checkmark").font(.caption2.bold())
+                        .foregroundStyle(hex == nil ? AnyShapeStyle(.background) : AnyShapeStyle(.white))
+                }
+            }
             .opacity(configuration.isPressed ? 0.6 : 1)
             .accessibilityLabel(name)
             .accessibilityAddTraits(chosen ? .isSelected : [])

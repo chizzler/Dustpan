@@ -223,9 +223,14 @@ public func projectSections(_ snap: Snapshot, _ projectId: String?, cleared: [St
 
 /// The sidebar count: open, neither parked nor deferred. For the Inbox, its own tasks.
 public func countOpen(_ snap: Snapshot, _ projectId: String?, today: String) -> Int {
-    let rows = snap.tasksByProject[projectId] ?? []
-    if projectId == nil { return rows.count { isInboxTask($0, parentOf: { snap.allTasks[$0] }) } }
-    return rows.count { $0["completed_at"].isNull && isActive($0, today: today) }
+    guard projectId == nil else { return countListed(snap, projectId, today: today) }
+    return (snap.tasksByProject[nil] ?? []).count { isInboxTask($0, parentOf: { snap.allTasks[$0] }) }
+}
+
+/// The page heading's count: what the page lists open, neither parked nor deferred. For the Inbox that takes in
+/// planned tasks without a project, which the sidebar leaves out (spec/pagehead.md).
+public func countListed(_ snap: Snapshot, _ projectId: String?, today: String) -> Int {
+    (snap.tasksByProject[projectId] ?? []).count { $0["completed_at"].isNull && isActive($0, today: today) }
 }
 
 // MARK: - From views.py

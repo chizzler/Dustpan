@@ -10,21 +10,16 @@ struct TrashPage: View {
 
     var body: some View {
         let items = model.trash
-        Group {
-            if items.isEmpty {
-                ContentUnavailableView("The Trash is empty", systemImage: "trash",
-                                       description: Text(retentionText))
-            } else {
-                List {
-                    Text(retentionText)
-                        .foregroundStyle(.secondary)
-                    ForEach(items) { item in
-                        TrashRow(item: item, waiting: model.purging.contains(item.target)) { ask([item]) }
-                    }
-                }
+        List {
+            PageHeading(head: model.pageHead(.trash))
+                .listRowSeparator(.hidden)
+            Text(items.isEmpty ? "The Trash is empty. \(retentionText)" : retentionText)
+                .foregroundStyle(.secondary)
+            ForEach(items) { item in
+                TrashRow(item: item, waiting: model.purging.contains(item.target)) { ask([item]) }
             }
         }
-        .navigationTitle("Trash")
+        .pageTitle(Page.trash.name)
         .toolbar {
             ToolbarItem {
                 Button("Empty Trash…", systemImage: "trash.slash") { ask(items) }
@@ -81,9 +76,7 @@ private struct TrashRow: View {
                 }
             } icon: {
                 if item.isProject {
-                    Image(systemName: "circle.fill")
-                        .foregroundStyle(Color(hex: item.color) ?? .secondary)
-                        .imageScale(.small)
+                    ProjectMark(color: item.color, icon: item.icon)
                 } else {
                     Image(systemName: "circle").foregroundStyle(.secondary)
                 }

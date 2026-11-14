@@ -14,15 +14,15 @@ struct Sidebar: View {
         let today = isoToday()
         let snap = model.snapshot
         List(selection: $model.page) {
-            Label("Today", systemImage: "star")
+            Label(Page.today.name, systemImage: Page.today.symbol)
                 .sidebarDropArea()
                 .taskDrop("today", .day(model.today))
                 .badge(todayCount(snap.tasks, today: model.today))
                 .tag(Page.today)
                 .listRowInsets(.vertical, 0)
-            Label("Upcoming", systemImage: "calendar")
+            Label(Page.upcoming.name, systemImage: Page.upcoming.symbol)
                 .tag(Page.upcoming)
-            Label("Inbox", systemImage: "tray")
+            Label(Page.inbox.name, systemImage: Page.inbox.symbol)
                 .sidebarDropArea()
                 .taskDrop("inbox", .project(nil), opens: .inbox)
                 .badge(countOpen(snap, nil, today: today))
@@ -52,7 +52,7 @@ struct Sidebar: View {
             Section {
                 let ctx = snap.filterContext(today: model.today)
                 ForEach(snap.views.enumerated(), id: \.element.id) { index, view in
-                    Label(view["name"].string ?? "", systemImage: "line.3.horizontal.decrease.circle")
+                    Label(view["name"].string ?? "", systemImage: Page.view(view.id).symbol)
                         .badge((try? runQuery(view["query"].string ?? "", ctx, snap.tasks).count) ?? 0)
                         .tag(Page.view(view.id))
                         .contextMenu {
@@ -205,9 +205,7 @@ private struct ProjectRow: View {
             Label {
                 Text(name)
             } icon: {
-                Image(systemName: "circle.fill")
-                    .foregroundStyle(Color(hex: node.row["color"].string) ?? .secondary)
-                    .imageScale(.small)
+                ProjectMark(node.row)
             }
         }
         .padding(.leading, Double(line.depth) * projectIndent)
@@ -252,9 +250,7 @@ private struct ArchivedRows: View {
                     Label {
                         Text(path)
                     } icon: {
-                        Image(systemName: "circle.fill")
-                            .foregroundStyle(Color(hex: project["color"].string) ?? .secondary)
-                            .imageScale(.small)
+                        ProjectMark(project)
                     }
                     .tag(Page.archived(project.id))
                     .contextMenu {

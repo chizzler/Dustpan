@@ -174,6 +174,7 @@ func shape(_ nodes: [Node]) -> String {
         #expect(shape(sections[1].tasks) == "dated(child)")
         #expect(!sections[1].isList)
         #expect(countOpen(snap, nil, today: "2026-11-01") == 1)
+        #expect(countListed(snap, nil, today: "2026-11-01") == 3)  // the page's heading counts what it shows
     }
 
     @Test func countSkipsParkedAndDeferred() throws {

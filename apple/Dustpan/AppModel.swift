@@ -34,6 +34,9 @@ extension Page {
 
     var name: String {
         switch self {
+        case .today: "Today"
+        case .upcoming: "Upcoming"
+        case .inbox: "Inbox"
         case .anytime: "Anytime"
         case .completed: "Completed"
         case .filter: "Filter"
@@ -44,6 +47,10 @@ extension Page {
 
     var symbol: String {
         switch self {
+        case .today: "star"
+        case .upcoming: "calendar"
+        case .inbox: "tray"
+        case .view: "line.3.horizontal.decrease.circle"
         case .anytime: "square.stack"
         case .completed: "checkmark.circle"
         case .filter: "magnifyingglass"
@@ -549,12 +556,14 @@ final class AppModel {
     }
 
     /// Create a project and show it, or edit one.
-    func saveProject(_ project: Row?, name: String, color: String, parentId: String??) throws {
+    /// color nil is Theme. icon nil is none.
+    func saveProject(_ project: Row?, name: String, color: String?, icon: String?, parentId: String??) throws {
         if let project {
-            let done = try apply { try $0.editProject(project.id, ProjectEdit(name: name, color: color, parentId: parentId)) }
+            let edit = ProjectEdit(name: name, color: .some(color), icon: .some(icon), parentId: parentId)
+            let done = try apply { try $0.editProject(project.id, edit) }
             if !done.undo.isEmpty { registerUndo("Edit Project", done) }
         } else {
-            page = .project(try apply { try $0.addProject(name, under: parentId ?? nil, color: color) })
+            page = .project(try apply { try $0.addProject(name, under: parentId ?? nil, color: .some(color), icon: icon) })
         }
     }
 

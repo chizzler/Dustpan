@@ -26,6 +26,9 @@ struct TaskList: View {
                                uniquingKeysWith: { first, _ in first })
         ScrollViewReader { proxy in
             List(selection: $selection) {
+                PageHeading(head: model.pageHead(page))
+                    .selectionDisabled()
+                    .listRowSeparator(.hidden)
                 ForEach(sections.enumerated(), id: \.offset) { index, section in
                     let place = Place(projectId: projectId, sectionId: section.id)
                     let items = shown[index]
@@ -52,6 +55,7 @@ struct TaskList: View {
                     .selectionDisabled()
                 }
             }
+            .pageTitle(title)
             .onChange(of: model.flash) { _, id in
                 guard let id else { return }
                 selection = [id]
@@ -65,7 +69,6 @@ struct TaskList: View {
         .animation(.default, value: model.settling)
         .taskMenus(selection: $selection, lists: lists.compactMap { $0 }, folds: folds)
         .focusedValue(\.taskFold, taskFold(folds))
-        .navigationTitle(title)
         .toolbar {
             if let project = projectId.flatMap({ model.projectsById[$0] }) {
                 ToolbarItem(placement: .primaryAction) {

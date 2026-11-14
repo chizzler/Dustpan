@@ -1,7 +1,7 @@
 # Project icons
 
 A project can show an icon instead of its dot, in the project's colour. Like Bear's tag icons, but for projects.
-Built on the desktop 2026-11-13, in 0.12.5. The Mac comes later.
+Built on the desktop 2026-11-13, in 0.12.5. On the Mac since 0.19.0 (2026-11-14).
 
 ## Where the icons come from
 
@@ -103,11 +103,25 @@ Lucide files the briefcase under transport, the star under weather.
   The calendar's 7 px dots stay dots: too small for a shape.
 - **Not shown in** the calendar's 7 px dots or the task editor's project list.
 
+## On the Mac (0.19.0)
+
+- **The same files and rules.** `DustpanCore/Resources/icons` holds the desktop's four files, and a test checks they're
+  still byte for byte the desktop's. `Icons.swift` ports the rules, `IconPath.swift` turns an icon's SVG into a
+  `CGPath` (for the iPhone too). No SVG library: Lucide uses seven elements and the path commands, and arcs draw as a
+  transformed unit circle. The desktop's tests are ported, plus every icon drawing inside the 24-unit grid.
+- **Drawing.** `IconImage` strokes the path at 1.5 units of 24 with round caps and joins, so it matches the desktop.
+  `ProjectMark` is a project's icon or dot in one square; Theme draws in `.primary`.
+- **The editor** has Theme first in the colour row, and an Icon row whose button opens the picker in a popover:
+  search across the top, the categories as a sidebar `List` with counts, the icons in a `LazyVGrid` eight across.
+  Return takes the best match; Esc closes. The picker closes through its own binding: a popover's `dismiss` inside
+  the editor's sheet closed the whole window.
+- **Labels** keep SF Symbols' `tag.fill` rather than Lucide's solid tag: it's the Mac's own tag, and solid too.
+  Task chips draw it at 10 pt in place of the dot.
+- **A new project's colour** is picked when the editor opens, as before, so its icon previews in that colour.
+
 ## Not yet
 
 - **Section icons.** The field exists, and the web app sets it. The desktop keeps it when editing a section, and
   doesn't show it.
-- **The Mac.** It needs the same JSON files as a resource in `DustpanCore`, and the same rules ported with these
-  tests. The SVGs would draw as template images so they take the project's colour.
 - **Marking which icons the web app shows.** It draws OpenTodo's 411 only. The picker doesn't say which those are.
 - **Keyboard into the grid.** Arrow keys from the search box into the icons.

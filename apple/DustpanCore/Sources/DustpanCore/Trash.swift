@@ -25,6 +25,7 @@ public struct TrashItem: Identifiable, Hashable, Sendable {
     public var projectName: String?
     /// For projects.
     public var color: String?
+    public var icon: String?
     /// Deleted with this task, and restored with it.
     public var subtasks = 0
 
@@ -55,7 +56,7 @@ public func trashItems(tasks: [String: Row], projects: [String: Row]) -> [TrashI
     var out = projects.values.compactMap { p -> TrashItem? in
         guard let deletedAt = p["deleted_at"].int else { return nil }
         return TrashItem(target: .init(entity: "project", id: p.id), title: p["name"].string ?? "Untitled project",
-                         deletedAt: deletedAt, color: p["color"].string)
+                         deletedAt: deletedAt, color: p["color"].string, icon: p["icon"].string)
     }
     let deleted = tasks.values.filter { $0["deleted_at"].int != nil }
     func parent(of task: Row) -> String? {

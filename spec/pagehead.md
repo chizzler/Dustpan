@@ -1,7 +1,7 @@
 # The page heading
 
 Every page opens with a large heading, so a project reads as a place you are in, not a list you are looking at.
-Built on the desktop 2026-11-13, in 0.12.5. The Mac comes later.
+Built on the desktop 2026-11-13, in 0.12.5. On the Mac since 0.19.0 (2026-11-14).
 
 ## The parts
 
@@ -44,8 +44,18 @@ Sync messages still show as the header bar's subtitle.
 `dustpan/pagehead.py` builds the widget from plain facts and holds its CSS. `Window.page_heading` in `app.py`
 gathers the facts for a page. Tests are in `tests/test_icons.py` (`PageHeadTest`).
 
+## On the Mac (0.19.0)
+
+- **The heading is the list's first row**, so it scrolls with the tasks and lines up with them. `AppModel.pageHead`
+  gathers the facts (`PageHeads.swift`), `PageHeading` draws them. The title is `.largeTitle`, heavy; symbols take
+  the accent colour. Sub-projects are bordered capsule buttons.
+- **The window's title** stays empty until the list has scrolled 72 pt (`pageTitle`), as Reminders does.
+  The Window menu still names the window "Dustpan".
+- **Trash** shows the heading above its note and items, empty or not. **An archived project** shows it above
+  Unarchive and Delete.
+- **The Inbox's count** is `countListed`, beside the sidebar's `countOpen`.
+
 ## Not yet
 
 - **Large-screen polish.** The heading sits in the same 760 px column as the tasks.
-- **The Mac.** It has the same pages and would take the same heading.
 - **Editing in place.** Clicking the title or the mark could rename the project or open the icon picker.

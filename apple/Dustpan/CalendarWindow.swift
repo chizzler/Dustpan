@@ -76,11 +76,11 @@ struct CalendarWindow: View {
     /// "November 2026", "9–15 Nov" or "Thu 12 November".
     private func title(_ day: Day) -> String {
         switch mode {
-        case .month: return date(day).formatted(.dateTime.month(.wide).year())
-        case .day: return date(day).formatted(.dateTime.weekday(.abbreviated).day().month(.wide))
+        case .month: return day.date.formatted(.dateTime.month(.wide).year())
+        case .day: return day.date.formatted(.dateTime.weekday(.abbreviated).day().month(.wide))
         case .week:
             let week = days(day)
-            let (first, last) = (date(week[0]), date(week[6]))
+            let (first, last) = (week[0].date, week[6].date)
             return (first..<last).formatted(.interval.day().month(.abbreviated))
         }
     }
@@ -91,14 +91,9 @@ struct CalendarWindow: View {
         case .month: return ""
         case .day: return day.parts.year.formatted(.number.grouping(.never))
         case .week:
-            let first = date(days(day)[0])
+            let first = days(day)[0].date
             let number = Calendar(identifier: .iso8601).component(.weekOfYear, from: first)
             return "Week \(number), \(days(day)[6].parts.year.formatted(.number.grouping(.never)))"
         }
-    }
-
-    private func date(_ day: Day) -> Date {
-        let (year, month, dayOfMonth) = day.parts
-        return Calendar.current.date(from: DateComponents(year: year, month: month, day: dayOfMonth)) ?? .now
     }
 }

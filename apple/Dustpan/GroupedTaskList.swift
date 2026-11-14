@@ -32,6 +32,9 @@ struct GroupedTaskList: View {
         let content = self.content
         ScrollViewReader { proxy in
             List(selection: $selection) {
+                PageHeading(head: model.pageHead(page))
+                    .selectionDisabled()
+                    .listRowSeparator(.hidden)
                 if let query = content.query {
                     Text(query)
                         .font(.callout.monospaced())
@@ -73,6 +76,7 @@ struct GroupedTaskList: View {
                         .selectionDisabled()
                 }
             }
+            .pageTitle(content.title)
             .onChange(of: model.flash) { _, id in
                 guard let id, content.groups.contains(where: { $0.tasks.contains { $0.id == id } }) else { return }
                 selection = [id]
@@ -83,7 +87,6 @@ struct GroupedTaskList: View {
             if let status = content.status { FilterBar(status: status, failed: content.failed) }
         }
         .taskMenus(selection: $selection)
-        .navigationTitle(content.title)
         .toolbar {
             if content.addDue != nil {
                 ToolbarItem(placement: .primaryAction) {

@@ -943,22 +943,30 @@ extension Writer {
         return position(max(Double(now()), (last ?? 0) + 1))
     }
 
-    /// A project, last at the top level or under parentId, in the first colour no live project uses. Returns its id.
+    /// A project, last at the top level or under parentId. Returns its id.
+    ///
+    /// color: nil picks the first palette colour no live project uses; `.some(nil)` is Theme, no colour of its own
+    /// (spec/icons.md). icon: nil writes no icon field.
     @discardableResult
-    public func addProject(_ name: String, under parentId: String? = nil, color: String? = nil) throws -> String {
+    public func addProject(_ name: String, under parentId: String? = nil, color: String?? = nil,
+                           icon: String? = nil) throws -> String {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { throw CannotEdit("A project needs a name") }
+        if let color { try checkColour(color) }
+        try checkIcon(icon)
         let projectId = newId()
         try commit {
             let projects = try store.rows("project")
             try checkParent(projects, parentId)
             let used = Set(projects.values.filter(isLive).compactMap { $0["color"].string })
-            return [Change("project", projectId, [
-                "name": .string(name),
-                "color": .string(color ?? projectColours.first { !used.contains($0.hex) }?.hex ?? projectColours[0].hex),
+            let chosen = color ?? projectColours.first { !used.contains($0.hex) }?.hex ?? projectColours[0].hex
+            var fields: [String: JSON] = [
+                "name": .string(name), "color": chosen.map(JSON.string) ?? .null,
                 "position": lastProjectPosition(projects, parentId), "archived": false,
                 "parent_id": parentId.map(JSON.string) ?? nil, "created_at": .int(now()), "deleted_at": nil,
-            ])]
+            ]
+            if let icon { fields["icon"] = .string(icon) }
+            return [Change("project", projectId, fields)]
         }
         return projectId
     }
@@ -1015,17 +1023,29 @@ extension Writer {
 /// The project fields `Writer.editProject` takes. Nil leaves a field alone.
 public struct ProjectEdit: Equatable, Sendable {
     public var name: String?
-    /// A hex colour, "#rrggbb".
-    public var color: String?
+    /// A hex colour, "#rrggbb". `.some(nil)` is Theme: no colour of its own.
+    public var color: String??
+    /// A known icon's name. `.some(nil)` clears it.
+    public var icon: String??
     /// `.some(nil)` is the top level.
     public var parentId: String??
 
-    public init(name: String? = nil, color: String? = nil, parentId: String?? = nil) {
-        (self.name, self.color, self.parentId) = (name, color, parentId)
+    public init(name: String? = nil, color: String?? = nil, icon: String?? = nil, parentId: String?? = nil) {
+        (self.name, self.color, self.icon, self.parentId) = (name, color, icon, parentId)
     }
 }
 
 extension Writer {
+    /// A project's colour is "#rrggbb", or nil for the theme's text colour (spec/icons.md).
+    func checkColour(_ color: String?) throws {
+        if let color, color.wholeMatch(of: /#[0-9a-fA-F]{6}/) == nil { throw CannotEdit("Not a colour: \(color)") }
+    }
+
+    /// An icon written must be nil or one this client can draw (spec/icons.md).
+    func checkIcon(_ icon: String?) throws {
+        if let icon, !Icons.known(icon) { throw CannotEdit("Not an icon: \(icon)") }
+    }
+
     /// Write the changed fields of a project, as one batch. A new parent also writes a position, last among
     /// the new siblings.
     public func editProject(_ projectId: String, _ edit: ProjectEdit) throws -> Done {
@@ -1039,8 +1059,13 @@ extension Writer {
                 if name != project["name"].string { patch["name"] = .string(name) }
             }
             if let color = edit.color, color != project["color"].string {
-                guard color.wholeMatch(of: /#[0-9a-fA-F]{6}/) != nil else { throw CannotEdit("Not a colour: \(color)") }
-                patch["color"] = .string(color)
+                try checkColour(color)
+                patch["color"] = color.map(JSON.string) ?? .null
+            }
+            // Compared before checking: a newer client's icon survives an edit that leaves it alone.
+            if let icon = edit.icon, icon != project["icon"].string {
+                try checkIcon(icon)
+                patch["icon"] = icon.map(JSON.string) ?? .null
             }
             if let parentId = edit.parentId, parentId != project["parent_id"].string {
                 try checkParent(projects, parentId, for: projectId)
