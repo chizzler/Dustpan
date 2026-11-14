@@ -28,6 +28,10 @@ so it works standalone out of the box, with optional sync to your own OpenTodo s
 - Completed subtasks settle below open ones 2 seconds after the last tick.
 - Subtask progress, the parent-completion prompt, and delayed sorting of completed subtasks.
 - Clickable project names on grouped task rows.
+- Quick add's preview starts with the title it will save (`→ Call Sam · Tomorrow 3:00pm · p1`),
+  so a word read as a date can't vanish unseen.
+- Fixed: quick add read "sun", "sat" and "wed" as days mid-sentence, so `Sit in the sun` became *Sit in the*,
+  due Sunday. They're now a date only with a cue: `on`/`next` before, a time or tag after, or at the line's end.
 - Desktop visual polish and the Dustpan icon.
 - A remembered calendar toggle for completed tasks (`h`).
 - Refused HTTP redirects to prevent forwarding the API token to another host or an insecure URL.

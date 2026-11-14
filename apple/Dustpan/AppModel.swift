@@ -511,7 +511,7 @@ final class AppModel {
         try apply { try $0.quickAdd(line, parentId: parentId) }
     }
 
-    /// What a quick-add line will set besides the title, as "Tomorrow 15:00 · Work · @phone · p1".
+    /// The title a quick-add line leaves and what it sets, as "→ Call Sam · Tomorrow 15:00 · Work · @phone · p1".
     func quickAddPreview(_ line: String) -> String {
         guard !line.trimmingCharacters(in: .whitespaces).isEmpty, let parsed = try? writer?.parseLine(line) else {
             return ""
@@ -526,7 +526,9 @@ final class AppModel {
             parsed.priority.map { "p\($0)" }, parsed.estimateMinutes.map(formatMinutes), parsed.recurrence,
             reminders > 0 ? "\(reminders) reminder\(reminders == 1 ? "" : "s")" : nil,
         ]
-        return parts.compactMap { $0 }.joined(separator: " · ")
+        let text = parts.compactMap { $0 }.joined(separator: " · ")
+        // The title too, so a word read as a date doesn't vanish unseen.
+        return text.isEmpty ? "" : "→ \(parsed.title.isEmpty ? "(no title)" : parsed.title) · \(text)"
     }
 
     /// Delete tasks and their subtasks. One Undo brings them all back.

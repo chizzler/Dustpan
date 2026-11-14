@@ -1418,7 +1418,7 @@ class Window(Adw.ApplicationWindow):
         return box
 
     def show_quick_add(self, entry, preview):
-        """Under the entry: what the line will set, besides the title."""
+        """Under the entry: the title the line leaves, and what it sets."""
         parsed = self.writer.parse_line(entry.get_text())
         due = format_due(parsed.due, time_format=self.time_format)
         names = dict(self.project_paths)
@@ -1431,6 +1431,8 @@ class Window(Adw.ApplicationWindow):
             parsed.recurrence, parsed.reminders and f"{len(parsed.reminders)} reminder{'s' * (len(parsed.reminders) > 1)}",
         ]
         text = " · ".join(str(part) for part in parts if part)
+        if text:  # the title too, so a word read as a date doesn't vanish unseen
+            text = f"→ {parsed.title or '(no title)'} · {text}"
         preview.set_label(text)
         preview.set_visible(bool(text))
 

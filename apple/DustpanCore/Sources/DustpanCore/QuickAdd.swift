@@ -56,6 +56,10 @@ public func parseQuickAdd(_ line: String, _ ctx: QuickAddContext) -> QuickAddRes
     return parser.run()
 }
 
+// Dustpan differs here (spec/quickadd.md): English day names that are also everyday words.
+private let wordLikeDays: Set<String> = ["sun", "sat", "wed"]
+private let articles: Set<String> = ["the", "a", "an", "my", "our", "your", "his", "her", "their"]
+
 private struct QuickAddParser {
     let line: [Unicode.Scalar]
     let ctx: QuickAddContext
@@ -206,6 +210,7 @@ private struct QuickAddParser {
         if date == nil || dateBare {
             dm = matchDateAt(tokens, i, dates)
             if date != nil && dm?.bare == true { dm = nil }  // after a bare month, only a complete date
+            if let found = dm, wordLikeDay(found, i) { dm = nil }
         }
         if time == nil { tm = matchTimeAt(tokens, i, dates) }
         // After the first rule only a literal match counts. "5th Friday" is one too.
@@ -254,6 +259,22 @@ private struct QuickAddParser {
             }
         }
         return i + 1
+    }
+
+    /// A bare "sun", "sat" or "wed" read as text: after "the", "a", "my"…, or mid-sentence,
+    /// unless a time or a tag follows, or it ends the line.
+    func wordLikeDay(_ dm: DateMatch, _ i: Int) -> Bool {
+        guard dm.to == i + 1, wordLikeDays.contains(tokens[i].norm) else { return false }
+        if i > 0 && articles.contains(tokens[i - 1].norm) { return true }
+        if i + 1 == tokens.count || !tokens[i + 1].quoted && isAttribute(tokens[i + 1].text) { return false }
+        return matchTimeAt(tokens, i + 1, dates) == nil
+    }
+
+    /// Whether attribute() reads this token as a tag, whatever the line has already set.
+    func isAttribute(_ text: String) -> Bool {
+        (text.count > 1 && text.hasPrefix("#") && matchProject(text, ctx.projects) != nil)
+            || matchLabel(text) != nil || (ctx.energy && !matchEnergy(text).isEmpty) || matchPriority(text) > 0
+            || matchSpent(text) != nil || matchDuration(text, bareHourIsTime: bareHourIsTime) > 0
     }
 
     // MARK: result

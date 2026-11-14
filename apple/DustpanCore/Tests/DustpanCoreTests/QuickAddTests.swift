@@ -76,6 +76,35 @@ import Testing
         #expect(got.due == nil && got.priority == 2)
     }
 
+    /// Dustpan differs from upstream: "sun", "sat" and "wed" are everyday words too. Mirrors test_word_like_days.
+    @Test func wordLikeDays() {
+        let ctx = QuickAddContext(today: Day("2026-11-14")!, now: "15:00")  // a Saturday
+        let cases: [(String, String, JSON)] = [
+            ("Stack the turtles in the sun today", "Stack the turtles in the sun", ["date": "2026-11-14"]),
+            ("Sit in the sun", "Sit in the sun", nil),
+            ("Read on the sun deck tomorrow", "Read on the sun deck", ["date": "2026-11-15"]),
+            ("Lunch with Sat friday", "Lunch with Sat", ["date": "2026-11-20"]),
+            ("Sun cream", "Sun cream", nil),
+            ("Call Mum sun", "Call Mum", ["date": "2026-11-15"]),
+            ("Call Mum on sun", "Call Mum", ["date": "2026-11-15"]),
+            ("Call Mum next sun", "Call Mum", ["date": "2026-11-22"]),
+            ("Call Mum sun 4pm", "Call Mum", ["date": "2026-11-15", "time": "16:00"]),
+            ("Call Mum sun p1", "Call Mum", ["date": "2026-11-15"]),
+            ("Gym sat +1h", "Gym", ["date": "2026-11-21"]),
+            ("Gym sat 1h", "Gym", ["date": "2026-11-21"]),
+            ("Dinner sat #nowhere", "Dinner sat #nowhere", nil),
+            ("Meet wed 10am @work", "Meet", ["date": "2026-11-18", "time": "10:00"]),
+            ("Wed the fri", "Wed the", ["date": "2026-11-20"]),
+        ]
+        for (line, title, due) in cases {
+            let got = parseQuickAdd(line, ctx)
+            #expect(got.title == title, "\(line)")
+            #expect(got.due == due, "\(line)")
+        }
+        #expect(parseQuickAdd("Bins every sun", ctx).recurrence == "every sunday")
+        #expect(parseQuickAdd("Send report deadline sun for review", ctx).deadline == Day("2026-11-15"))
+    }
+
     @Test func resolve() {
         let today = Day("2026-10-31")!
         let nine = TypedReminder.moment(date: nil, time: "09:00")

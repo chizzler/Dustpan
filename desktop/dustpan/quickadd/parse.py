@@ -14,6 +14,10 @@ from .reminders import match_reminder_at
 from .repeats import RepeatMatch, match_repeat_at
 from .words import VOCABS, active_languages, strip_spans, tokenize, words_at
 
+# Dustpan differs here (spec/quickadd.md): English day names that are also everyday words.
+WORD_LIKE_DAYS = {"sun", "sat", "wed"}
+ARTICLES = {"the", "a", "an", "my", "our", "your", "his", "her", "their"}
+
 
 @dataclass
 class Context:
@@ -173,6 +177,8 @@ class Parser:
             dm = match_date_at(tokens, i, dctx)
             if self.date is not None and dm and dm.bare:  # after a bare month, only a complete date
                 dm = None
+            if dm and self.word_like_day(dm, i):
+                dm = None
         if self.time is None:
             tm = match_time_at(tokens, i, dctx)
         # After the first rule only a literal match counts. "5th Friday" is one too.
@@ -208,6 +214,24 @@ class Parser:
             self.someday = self.span(i, i + n)
             return i + n
         return i + 1
+
+    def word_like_day(self, dm, i):
+        """A bare "sun", "sat" or "wed" read as text: after "the", "a", "my"…, or mid-sentence,
+        unless a time or a tag follows, or it ends the line."""
+        tokens = self.tokens
+        if dm.to != i + 1 or tokens[i].norm not in WORD_LIKE_DAYS:
+            return False
+        if i > 0 and tokens[i - 1].norm in ARTICLES:
+            return True
+        if i + 1 == len(tokens) or not tokens[i + 1].quoted and self.is_attribute(tokens[i + 1].text):
+            return False
+        return match_time_at(tokens, i + 1, self.dctx) is None
+
+    def is_attribute(self, text):
+        """Whether attribute() reads this token as a tag, whatever the line has already set."""
+        return bool(len(text) > 1 and text[0] == "#" and match_project(text, self.ctx.projects)
+                    or match_label(text) or self.ctx.energy and match_energy(text) or match_priority(text)
+                    or match_spent(text) or match_duration(text, self.bare_hour_is_time))
 
     # ---- result ----
 

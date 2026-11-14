@@ -43,6 +43,20 @@ because the app needs it at run time. A test fails when it no longer matches the
 
 Text in double quotes is never read. The title is what's left.
 
+## Where we differ
+
+**"sun", "sat" and "wed" are words as well as days.** Upstream reads them as a date anywhere in the line,
+so `Sit in the sun` is due Sunday with the title *Sit in the*. Dustpan reads them as a date only when:
+
+- `on`, `by`, `due`, `next` or `this` comes before them, or `deadline`, `until` or a reminder phrase;
+- a time or a tag that quick add reads (a known `#project`, `@label`, `p1`, `+30m`, `1h`…) comes after them;
+- they end the line, and don't follow `the`, `a`, `an` or a possessive (`my`, `our`…).
+
+So `Call Mum sun` and `Gym sat 6pm` are dated, and `Stack the turtles in the sun today` is due today with the
+sun left in. Full names (`sunday`) and `every sun` are unchanged. English only: German's two-letter days already
+need their dot upstream. The check is in the parser's free-text scan (`Parser.word_like_day` in `quickadd/parse.py`,
+`wordLikeDay` in `QuickAdd.swift`), so `dates.py` stays a straight port. All 160 upstream vectors still pass. Drop this if OpenTodo adopts it.
+
 ## The context
 
 - **Languages:** `user_prefs.language` unless it's `system`, then this device's locale (`LC_ALL`, `LC_MESSAGES`, `LANG`).
@@ -53,7 +67,8 @@ Text in double quotes is never read. The title is what's left.
 
 ## In the window
 
-The add-task entry reads every line with quick add. A line under it shows what will be set, besides the title.
+The add-task entry reads every line with quick add. A line under it shows the title that's left and what will be set:
+`→ Call Sam · Tomorrow 3:00pm · Work · p1`. Showing the title means a word read as a date can't vanish unseen.
 The page fills in what the line leaves out:
 
 - a project page: its project and the section;

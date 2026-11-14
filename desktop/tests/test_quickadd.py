@@ -50,6 +50,33 @@ class QuickAddTest(unittest.TestCase):
         got = parse('Read "tomorrow" #nowhere p2', Context("2026-10-31", "10:00"))
         self.assertEqual((got.title, got.due, got.priority), ("Read tomorrow #nowhere", None, 2))
 
+    def test_word_like_days(self):
+        # Dustpan differs from upstream: "sun", "sat" and "wed" are everyday words too.
+        ctx = Context("2026-11-14", "15:00")  # a Saturday
+        cases = {
+            "Stack the turtles in the sun today": ("Stack the turtles in the sun", {"date": "2026-11-14"}),
+            "Sit in the sun": ("Sit in the sun", None),
+            "Read on the sun deck tomorrow": ("Read on the sun deck", {"date": "2026-11-15"}),
+            "Lunch with Sat friday": ("Lunch with Sat", {"date": "2026-11-20"}),
+            "Sun cream": ("Sun cream", None),
+            "Call Mum sun": ("Call Mum", {"date": "2026-11-15"}),
+            "Call Mum on sun": ("Call Mum", {"date": "2026-11-15"}),
+            "Call Mum next sun": ("Call Mum", {"date": "2026-11-22"}),
+            "Call Mum sun 4pm": ("Call Mum", {"date": "2026-11-15", "time": "16:00"}),
+            "Call Mum sun p1": ("Call Mum", {"date": "2026-11-15"}),
+            "Gym sat +1h": ("Gym", {"date": "2026-11-21"}),
+            "Gym sat 1h": ("Gym", {"date": "2026-11-21"}),
+            "Dinner sat #nowhere": ("Dinner sat #nowhere", None),
+            "Meet wed 10am @work": ("Meet", {"date": "2026-11-18", "time": "10:00"}),
+            "Wed the fri": ("Wed the", {"date": "2026-11-20"}),
+        }
+        for line, want in cases.items():
+            with self.subTest(line):
+                got = parse(line, ctx)
+                self.assertEqual((got.title, got.due), want)
+        self.assertEqual(parse("Bins every sun", ctx).recurrence, "every sunday")
+        self.assertEqual(parse("Send report deadline sun for review", ctx).deadline, "2026-11-15")
+
     def test_resolve(self):
         offset = {"kind": "offset", "minutes": -30}
         at_nine = {"kind": "moment", "date": None, "time": "09:00"}
