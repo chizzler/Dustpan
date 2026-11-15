@@ -24,10 +24,10 @@ deploy/pull-backups.sh --install  # daily copies of the server's archives and th
 Both clients work standalone, and read their URL and token from `~/.config/dustpan/config` once connected in Settings.
 
 Linux AUR release preparation is in [packaging/](packaging/README.md). It builds a Linux-only source
-archive and Arch package. The 0.12.6 candidate passes package and fresh-profile runtime checks; AUR
-submission is waiting for account setup. Downloads are being prepared at [ChipDust](https://chipdust.au/dustpan/).
+archive and Arch package. Linux 0.12.6 is available from [ChipDust](https://chipdust.au/dustpan/), with
+source, setup instructions and checksums. AUR submission is pending while new-account registration is closed.
 
-The Omarchy client reports 0.12.6; its latest release tag is v0.12.3 (see [versions](desktop/README.md#versions)).
+The Omarchy client reports 0.12.6; its latest release tag is v0.12.6 (see [versions](desktop/README.md#versions)).
 The Mac source is at 0.19.0, with unreleased section colours and icons and a concurrent-editor-save fix
 (see [Mac versions](apple/README.md#versions); the save fix still needs a Mac build/test run).
 The server is pinned to OpenTodo v0.22.0.
