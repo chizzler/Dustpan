@@ -201,6 +201,45 @@ import Testing
         #expect(try section("s1")["icon"] == "from-the-future" && section("s1")["name"] == "New")
     }
 
+    @Test func sectionEditorRenamePreservesRemoteStyleAndUndoOnlyRenames() throws {
+        try seed("section", "s1", ["name": "Waiting", "color": "#f59e0b", "icon": "hourglass"])
+        let original = try section("s1")
+        _ = try writer.editSection("s1", color: "#3b82f6", icon: "dog")
+        let count = try outbox().count
+        let done = try writer.editSection(original, name: " Renamed ", color: "#f59e0b", icon: "hourglass")
+        #expect(try section("s1")["name"] == "Renamed")
+        #expect(try section("s1")["color"] == "#3b82f6" && section("s1")["icon"] == "dog")
+        #expect(try outbox().count == count + 1)
+        try writer.revert(done.undo)
+        #expect(try section("s1")["name"] == "Waiting")
+        #expect(try section("s1")["color"] == "#3b82f6" && section("s1")["icon"] == "dog")
+    }
+
+    @Test func sectionEditorClearKeepsRemoteNameAndColourAndUndoRestoresLatestIcon() throws {
+        try seed("section", "s1", ["name": "Waiting", "color": "#f59e0b", "icon": "hourglass"])
+        let original = try section("s1")
+        _ = try writer.editSection("s1", name: "Remote name", color: "#3b82f6", icon: "dog")
+        let count = try outbox().count
+        let done = try writer.editSection(original, name: "Waiting", color: "#f59e0b", icon: nil)
+        #expect(try section("s1")["name"] == "Remote name" && section("s1")["color"] == "#3b82f6")
+        #expect(try section("s1")["icon"].isNull)
+        #expect(try outbox().count == count + 1)
+        try writer.revert(done.undo)
+        #expect(try section("s1")["icon"] == "dog")
+    }
+
+    @Test func unchangedSectionEditorDoesNotWriteOverRemoteChanges() throws {
+        try seed("section", "s1", ["name": "Waiting", "color": "#f59e0b", "icon": "hourglass"])
+        let original = try section("s1")
+        _ = try writer.editSection("s1", name: "Remote name", color: "#3b82f6", icon: "dog")
+        let count = try outbox().count
+        let done = try writer.editSection(original, name: " Waiting ", color: "#f59e0b", icon: "hourglass")
+        #expect(done.undo.isEmpty)
+        #expect(try outbox().count == count)
+        #expect(try section("s1")["name"] == "Remote name")
+        #expect(try section("s1")["color"] == "#3b82f6" && section("s1")["icon"] == "dog")
+    }
+
     @Test func moveSectionStepsOnePlace() throws {
         try seed("project", "p1", ["name": "Home"])
         for (i, id) in ["s1", "s2", "s3"].enumerated() {

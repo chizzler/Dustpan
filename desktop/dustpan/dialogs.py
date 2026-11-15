@@ -1,4 +1,4 @@
-"""The task, view, project, label and settings dialogs."""
+"""The task, view, project, section, label and settings dialogs."""
 
 import re
 import threading
@@ -10,7 +10,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, Gdk, GLib, Gtk  # noqa: E402
 
-from . import config  # noqa: E402
+from . import config, icons  # noqa: E402
 from .api import Api, ApiError, Offline  # noqa: E402
 from .dates import day_start_minutes, format_time, uses_12h  # noqa: E402
 from .filters import FilterError  # noqa: E402
@@ -25,7 +25,7 @@ from .reminders import (DEADLINE_PRESETS, DEFAULT_DATED_PRESETS, DEFAULT_TIMED_P
                         describe, offset_label, parse_custom_offset, read_defaults)  # noqa: E402
 from .sync import UnsupportedAccount, adopt_standalone, migrate_account, reset_for_account, verify_account  # noqa: E402
 from .views import run_query, view_options  # noqa: E402
-from .widgets import NO_COLOUR, Dot, broom_button, escape, label_chip, project_mark  # noqa: E402
+from .widgets import NO_COLOUR, Dot, NoColour, broom_button, escape, label_chip, project_mark, section_mark  # noqa: E402
 from .writes import (AUTO_COLOUR, DAY_STARTS, LABEL_COLOURS, LOCAL_USER, PROJECT_COLOURS, CannotEdit, live,
                      project_descendants)  # noqa: E402
 
@@ -696,6 +696,104 @@ class ProjectDialog(Adw.Dialog):
             return
         self.close()
         window.show_project(project_id)
+
+
+class SectionDialog(Adw.Dialog):
+    """Add or edit a section's name, colour and icon; choices stay local until Save."""
+
+    def __init__(self, window, project_id, section=None):
+        super().__init__(title="Edit section" if section else "New section", content_width=460)
+        self.window, self.project_id, self.section = window, project_id, section
+        self.color = section.get("color") if section else None
+        self.icon = section.get("icon") if section else None
+
+        cancel = Gtk.Button(label="Cancel")
+        cancel.connect("clicked", lambda _b: self.close())
+        self.save_button = Gtk.Button(label="Save" if section else "Add", css_classes=["suggested-action"])
+        self.save_button.connect("clicked", lambda _b: self.save())
+        header = Adw.HeaderBar(show_start_title_buttons=False, show_end_title_buttons=False)
+        header.pack_start(cancel)
+        header.pack_end(self.save_button)
+
+        page = Adw.PreferencesPage()
+        main = Adw.PreferencesGroup()
+        self.name_row = Adw.EntryRow(title="Name", text=section.get("name", "") if section else "")
+        self.name_row.connect("entry-activated", lambda _r: self.save())
+        self.name_row.connect("notify::text", lambda *_a: self.update_save())
+        main.add(self.name_row)
+
+        colours = Gtk.Box(spacing=4, valign=Gtk.Align.CENTER)
+        first = None
+        chosen = self.color.lower() if isinstance(self.color, str) else None
+        for hex_, name in ((None, "None"), *PROJECT_COLOURS):
+            button = Gtk.ToggleButton(child=NoColour() if hex_ is None else Dot(hex_, 16), tooltip_text=name,
+                                      css_classes=["flat", "colour-choice"], active=hex_ == chosen)
+            button.set_group(first)
+            first = first or button
+            button.connect("toggled", lambda b, c=hex_: b.get_active() and self.pick_color(c))
+            colours.append(button)
+        colour_row = Adw.ActionRow(title="Colour")
+        colour_row.add_suffix(colours)
+        main.add(colour_row)
+
+        self.icon_button = Gtk.MenuButton(valign=Gtk.Align.CENTER, tooltip_text="Choose an icon", css_classes=["flat"],
+                                          popover=IconPicker(lambda: (self.name_row.get_text(), self.color, self.icon),
+                                                             self.pick_icon))
+        icon_row = Adw.ActionRow(title="Icon", activatable_widget=self.icon_button)
+        icon_row.add_suffix(self.icon_button)
+        main.add(icon_row)
+        self.show_icon()
+        page.add(main)
+
+        toolbar = Adw.ToolbarView(content=page)
+        toolbar.add_top_bar(header)
+        self.toasts = Adw.ToastOverlay(child=toolbar)
+        self.set_child(self.toasts)
+        self.set_focus(self.name_row)
+        self.update_save()
+
+    def update_save(self):
+        self.save_button.set_sensitive(bool(self.name_row.get_text().strip()))
+
+    def pick_color(self, color):
+        self.color = color
+        self.show_icon()
+
+    def pick_icon(self, icon):
+        self.icon = icon
+        self.show_icon()
+
+    def show_icon(self):
+        box = Gtk.Box(spacing=8)
+        mark = section_mark({"color": self.color, "icon": self.icon})
+        if mark is not None:
+            box.append(mark)
+        box.append(Gtk.Label(label=icons.title(self.icon) if self.icon else "None"))
+        self.icon_button.set_child(box)
+
+    def save(self):
+        if not self.name_row.get_text().strip():
+            return
+        changes = {"name": self.name_row.get_text().strip(), "color": self.color, "icon": self.icon}
+        try:
+            if self.section:
+                # Compare with the row the dialog opened on, not the latest synced row. Untouched fields
+                # belong to whoever changed them while this editor was open.
+                changes = {key: value for key, value in changes.items() if value != self.section.get(key)}
+                done = self.window.writer.edit_section(self.section.id, changes)
+            else:
+                self.window.writer.add_section(self.project_id, **changes)
+                done = None
+        except (CannotEdit, ValueError) as err:
+            self.toasts.add_toast(Adw.Toast(title=escape(str(err)), timeout=5))
+            return
+        self.close()
+        if self.section:
+            if done.undo:
+                self.window.after_edit()
+                self.window.toast("Edited section", undo=lambda: self.window.run(self.window.writer.revert, done.undo))
+        else:
+            self.window.show_project(self.project_id)
 
 
 class LabelDialog(Adw.Dialog):

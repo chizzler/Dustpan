@@ -76,6 +76,20 @@ class SyncTest(unittest.TestCase):
         api2, _ = self.run_sync()
         self.assertEqual(api.requests[0]["device"], api2.requests[0]["device"])
 
+    def test_section_style_pulls_and_edits_upload_as_section_fields(self):
+        incoming = [{**op("s1", field, value, 1), "entity": "section"}
+                    for field, value in (("name", "Waiting"), ("color", "#f59e0b"), ("icon", "hourglass"))]
+        self.run_sync({"ops": incoming, "cursor": 3})
+        row = self.store.rows("section")["s1"]
+        self.assertEqual((row.get("color"), row.get("icon")), ("#f59e0b", "hourglass"))
+        writer = Writer(self.store, clock=HybridClock(self.store, now=lambda: 2_000), now=lambda: 2_000)
+        writer.edit_section("s1", {"color": None, "icon": "sprout"})
+        api, _ = self.run_sync({"cursor": 5})
+        sent = [o for request in api.requests for o in request["ops"]]
+        self.assertEqual({(o["entity"], o["entityId"], o["field"]): o["value"] for o in sent},
+                         {("section", "s1", "color"): None, ("section", "s1", "icon"): "sprout"})
+        self.assertEqual(self.store.outbox_count(), 0)
+
     def test_purge_marker_deletes_entity(self):
         self.run_sync({"ops": [op("t1", "title", "A", 1)], "cursor": 1})
         self.run_sync({"purged": [{"entity": "task", "entityId": "t1"}], "cursor": 2})

@@ -9,6 +9,10 @@ natural-language quick add, filters, saved views, Undo and Trash are included. A
 provides Month, Week and Day views, scheduling and duration resizing. Colours follow the Omarchy theme,
 with Adwaita as the fallback.
 
+Projects and sections can have colours and Lucide icons. Add/Edit section offers None for no colour;
+an icon without a colour follows the text colour, a colour alone shows a dot, and neither leaves just
+the name. Section edits have Undo and preserve unrelated changes synced while the editor was open.
+
 ## Install
 
 For a locally built Arch package:
@@ -45,6 +49,10 @@ OPENTODO_URL=https://todo.example.com
 OPENTODO_TOKEN=your-api-token
 ```
 
+Changing accounts waits for a running sync to finish before switching. Previously synced items deleted
+for good after disconnect remain queued for server deletion on reconnect; never-synced standalone items
+are deleted locally at once.
+
 The URL must use https; plain http is allowed only for localhost. Closing the window hides it so reminders
 (and sync, when connected) continue; Ctrl+Q quits. Quit and reopen after an update.
 
@@ -70,10 +78,6 @@ length, Alt+Shift+Up/Down move its start while keeping its end, and `u` removes 
 
 ## Current limits
 
-- Release blocker: switching OpenTodo accounts during active sync can send new-account data to the previous
-  account and mix its response into local data. Avoid switching accounts in the running app until fixed.
-- Release blocker: deleting previously synced items for good after disconnect loses their server deletion;
-  the server copy remains and can return. Keep sync configured and let permanent deletion reach the server.
 - Encrypted accounts and complete shared-project membership handling are not supported.
 - The calendar does not yet show future repeat occurrences or multi-day bars.
 - Time sectors can be shown, filtered and used in quick add, but cannot be set in the editor.

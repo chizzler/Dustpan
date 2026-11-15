@@ -80,7 +80,7 @@ struct ProjectDraft: Identifiable {
     var parentId: String?
 }
 
-/// A section being named: a new one in projectId, or an existing one.
+/// A section being edited: a new one in projectId, or the existing row as the editor opened.
 struct SectionDraft: Identifiable {
     let id = UUID()
     let projectId: String
@@ -632,7 +632,7 @@ final class AppModel {
     /// Add a section, last in its project, or edit one. color nil is none. icon nil is none.
     func saveSection(_ draft: SectionDraft, name: String, color: String?, icon: String?) throws {
         if let section = draft.section {
-            let done = try apply { try $0.editSection(section.id, name: name, color: .some(color), icon: .some(icon)) }
+            let done = try apply { try $0.editSection(section, name: name, color: color, icon: icon) }
             if !done.undo.isEmpty { registerUndo("Edit Section", done) }
         } else {
             try apply { try $0.addSection(name, to: draft.projectId, color: color, icon: icon) }

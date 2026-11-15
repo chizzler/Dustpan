@@ -18,7 +18,7 @@ from .api import Api, ApiError, Offline  # noqa: E402
 from .calendarwindow import CSS as CALENDAR_CSS, CalendarWindow  # noqa: E402
 from .clock import wall_ms  # noqa: E402
 from .dates import day_heading, day_start_minutes, format_due, format_minutes, format_time, uses_12h  # noqa: E402
-from .dialogs import LabelDialog, ProjectDialog, SettingsDialog, TaskDialog, ViewDialog, ask_name  # noqa: E402
+from .dialogs import LabelDialog, ProjectDialog, SectionDialog, SettingsDialog, TaskDialog, ViewDialog, ask_name  # noqa: E402
 from .dragdrop import (AFTER, BEFORE, INSIDE, MOVES, Place, Slot, ToDay, ToLabel, ToProject,  # noqa: E402
                        describe as describe_drop, nudge, place_item, zone)
 from .dragging import Autoscroll, Drag, ItemDrag, PageDrop, SidebarDrop  # noqa: E402
@@ -40,7 +40,7 @@ from .views import (LOGBOOK_PAGE, WEEK_START, compare_tasks, group_tasks, in_any
                     upcoming_groups, view_options)
 from .widgets import (CSS, FOLD_PX, INDENT_PX, BrandDust, BrandMark, Pie, ThemeFollower,  # noqa: E402
                       broom_button, escape, flash, label_chip, label_mark, on_right_click, popup_menu, project_mark,
-                      save_screenshot, scroll_into_view)
+                      save_screenshot, scroll_into_view, section_mark)
 from .writes import LOCAL_USER, CannotEdit, Writer, descendants, live, project_descendants  # noqa: E402
 
 SYNC_INTERVAL_S = 30
@@ -764,7 +764,7 @@ class Window(Adw.ApplicationWindow):
     def note(self, column, text, css="dim-label"):
         column.append(Gtk.Label(label=text, xalign=0, wrap=True, margin_top=12, margin_bottom=8, css_classes=[css]))
 
-    def heading(self, column, text, menu=None):
+    def heading(self, column, text, menu=None, mark=None):
         """A heading. menu() gives the sections of its menu, opened by its button or a right-click."""
         label = Gtk.Label(label=text, xalign=0, hexpand=True, wrap=True, css_classes=["heading"])
         if menu is None:
@@ -772,6 +772,8 @@ class Window(Adw.ApplicationWindow):
             column.append(label)
             return label
         box = Gtk.Box(spacing=6, css_classes=["section-heading"])
+        if mark is not None:
+            box.append(mark)
         box.append(label)
         button = Gtk.Button(icon_name="view-more-symbolic", tooltip_text="Section menu", valign=Gtk.Align.CENTER,
                             css_classes=["flat", "circular"])
@@ -784,11 +786,13 @@ class Window(Adw.ApplicationWindow):
     def fill_project(self, column, project_id):
         """A project's or the Inbox's sections. Each real list takes drops: between rows, inside one, at its ends."""
         sections = project_sections(self.snap, project_id, self.store.get_meta(CLEARED_SUBTASKS) or {}, self.settling)
+        styled = {s.id: s for s in self.snap.sections_by_project.get(project_id, [])}
         if not any(s.tasks for s in sections) and len(sections) == 1 and self.adding is None:
             self.note(column, "Nothing to do here.")
         for sec in sections:
             menu = (lambda sid=sec.id: self.section_menu(sid)) if sec.id else None
-            heading = self.heading(column, sec.name, menu) if sec.name else None
+            mark = section_mark(styled[sec.id]) if sec.id in styled else None
+            heading = self.heading(column, sec.name, menu, mark) if sec.name else None
             rows = []
             self.add_tasks(column, sec.tasks, 0, None, rows)
             if sec.is_list:
@@ -1878,27 +1882,23 @@ class Window(Adw.ApplicationWindow):
         self.run(self.writer.revert, undo)
 
     def add_section(self, project_id):
-        def add(name):
-            if self.run(self.writer.add_section, project_id, name) is not None:
-                self.show_project(project_id)
-
-        ask_name(self, "New section", "", add)
+        SectionDialog(self, project_id).present(self)
 
     def section_menu(self, section_id):
         section = self.store.rows("section").get(section_id)
         order = [s.id for s in self.snap.sections_by_project.get(section.get("project_id"), [])]
         index = order.index(section_id) if section_id in order else -1
         return [
-            [("Rename…", lambda: self.rename_section(section_id), True)],
+            [("Edit section…", lambda: self.edit_section(section_id), True)],
             [("Move up", lambda: self.run(self.writer.move_section, section_id, -1), index > 0),
              ("Move down", lambda: self.run(self.writer.move_section, section_id, 1), 0 <= index < len(order) - 1)],
             [("Delete section", lambda: self.delete_section(section_id), True)],
         ]
 
-    def rename_section(self, section_id):
+    def edit_section(self, section_id):
         section = self.store.rows("section").get(section_id)
-        ask_name(self, "Rename section", section.get("name", ""),
-                 lambda name: self.run(self.writer.rename_section, section_id, name))
+        if section is not None:
+            SectionDialog(self, section.get("project_id"), section).present(self)
 
     def delete_section(self, section_id):
         name = self.store.rows("section").get(section_id).get("name", "")

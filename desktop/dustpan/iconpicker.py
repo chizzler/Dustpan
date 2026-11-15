@@ -15,7 +15,7 @@ SUGGESTED = "suggested"
 
 
 class IconPicker(Gtk.Popover):
-    """context() gives (project name, colour, current icon) each time the picker opens.
+    """context() gives (project or section name, colour, current icon) each time the picker opens.
 
     Choosing an icon, or No icon, calls choose(name or None) and closes.
     """

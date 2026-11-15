@@ -41,6 +41,7 @@ When the pin moves, re-read the sync doc's schema table and diff the vectors.
 | — | Project icons: all 1,854 of Lucide's, a picker with a category sidebar and suggestions from the name, shown in the sidebar and Trash; a Theme colour | [icons.md](icons.md) | built 2026-11-13 (0.12.5), owner trial pending |
 | — | Page heading: a large title on every page, so a project reads as a place; sub-projects to walk into | [pagehead.md](pagehead.md) | built 2026-11-13 (0.12.5), owner trial pending |
 | Recovery | Real-server restore/re-seed, interrupted uploads, purge boundaries, copied actual backups, GTK smoke | [recovery guide](../dev/RECOVERY.md) | passed 2026-11-12; permanent-deletion rollback and accidental-deletion limits confirmed |
+| — | Section colours and icons: editor, headings, sync and Undo | [sections](projects.md#sections), [implementation plan](section-icons-plan.md) | built 2026-11-15 (0.12.6), matching Mac commit 00879e5; owner trial pending |
 
 ## Behind the server
 

@@ -996,11 +996,13 @@ class Writer:
             raise CannotEdit("That section no longer exists")
         return section
 
-    def add_section(self, project_id, name):
-        """A section, last in its project. Returns its id."""
+    def add_section(self, project_id, name, color=None, icon=None):
+        """A section, last in its project. Plain sections omit colour and icon fields."""
         name = name.strip()
         if not name:
             raise CannotEdit("A section needs a name")
+        check_colour(color)
+        check_icon(icon)
         section_id = str(uuid.uuid4())
 
         def plan():
@@ -1012,19 +1014,37 @@ class Writer:
                 "name": name, "project_id": project_id,
                 "position": max(positions) + GAP if positions else self.now(),
                 "created_at": self.now(), "deleted_at": None,
+                **({"color": color} if color is not None else {}),
+                **({"icon": icon} if icon is not None else {}),
             })]
 
         self.commit(plan)
         return section_id
 
     def rename_section(self, section_id, name):
-        name = name.strip()
-        if not name:
-            raise CannotEdit("A section needs a name")
+        return self.edit_section(section_id, {"name": name})
+
+    def edit_section(self, section_id, changes):
+        """Changed name, colour and icon, in one undoable batch. None clears a style field."""
+        unknown = set(changes) - {"name", "color", "icon"}
+        if unknown:
+            raise ValueError(f"not editable: {sorted(unknown)}")
 
         def plan():
             section = self._section(section_id)
-            return [("section", section_id, {"name": name})] if name != section.get("name") else []
+            patch = {}
+            if "name" in changes:
+                name = changes["name"].strip()
+                if not name:
+                    raise CannotEdit("A section needs a name")
+                if name != section.get("name"):
+                    patch["name"] = name
+            for field, check in (("color", check_colour), ("icon", check_icon)):
+                # A newer client's icon survives an edit that leaves it alone.
+                if field in changes and changes[field] != section.get(field):
+                    check(changes[field])
+                    patch[field] = changes[field]
+            return [("section", section_id, patch)] if patch else []
 
         return self.commit(self._undoable(plan))
 
@@ -1317,7 +1337,7 @@ class Writer:
 
 
 def check_colour(color):
-    """A project's colour is a hex string, or None for the theme's text colour (spec/icons.md)."""
+    """A project's or section's colour is a hex string, or None (spec/icons.md)."""
     if color is not None and not re.fullmatch(r"#[0-9a-fA-F]{6}", color if isinstance(color, str) else ""):
         raise ValueError(f"color: {color!r}")
 

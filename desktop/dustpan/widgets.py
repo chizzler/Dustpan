@@ -243,6 +243,22 @@ class Dot(Gtk.Widget):
         snap.pop()
 
 
+class NoColour(Gtk.DrawingArea):
+    """A dashed ring for a section's None swatch: no dot without a colour or icon."""
+
+    def __init__(self, size=16):
+        super().__init__(content_width=size, content_height=size, valign=Gtk.Align.CENTER)
+        self.set_draw_func(self.draw)
+
+    def draw(self, _area, cr, width, height):
+        color = self.get_color()
+        cr.set_source_rgba(color.red, color.green, color.blue, color.alpha * 0.6)
+        cr.set_line_width(1)
+        cr.set_dash([2, 2])
+        cr.arc(width / 2, height / 2, min(width, height) / 2 - 1, 0, 2 * math.pi)
+        cr.stroke()
+
+
 def parse_colour(color):
     """An OpenTodo hex colour as Gdk.RGBA; the grey for a missing or bad one."""
     rgba = Gdk.RGBA()
@@ -291,6 +307,13 @@ def project_mark(project, size=16):
     dot = Dot(color, max(10, size // 2), theme=True)
     dot.set_size_request(size, max(10, size // 2))
     return dot
+
+
+def section_mark(section, size=14):
+    """A section's icon, a coloured dot, or nothing. No inherited project colour."""
+    if icons.known(section.get("icon")) or section.get("color") is not None:
+        return project_mark(section, size)
+    return None
 
 
 def label_mark(color, size=16):

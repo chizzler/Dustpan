@@ -119,9 +119,15 @@ Lucide files the briefcase under transport, the star under weather.
   Task chips draw it at 10 pt in place of the dot.
 - **A new project's colour** is picked when the editor opens, as before, so its icon previews in that colour.
 
+## Sections
+
+Sections show and edit colours and icons too: on the Mac since 2026-11-14 and on the desktop since 0.12.6
+(2026-11-15). They use the same picker, with suggestions from the section's name. The heading's 14 px mark
+is an icon in the section colour or theme text colour, a coloured dot when no icon can be drawn, or nothing
+when neither is present. None in the colour row is a dashed ring, unlike a project's Theme dot.
+See [the section rules](projects.md#sections).
+
 ## Not yet
 
-- **Section icons on the desktop.** The Mac shows and edits them ([projects.md](projects.md#sections)). The desktop
-  keeps them when renaming a section, and doesn't show them.
 - **Marking which icons the web app shows.** It draws OpenTodo's 411 only. The picker doesn't say which those are.
 - **Keyboard into the grid.** Arrow keys from the search box into the icons.

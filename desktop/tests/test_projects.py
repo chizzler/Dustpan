@@ -137,6 +137,70 @@ class ProjectsTest(WriterCase):
         self.writer.revert(done.undo)
         self.assertEqual(self.section("s1").get("name"), "Old")
 
+    def test_add_section_with_optional_colour_and_icon(self):
+        self.seed("project", "p1", name="Home")
+        plain = self.writer.add_section("p1", "Next")
+        self.assertNotIn("color", self.section(plain).values)
+        self.assertNotIn("icon", self.section(plain).values)
+        styled = self.writer.add_section("p1", "Waiting", color="#f59e0b", icon="hourglass")
+        row = self.section(styled)
+        self.assertEqual((row.get("color"), row.get("icon")), ("#f59e0b", "hourglass"))
+        self.assertEqual(len({o["ts"] for o in self.outbox() if o["entityId"] == styled}), 1)
+
+    def test_edit_section_changes_one_batch_and_undo_restores_it(self):
+        self.seed("section", "s1", name="Old", project_id="p1", color="#123456", icon="house", position=42)
+        done = self.writer.edit_section("s1", {"name": " Waiting ", "color": "#f59e0b", "icon": "hourglass"})
+        self.assertEqual(self.written(), {("s1", "name"): "Waiting", ("s1", "color"): "#f59e0b",
+                                          ("s1", "icon"): "hourglass"})
+        self.assertEqual(len({o["ts"] for o in self.outbox()}), 1)
+        self.assertEqual((self.section("s1").get("project_id"), self.section("s1").get("position")), ("p1", 42))
+        self.writer.revert(done.undo)
+        row = self.section("s1")
+        self.assertEqual((row.get("name"), row.get("color"), row.get("icon")), ("Old", "#123456", "house"))
+
+    def test_section_style_fields_can_be_omitted_cleared_and_undone(self):
+        self.seed("section", "s1", name="Waiting", color="#f59e0b", icon="hourglass")
+        self.writer.edit_section("s1", {"color": "#22c55e"})
+        self.assertEqual(self.section("s1").get("icon"), "hourglass")
+        self.assertEqual(self.written(), {("s1", "color"): "#22c55e"})
+        done = self.writer.edit_section("s1", {"color": None, "icon": None})
+        self.assertIsNone(self.section("s1").get("color"))
+        self.assertIsNone(self.section("s1").get("icon"))
+        self.assertEqual(self.written()[("s1", "icon")], None)
+        self.writer.revert(done.undo)
+        self.assertEqual((self.section("s1").get("color"), self.section("s1").get("icon")),
+                         ("#22c55e", "hourglass"))
+
+    def test_unchanged_section_style_including_unknown_icons_writes_nothing(self):
+        self.seed("section", "s1", name="Old", color="#ABCDEF", icon="from-the-future")
+        done = self.writer.edit_section("s1", {"name": "Old", "color": "#ABCDEF", "icon": "from-the-future"})
+        self.assertFalse(done.undo)
+        self.assertEqual(self.store.outbox_count(), 0)
+        self.writer.edit_section("s1", {"name": "New", "icon": "from-the-future"})
+        self.assertEqual(self.written(), {("s1", "name"): "New"})
+        self.assertEqual(self.section("s1").get("icon"), "from-the-future")
+
+    def test_invalid_section_styles_do_not_partially_write(self):
+        self.seed("project", "p1", name="Home")
+        self.seed("section", "s1", name="Old", color="#f59e0b", icon="hourglass")
+        for field, bad in (("color", "red"), ("color", 7), ("icon", "no-such-icon"), ("icon", 7)):
+            with self.subTest(field=field, bad=bad):
+                with self.assertRaises(ValueError):
+                    self.writer.add_section("p1", "Bad", **{field: bad})
+                with self.assertRaises(ValueError):
+                    self.writer.edit_section("s1", {"name": "New", field: bad})
+        with self.assertRaises(ValueError):
+            self.writer.edit_section("s1", {"project_id": "elsewhere"})
+        with self.assertRaises(CannotEdit):
+            self.writer.edit_section("s1", {"name": " "})
+        self.assertEqual(self.store.outbox_count(), 0)
+        self.assertEqual(self.section("s1").get("name"), "Old")
+        self.assertEqual(len(self.store.rows("section")), 1)
+        self.seed("section", "gone", name="Gone", deleted_at=1)
+        for sid in ("gone", "missing"):
+            with self.assertRaises(CannotEdit):
+                self.writer.edit_section(sid, {"icon": "hourglass"})
+
     def test_move_section_steps_one_place(self):
         self.seed("project", "p1", name="Home")
         for i, sid in enumerate(("s1", "s2", "s3")):

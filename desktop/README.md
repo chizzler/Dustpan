@@ -141,7 +141,11 @@ and can be enabled or disconnected at any time in Settings (`Ctrl+,`), which man
 **Projects and sections.** The + beside Projects makes a project. Right-click a project for its menu,
 or use the pencil on its page to rename it, recolour it, move it under another, archive or delete it.
 Archived projects are listed under Archived, at the foot of the sidebar. Each section heading has a ⋮ menu:
-rename, move up or down, delete. "Add section" is at the end of a project's page.
+Edit section, move up or down, delete. "Add section" is at the end of a project's page. Add and Edit section
+offer a name, colour and icon from the same picker as projects, with suggestions from the section's name.
+Its heading shows the icon in its colour (or the theme's text colour), a dot for colour alone, or just the
+name for neither. Colour starts with None, a dashed ring. Section edits have Undo. Saving submits only
+fields changed since the editor opened, preserving unrelated names, colours or icons received by sync.
 
 **Completed subtasks.** Finished subtasks stay under their open parent, dimmed and struck through, in project
 and Inbox lists and in the task editor. The small broom beside a parent clears its completed subtasks from
@@ -190,6 +194,7 @@ Before 1.0: the minor number follows the slices (0.12 is slice 12), the patch nu
 
 | Version | Date | What |
 | --- | --- | --- |
+| 0.12.6 | 2026-11-15 | Section colours and icons, matching Mac commit 00879e5: Add and Edit section offer Name, Colour (None first) and Icon, with suggestions from the section's name. Headings show a coloured icon, a text-colour icon, a colour-only dot, or the name alone. Section edits write only changes and have Undo; unknown icons and custom colours survive untouched edits. Fixed during release review: editors submit only fields changed since opening, preserving unrelated updates received by sync while open. |
 | 0.12.5 | 2026-11-13 | Project icons: all 1,854 of Lucide's, with a picker that browses categories from a sidebar and suggests icons from the project's name; a Theme colour for projects; a large heading on every page, with a project's sub-projects to open; completed subtasks settle after 2 seconds, not 3. Fixed: the label and icon pickers kept taking the focus after closing. |
 | 0.12.4 | 2026-11-06 | Subtask progress and an offer to complete the parent; clickable project labels on grouped rows; completed subtasks settle below open siblings after 3 seconds. |
 | 0.12.3 | 2026-11-04 | Fold a task's subtasks away in project and Inbox lists: a chevron before the check, ← and →, and the row menu. Per device. Every row has a leading slot, so checks line up on every page. |

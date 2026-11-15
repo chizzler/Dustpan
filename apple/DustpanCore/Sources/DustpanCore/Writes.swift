@@ -1153,15 +1153,16 @@ extension Writer {
         return sectionId
     }
 
-    /// Write a section's changed name, colour and icon, as one batch. `.some(nil)` clears a colour or icon. Without
+    /// Write a section's changed name, colour and icon, as one batch. Nil leaves a field alone;
+    /// `.some(nil)` clears a colour or icon. Without
     /// a colour its icon draws in the text colour; with neither, its heading shows the name alone.
-    public func editSection(_ sectionId: String, name: String, color: String?? = nil, icon: String?? = nil) throws
+    public func editSection(_ sectionId: String, name: String? = nil, color: String?? = nil, icon: String?? = nil) throws
         -> Done {
-        let name = try sectionName(name)
+        let name = try name.map { try sectionName($0) }
         return try undoable {
             let section = try liveSection(sectionId)
             var patch: [String: JSON] = [:]
-            if name != section["name"].string { patch["name"] = .string(name) }
+            if let name, name != section["name"].string { patch["name"] = .string(name) }
             if let color, color != section["color"].string {
                 try checkColour(color)
                 patch["color"] = color.map(JSON.string) ?? .null
@@ -1173,6 +1174,15 @@ extension Writer {
             }
             return patch.isEmpty ? [] : [Change("section", sectionId, patch)]
         }
+    }
+
+    /// Save an editor against its opening snapshot. Only fields changed in the editor are submitted, so a
+    /// remote rename, colour or icon arriving while it is open survives an edit of another field.
+    public func editSection(_ original: Row, name: String, color: String?, icon: String?) throws -> Done {
+        let name = try sectionName(name)
+        return try editSection(original.id, name: name == original["name"].string ? nil : name,
+                               color: color == original["color"].string ? nil : .some(color),
+                               icon: icon == original["icon"].string ? nil : .some(icon))
     }
 
     /// One place up (-1) or down (+1) among its project's sections. Nothing at an edge.

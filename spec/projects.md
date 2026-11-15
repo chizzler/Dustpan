@@ -61,8 +61,19 @@ The sidebar lists them under "Archived", flat, with their path. Their page offer
   null; `icon` an icon's name or null ([icons.md](icons.md)). The heading shows the icon before the name, in the
   colour, or in the text colour without one. A colour alone is a small dot. With neither, the name alone, as before.
   "No section" never has either. The editor's colour row starts with None, a dashed ring: no dot, unlike a project's
-  Theme. An icon this client can't draw survives an edit that leaves it alone. On the Mac since 2026-11-14; the
-  desktop keeps them when renaming and doesn't show them yet.
+  Theme. An icon this client can't draw survives an edit that leaves it alone. On the Mac since 2026-11-14;
+  on the desktop since 0.12.6 (2026-11-15). Add and Edit section share the project icon picker, suggesting from
+  the section's name. Edits are one undoable batch; unchanged saves write nothing. New plain sections omit
+  both style fields. Explicitly clearing a style writes null. The desktop's `rename_section` delegates to
+  `edit_section` for callers that only change the name. The task editor's section list stays text-only.
+- **Concurrent editor saves.** Both editors compare their final values with the row they opened on,
+  trimming the name before comparison. Only fields changed in the editor are submitted to the writer;
+  unrelated changes received by sync while it was open survive. A changed field still follows the normal
+  last-writer-wins rule. An unchanged save, including choices reverted to their opening values, writes
+  nothing. Undo restores the values immediately before the save, only for fields that save wrote.
+  The Mac core has a snapshot-based `editSection` overload; its name can be omitted in field-based edits
+  so an icon-only save cannot overwrite a concurrent rename. The Mac changes and three regression tests
+  still need building and running on a Mac; this Linux machine has no Swift toolchain.
 
 ## Not in this slice
 

@@ -1,4 +1,4 @@
-# Dustpan for Linux 0.12.5 — release draft
+# Dustpan for Linux 0.12.6
 
 A native GTK 4 / libadwaita task manager for Omarchy and Arch Linux. Tasks live in a local SQLite database
 so it works standalone out of the box, with optional sync to your own OpenTodo server.
@@ -17,6 +17,11 @@ so it works standalone out of the box, with optional sync to your own OpenTodo s
 
 ## Since v0.12.3
 
+- Section colours and icons: Add and Edit section offer a name, colour (None first) and icon, with
+  suggestions from the section's name. Headings show a coloured icon, an icon in the text colour,
+  a coloured dot, or the name alone. Edits have Undo and preserve unknown icons when untouched.
+- Fixed: saving a section editor could overwrite an unrelated rename, colour or icon synced while it
+  was open. Only fields changed since opening are submitted; Undo restores only those fields.
 - Project icons: pick one of Lucide's 1,854 line icons for a project, with suggestions from its name.
   The picker browses 30 categories from a sidebar, or searches them all. They sync through OpenTodo;
   its web app shows the 411 in its own catalogue, and the project's dot for the rest.
@@ -62,10 +67,21 @@ This is a pre-1.0 release.
 
 ## Validation
 
-The current suite ran 358 Python tests with no failures, including GTK window tests. Regression tests cover
-both standalone fixes: account switching during sync, and permanent deletion after disconnect.
-The earlier 314-test recovery and package validation predates standalone support; release artifacts need
-rebuilding and revalidation. Calendar row key handlers have also been
+The current source suite ran 378 Python tests with no failures or skips with display access. Regression
+tests cover account switching during sync, permanent deletion after disconnect, and section editor saves
+after concurrent updates (including explicit clearing, no-op saves and Undo). Section headings and editors
+were visually checked using throwaway data in dark and light palettes; the shared icon picker was also
+checked in the dark palette.
+The 0.12.6 Arch package passed local and clean-Arch builds, packaged imports/assets, desktop-entry validation
+and disposable install/reinstall/removal. The release archive's 378 tests also pass with display access
+using only its bundled upstream fixtures; headless package builds skip the 21 GTK checks.
+A fresh packaged-app profile passed hidden startup, normal activation of the same instance, close-to-hide,
+Settings connection, upload of standalone data, account replacement during active sync and queued permanent
+deletion after reconnect, against an isolated real OpenTodo v0.22.0 server. Two Linux clients passed section
+styling, concurrent editing and Undo over that server. Reminder delivery, Snooze, Dismiss and withdrawal pass
+over a private notification service. The opt-in autostart entry validates; actual session login and desktop
+notification rendering were not tested. The Mac is offline, so Swift tests and a real Mac/Linux trial remain
+pending. Calendar row key handlers have also been
 exercised in a separate GTK window using a temporary database with sync disabled.
 An isolated real-server recovery rehearsal covers restore/re-seed, both reconnect orders, conflicts,
 pagination, interrupted uploads, lost acknowledgements, purge behavior and corrupted archives.
