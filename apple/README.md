@@ -68,6 +68,8 @@ Debug builds only. It uses ScreenCaptureKit on the app's own window, which needs
 | `DustpanCore/Sources/DustpanCore/Events.swift` | The live update stream |
 | `DustpanCore/Sources/dustpan-cli/` | `sync` and `tree`, for checking against the desktop client |
 | `Dustpan/` | The Mac app: window, sidebar, task list, editor, notifications |
+| `Dustpan/WelcomeView.swift` | First-launch wording and compact window layout; `WelcomeChoice.swift` styles each choice and its button; `WelcomeSyncView.swift` opens connection settings |
+| `DustpanCore/Sources/DustpanCore/Welcome.swift` | Welcome completion and the existing-profile check |
 | `Dustpan/Dragging.swift` | Drag sources, drop delegates, the drop line, the drag pill, the flash |
 | `Dustpan/NoteView.swift` | A note's blocks, formatted. `NotesEditor.swift`: the editor's Write and Preview |
 | `Dustpan/ProjectEditor.swift` | A project's name, colour (Theme or the palette), icon and parent, with Archive and Delete. `IconPicker`, with `IconGroupRow`, `IconGrid` and `IconCell`, picks the icon |
@@ -100,6 +102,14 @@ the main actor in the app, and only the network waits happen elsewhere.
 
 ## Real use
 
+On a fresh profile, the welcome screen describes two choices, each ending with its own button:
+**Standalone on This Mac** or **Sync to an OpenTodo Server…**. Its compact window keeps both choices visible,
+with a blue accent for standalone and orange for sync. The heading is “Welcome to Dustpan”, with
+“Taking tasks to task since 2026” below. Standalone needs no account; sync opens the server connection sheet.
+Existing profiles skip the welcome; **Help ▸ Welcome to Dustpan** brings it back.
+Closing the main window keeps app-owned reminders and sync running until Quit.
+The [dependency and concurrency review](DEPENDENCIES.md) records this release's audit and its limits.
+
 Dustpan works standalone with no setup. To sync, connect in Settings ▸ Sync, which writes `OPENTODO_URL` and
 `OPENTODO_TOKEN` to `~/.config/dustpan/config` (mode 600), the file the desktop reads too; Disconnect takes them out.
 The URL must be https. Plain http works only for this machine (`localhost`, `127.0.0.1`, `::1`).
@@ -128,7 +138,7 @@ Before 1.0 the minor number follows the Mac client's own slices.
 
 | Version | Date | What |
 | --- | --- | --- |
-| Unreleased | | Sections can carry a colour and an icon, as on the web: Edit Section (was Rename Section) has the same Colour and Icon rows as Edit Project, with None for no colour. The heading shows the icon in the section's colour, a dot for a colour alone, and nothing extra for neither. Release-review fix: saves compare with the editor's opening row and submit only changed fields, so unrelated synced renames and styling survive. The fix and its three new core regression tests still need a Mac build/test run; no Swift toolchain is available on the Linux development machine. |
+| 0.19.1 (candidate) | Unreleased | Compact first-launch welcome with standalone and server-sync choices; app-owned background reminders and polling; cancellation and account-switch safeguards; section saves preserve unrelated synced edits; dependency audit and universal Mac packaging. Sync upload and field-size limits; held edits shown as waiting; experimental outline list restricted to Debug builds. Sections can carry a colour and an icon, as on the web: Edit Section (was Rename Section) has the same Colour and Icon rows as Edit Project, with None for no colour. The heading shows the icon in the section's colour, a dot for a colour alone, and nothing extra for neither. |
 | 0.19.0 | 2026-11-14 | Catching up with the desktop's 0.12.5. Projects can carry any of Lucide's 1,854 icons, in their colour, in the sidebar, Trash and headings: Edit Project has an Icon row with a picker (search, a category sidebar, and suggestions from the name). A project can take the Theme colour, drawn in the text colour. Every page opens with a large heading: the date on Today, a sub-project's parent (a link), the title with its icon or symbol, an open count, and the sub-projects to open; the window's title shows once it has scrolled away. Label chips show a small tag instead of a dot. Quick add's preview starts with the title it will save, and "sun", "sat" and "wed" are read as days only with a cue, as on the desktop ([spec](../spec/quickadd.md#where-we-differ)). Reminders only fire while Dustpan runs, so the first time one is waiting it offers to open at login; Settings ▸ General has the switch. Lighter in the background: the 30-second reminder check reads only the tasks it needs (100 ms to 5 ms at 3,000 tasks), drawing icons no longer loads the picker's catalogue, and a sync that changes nothing doesn't rebuild the pages. |
 | 0.18.0 | 2026-11-13 | Catching up with the desktop's standalone support. Dustpan opens without a server and keeps everything on this Mac; a config file that's wrong opens standalone too, with a note saying why. Settings (⌘,): default reminders (with a custom offset), time format, date order, week and day start, and quick add's language and switches, stored as the desktop stores them; Sync connects to an OpenTodo server, uploading the tasks here, and Disconnect goes back to standalone. Connecting with data from another account asks whether to upload it into the new one or replace it. An account change waits for a running sync, and a sync caught by one keeps nothing. Delete for Good deletes at once when the data has never been on a server, and otherwise waits for the server, after reconnecting if need be. Ticked subtasks settle after 2 s, not 3. |
 | 0.17.0 | 2026-11-13 | Catching up with the desktop's 0.12.4. A parent's check circle holds a pie of its done subtasks (a faint ring for none, a disc for all), with "3/5" on the row and the count in the tooltip. Completing the last open subtask offers to complete the parent in a banner: Complete (⌘Return) or Esc. Completed subtasks stay under their parent, below its open ones, until the broom on the parent clears them from this Mac's lists, with Undo; a ticked or reopened subtask keeps its place until the page has been still for 3 s. A row's project label on Today and the other grouped pages opens the task in its project, unfolded. |

@@ -3,6 +3,7 @@ import Foundation
 /// The sync exchange with an OpenTodo server. See spec/sync.md, "Exchange".
 public final class Syncer {
     static let batch = 500
+    static let maxRequestBytes = 4 * 1024 * 1024
     static let features: JSON = ["backfill_ack", "clock_skew"]
     static let maxSkewRounds = 3
 
@@ -71,6 +72,7 @@ public final class Syncer {
     /// Push edits, pull changes, then send queued purges and pull their markers.
     /// Throws ApiError, Failure or StoreError.
     public func run() async throws -> Result {
+        try Task.checkCancellation()
         try await checkAccount()
         try store.transaction {
             // Pin the account this sync belongs to. A switch after this is caught by checkSameAccount.
@@ -98,15 +100,24 @@ public final class Syncer {
     }
 
     /// Up to a batch of ops, without splitting a reminder, comment, attachment or time entry across requests.
-    func nextBatch() throws -> [(seq: Int64, op: Op)] {
+    func nextBatch(byteBudget: Int) throws -> [(seq: Int64, op: Op)] {
         let batch = try store.outboxBatch(limit: Self.batch + 1)
-        guard batch.count > Self.batch else { return batch }
-        let split = Array(batch.prefix(Self.batch))
+        var size = 0, count = 0
+        for item in batch.prefix(Self.batch) {
+            // JSONSerialization uses a single comma between array elements; reserve it for the first too.
+            size += item.op.json.data.count + 1
+            if size > byteBudget { break }
+            count += 1
+        }
+        if !batch.isEmpty && count == 0 { throw CannotEdit("A queued change is too large to sync") }
+        guard batch.count > count else { return batch }
+        let split = Array(batch.prefix(count))
         let tail = split.last!.op
-        guard batchWhole.contains(tail.entity), batch[Self.batch].op.entity == tail.entity,
-              batch[Self.batch].op.entityId == tail.entityId else { return split }
+        guard batchWhole.contains(tail.entity), batch[count].op.entity == tail.entity,
+              batch[count].op.entityId == tail.entityId else { return split }
         let trimmed = split.filter { $0.op.entity != tail.entity || $0.op.entityId != tail.entityId }
-        return trimmed.isEmpty ? split : trimmed
+        guard !trimmed.isEmpty else { throw CannotEdit("A queued entity is too large to sync in one request") }
+        return trimmed
     }
 
     /// Exchange until the outbox is empty and nothing remains to pull.
@@ -119,22 +130,25 @@ public final class Syncer {
             try requeueHeld()
         }
         while true {
+            try Task.checkCancellation()
             let (batch, body) = try store.transaction {
                 try checkSameAccount()
-                let batch = try nextBatch()
-                let body: JSON = [
+                var fields: [String: JSON] = [
                     // A restore can bring back fields we no longer hold, our own old writes too. Pull under a
                     // temporary identity so the server sends them.
                     "device": .string(try store.meta("reseed_device").string ?? device),
                     "cursor": try store.meta("cursor").isNull ? 0 : try store.meta("cursor"),
-                    "ops": .array(batch.map(\.op.json)),
+                    "ops": [],
                     "features": Self.features,
                     "backfillAck": .int(try store.meta("backfill_ack").int ?? 0),
                     "tzOffset": .int(Int64(TimeZone.current.secondsFromGMT() / 60)),
                 ]
-                return (batch, body)
+                let batch = try nextBatch(byteBudget: Self.maxRequestBytes - JSON.object(fields).data.count)
+                fields["ops"] = .array(batch.map(\.op.json))
+                return (batch, JSON.object(fields))
             }
             let res = try await server.sync(body)
+            try Task.checkCancellation()
             guard let serverTime = res["serverTime"].int else { throw Failure.badResponse("no serverTime") }
 
             let rejected = res["rejected"].array ?? []
@@ -264,6 +278,11 @@ public final class Syncer {
 /// Ops a server limit held back, offered again on the next exchange.
 func heldOps(_ store: Store) throws -> [Op] {
     (try store.meta("held_ops").array ?? []).compactMap(Op.init(json:))
+}
+
+/// Every local operation still waiting for the server, including edits held by a server limit.
+public func pendingUploadCount(_ store: Store) throws -> Int {
+    try store.outboxCount() + heldOps(store).count
 }
 
 /// A stored field the server takes back: all but an attachment's uploaded_at, which only it writes.

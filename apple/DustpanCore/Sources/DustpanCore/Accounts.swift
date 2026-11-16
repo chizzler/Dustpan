@@ -32,6 +32,7 @@ func accountKey(url: URL, token: String) -> JSON {
 /// account key.
 public func verifyAccount(_ server: any SyncServer) async throws -> (userId: String, key: JSON?) {
     let me = try await server.me()
+    try Task.checkCancellation()
     if me["encryption"]["enabled"].bool == true {
         throw Syncer.Failure.unsupportedAccount("end-to-end encrypted accounts are not supported yet")
     }

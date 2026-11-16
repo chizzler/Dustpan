@@ -13,6 +13,7 @@ struct SyncSettings: View {
     @State private var joining: AccountToJoin?
     @State private var choosesAccount = false
     @State private var confirmsDisconnect = false
+    @State private var operation: Task<Void, Never>?
 
     init(config: Config?) {
         _url = State(initialValue: config?.url.absoluteString ?? "")
@@ -69,6 +70,7 @@ struct SyncSettings: View {
             }
         }
         .formStyle(.grouped)
+        .onDisappear { operation?.cancel() }
     }
 
     private var description: String {
@@ -91,6 +93,7 @@ struct SyncSettings: View {
         }
         run {
             let (userId, key) = try await model.verify(config)
+            try Task.checkCancellation()
             guard let how = try model.joinPlan(for: userId) else {
                 joining = AccountToJoin(config: config, userId: userId, key: key)
                 choosesAccount = true
@@ -111,10 +114,12 @@ struct SyncSettings: View {
     /// Busy while work runs; then whether it connected, or why not.
     private func run(_ work: @escaping () async throws -> Bool) {
         busy = true
-        Task {
+        operation = Task {
             defer { busy = false }
             do {
                 if try await work() { notice = "Connected to OpenTodo." }
+            } catch is CancellationError {
+                return
             } catch {
                 problem = Self.explain(error)
             }
@@ -122,12 +127,11 @@ struct SyncSettings: View {
     }
 
     private func disconnect() {
-        do {
-            try model.disconnect()
+        run {
+            try await model.disconnect()
             (url, token, problem) = ("", "", nil)
             notice = "Disconnected. Working on this Mac only."
-        } catch {
-            problem = Self.explain(error)
+            return false
         }
     }
 

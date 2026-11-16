@@ -54,21 +54,24 @@ extension Api {
 
     /// Keep one event stream open, reconnecting after 1 s, doubling to 30 s, with jitter. Ends when cancelled.
     public func liveEvents(device: String) -> AsyncStream<LiveEvent> {
-        AsyncStream { continuation in
+        AsyncStream(bufferingPolicy: .bufferingNewest(8)) { continuation in
             let task = Task {
                 var delay = 1.0
                 while !Task.isCancelled {
                     do {
                         let bytes = try await openEvents(device: device)
+                        try Task.checkCancellation()
                         continuation.yield(.connected)
                         delay = 1
                         var parser = EventParser()
                         for try await byte in bytes {
+                            try Task.checkCancellation()
                             if let data = parser.feed(byte: byte) { continuation.yield(.ops(cursor: data["cursor"].int)) }
                         }
                     } catch {}
+                    guard !Task.isCancelled else { break }
                     continuation.yield(.disconnected)
-                    try? await Task.sleep(for: .seconds(delay * .random(in: 0.5...1)))
+                    do { try await Task.sleep(for: .seconds(delay * .random(in: 0.5...1))) } catch { break }
                     delay = min(delay * 2, 30)
                 }
                 continuation.finish()

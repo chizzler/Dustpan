@@ -71,7 +71,7 @@ def main():
                    "desktop/dustpan/icons/LICENSE-lucide.txt",
                    "desktop/data/io.github.chizzler.Dustpan.svg",
                    "desktop/data/io.github.chizzler.Dustpan.desktop", "desktop/data/dustpan-v1.vectorcraft",
-                   "desktop/install.sh", "packaging/aur/PKGBUILD.in", "packaging/aur/dustpan",
+                   "desktop/install.sh", "deploy/pull-backups.sh", "packaging/aur/PKGBUILD.in", "packaging/aur/dustpan",
                    "packaging/aur/io.github.chizzler.Dustpan.desktop", "packaging/aur/dustpan-autostart.desktop"):
         add(source)
     for source, dest in (("packaging/linux/README.md", "README.md"), ("desktop/LICENSE", "LICENSE"),

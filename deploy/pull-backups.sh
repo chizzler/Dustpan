@@ -27,12 +27,10 @@ fi
 
 mkdir -p "$OUT/server" "$OUT/client"
 
-# No --delete: the server keeps 14 days, this PC keeps 90.
-rsync -a -e "ssh -o BatchMode=yes" "$HOST:/var/lib/opentodo/backups/" "$OUT/server/"
-
+result=0
 if [[ -f $DATA/dustpan.db ]]; then
   # SQLite's backup API gives a consistent copy while the app is open.
-  python3 - "$DATA/dustpan.db" "$OUT/client/dustpan-$(date +%Y%m%d).db" <<'EOF'
+  python3 - "$DATA/dustpan.db" "$OUT/client/dustpan-$(date +%Y%m%d).db" <<'EOF' || result=$?
 import sqlite3, sys
 src, dst = sqlite3.connect(sys.argv[1]), sqlite3.connect(sys.argv[2])
 src.backup(dst)
@@ -40,4 +38,9 @@ dst.close()
 EOF
 fi
 
+# Keep the local snapshot even when SSH is unavailable. Attempt both backups and report failure to the timer.
+# No --delete: the server keeps 14 days, this PC keeps 90.
+rsync -a -e "ssh -o BatchMode=yes" "$HOST:/var/lib/opentodo/backups/" "$OUT/server/" || result=$?
+
 find "$OUT" -type f -mtime +90 -delete
+exit "$result"

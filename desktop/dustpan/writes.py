@@ -158,6 +158,9 @@ class Writer:
                 for name, value in patch.items()
             ]
             for op in ops:
+                if len(json.dumps(op["value"]).encode()) > MAX_VALUE_BYTES:
+                    raise CannotEdit(f"{op['field'].replace('_', ' ').capitalize()} is too long: the limit is 64 KB")
+            for op in ops:
                 self.store.apply(op)
             self.store.outbox_add(ops)
         return result

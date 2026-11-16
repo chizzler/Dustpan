@@ -39,6 +39,8 @@ Before moving the pin, re-read the sync schema and diff the vectors (`spec/READM
 - **On this PC:** the timer copies those archives to `~/.local/share/dustpan/backups/server`.
   It also snapshots the client's own database to `…/backups/client`. Both are kept for 90 days.
   The client snapshot guards against a server bug that deletes tasks everywhere.
+  The local snapshot runs even when SSH fails; a local snapshot failure still allows the server copy to run.
+  Either failure makes the timer report a failed run.
 - The timer uses SSH without a prompt. It needs a key with no passphrase, or a running agent.
 
 ## Restore

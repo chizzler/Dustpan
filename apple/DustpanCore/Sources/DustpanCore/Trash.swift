@@ -118,6 +118,7 @@ public func queuePurges(_ store: Store, _ targets: [TrashItem.Target]) throws {
 func sendPurges(_ store: Store, _ server: any SyncServer) async throws -> Int {
     var sent = 0
     for target in try pendingList(store) {
+        try Task.checkCancellation()
         var refused: Error?
         if let row = try store.rows(target.entity)[target.id], !row["deleted_at"].isNull {
             // A server limit, or an edit made during sync, may leave its delete unsent.

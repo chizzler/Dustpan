@@ -4,6 +4,22 @@ import Testing
 
 /// A writer on an empty store, with a fixed clock.
 @Suite struct WritesTests {
+    @Test func valueLimitsRejectTheWholeActionBeforeAnyWrite() throws {
+        #expect(throws: CannotEdit.self) { try writer.addTask(String(repeating: "x", count: 65535)) }
+        #expect(try store.rows("task").isEmpty)
+        #expect(try store.outboxCount() == 0)
+        let id = try writer.addTask("Valid")
+        let before = try store.outboxCount()
+        #expect(throws: CannotEdit.self) {
+            try writer.edit(id, TaskEdit(title: String(repeating: "😀", count: 17000), priority: 1))
+        }
+        #expect(try task(id)["title"] == "Valid")
+        #expect(try task(id)["priority"] == 4)
+        #expect(try store.outboxCount() == before)
+        try writer.edit(id, TaskEdit(title: String(repeating: "x", count: 65534)))
+        #expect(try task(id)["title"].string?.count == 65534)
+    }
+
     let store: Store
     let writer: Writer
     let now: Int64 = 1_000_000

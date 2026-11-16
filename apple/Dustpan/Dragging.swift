@@ -294,8 +294,10 @@ private struct TaskDragSource: ViewModifier {
 /// (onDragSessionUpdated would say when, but doesn't fire for a List row's draggable, macOS 27.)
 @MainActor private func endsAfterMouseUp(_ model: AppModel) {
     Task {
-        while NSEvent.pressedMouseButtons & 1 != 0 { try? await Task.sleep(for: .milliseconds(100)) }
-        try? await Task.sleep(for: .milliseconds(500))
+        while NSEvent.pressedMouseButtons & 1 != 0 {
+            do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
+        }
+        do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
         // Pressed again: another drag may have begun.
         if NSEvent.pressedMouseButtons & 1 == 0 { model.endDrag() }
     }

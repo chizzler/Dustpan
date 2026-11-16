@@ -7,6 +7,13 @@ extension AppModel {
     /// An app may capture its own windows without the Screen Recording permission.
     func screenshotsIfAsked() async {
         guard let folder = ProcessInfo.processInfo.environment["DUSTPAN_SCREENSHOT"], !folder.isEmpty else { return }
+        if showsWelcome {
+            NSApp.activate()
+            do { try await Task.sleep(for: .milliseconds(700)) } catch { return }
+            await capture("welcome.png", in: folder) { _ in true }
+            NSApp.terminate(nil)
+            return
+        }
         let pages: [(String, Page)] = [("today", .today), ("upcoming", .upcoming), ("inbox", .inbox)]
             + Page.optional.map { ($0.key ?? "", $0) }
             + projectsById.values.map { ($0.row["name"].string ?? $0.id, Page.project($0.id)) }.sorted { $0.0 < $1.0 }
@@ -15,7 +22,7 @@ extension AppModel {
         let calendar = NSApp.windows.first { $0.identifier?.rawValue.contains(CalendarWindow.id) == true }?.windowNumber
         for (index, (name, page)) in pages.enumerated() {
             self.page = page
-            try? await Task.sleep(for: .milliseconds(600))
+            do { try await Task.sleep(for: .milliseconds(600)) } catch { return }
             await capture(String(format: "%02d-%@.png", index, name), in: folder) { $0 != calendar }
         }
         if let calendar { await capture("calendar.png", in: folder) { $0 == calendar } }

@@ -29,7 +29,8 @@ Device ids compare as byte strings.
 
 `POST /api/v1/sync` with `{device, cursor, ops, features, backfillAck, tzOffset}`.
 
-1. Take up to 500 ops from the outbox.
+1. Take up to 500 ops from the outbox, keeping the encoded request within 4 MiB. Reminders,
+   comments, attachments and time entries stay whole at either boundary.
 2. Send them with the stored cursor.
 3. On success: drop the sent ops from the outbox, apply returned ops, delete `purged` entities, store the cursor.
 4. Repeat while `hasMore` or the outbox isn't empty.

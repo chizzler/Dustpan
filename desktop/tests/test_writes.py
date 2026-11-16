@@ -38,6 +38,22 @@ class WriterCase(unittest.TestCase):
 
 
 class WriterTest(WriterCase):
+    def test_value_limits_reject_the_whole_action_before_any_write(self):
+        with self.assertRaises(CannotEdit):
+            self.writer.add_task("x" * 65535)
+        self.assertEqual(self.store.rows("task"), {})
+        self.assertEqual(self.store.outbox_count(), 0)
+        task_id = self.writer.add_task("Valid")
+        before = self.store.outbox_count()
+        with self.assertRaises(CannotEdit):
+            self.writer.edit(task_id, {"title": "é" * 11000, "priority": 1})
+        self.assertEqual(self.task(task_id).get("title"), "Valid")
+        self.assertEqual(self.task(task_id).get("priority"), 4)
+        self.assertEqual(self.store.outbox_count(), before)
+        # Includes the JSON quotes at the exact server boundary.
+        self.writer.edit(task_id, {"title": "x" * 65534})
+        self.assertEqual(len(self.task(task_id).get("title")), 65534)
+
     def test_add_writes_every_field_in_one_stamped_batch(self):
         self.seed("project", "p1", name="Home")
         task_id = self.writer.add_task("  Buy milk ", project_id="p1")

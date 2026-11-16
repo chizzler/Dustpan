@@ -1,6 +1,7 @@
 """The sync exchange with an OpenTodo server. See spec/sync.md, "Exchange"."""
 
 import hashlib
+import json
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,6 +13,7 @@ from .model import CLEARED_SUBTASKS, FOLDED_TASKS
 from .writes import LOCAL_USER
 
 BATCH = 500
+MAX_REQUEST_BYTES = 4 * 1024 * 1024
 FEATURES = ["backfill_ack", "clock_skew"]
 MAX_SKEW_ROUNDS = 3
 
@@ -412,20 +414,31 @@ class Syncer:
             with self.store.transaction():
                 self.store.set_meta("account_key", key)
 
-    def _next_batch(self):
-        """Up to BATCH ops from the outbox without splitting a multi-field child entity across requests."""
+    def _next_batch(self, byte_budget):
+        """Bound the encoded payload and count without splitting a multi-field child entity."""
         batch = self.store.outbox_batch(BATCH + 1)
-        if len(batch) <= BATCH:
+        size, count = 0, 0
+        for _, op in batch[:BATCH]:
+            # json.dumps uses comma-space between array elements. Allow it even for the first.
+            size += len(json.dumps(op).encode()) + 2
+            if size > byte_budget:
+                break
+            count += 1
+        if batch and not count:
+            raise ValueError("A queued change is too large to sync")
+        if len(batch) <= count:
             return batch
-        tail_op = batch[BATCH - 1][1]
-        split = batch[:BATCH]
+        tail_op = batch[count - 1][1]
+        split = batch[:count]
         if tail_op["entity"] not in BATCH_WHOLE:
             return split
         tail = (tail_op["entity"], tail_op["entityId"])
-        if (batch[BATCH][1]["entity"], batch[BATCH][1]["entityId"]) != tail:
+        if (batch[count][1]["entity"], batch[count][1]["entityId"]) != tail:
             return split
         trimmed = [item for item in split if (item[1]["entity"], item[1]["entityId"]) != tail]
-        return trimmed or split
+        if not trimmed:
+            raise ValueError("A queued entity is too large to sync in one request")
+        return trimmed
 
     def run(self):
         """Push edits, pull changes, then send queued purges and pull their markers."""
@@ -458,17 +471,18 @@ class Syncer:
         while True:
             with self.store.transaction():
                 self._check_account_same()
-                batch = self._next_batch()
                 body = {
                     # A restore can bring back fields we no longer hold, including our own
                     # old writes. Pull under a temporary identity so the server echoes them.
                     "device": self.store.get_meta("reseed_device") or device,
                     "cursor": self.store.get_meta("cursor", 0),
-                    "ops": [op for _, op in batch],
+                    "ops": [],
                     "features": FEATURES,
                     "backfillAck": self.store.get_meta("backfill_ack", 0),
                     "tzOffset": tz_offset_minutes(),
                 }
+                batch = self._next_batch(MAX_REQUEST_BYTES - len(json.dumps(body).encode()))
+                body["ops"] = [op for _, op in batch]
             res = self.api.sync(body)
             rejected = res.get("rejected") or []
             skewed = [r for r in rejected if r.get("reason") == "clock_skew"]

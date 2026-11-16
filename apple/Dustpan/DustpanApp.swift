@@ -18,9 +18,12 @@ struct DustpanApp: App {
         Window("Dustpan", id: "main") {
             ContentView()
                 .environment(model)
-                .task { await model.start() }
-                .task { await model.remind() }
+                .task {
+                    appDelegate.model = model
+                    model.startServices()
+                }
         }
+        .windowResizability(.contentSize)
         Window("Calendar", id: CalendarWindow.id) {
             CalendarWindow()
                 .environment(model)
@@ -32,13 +35,17 @@ struct DustpanApp: App {
         }
         .commands {
             TextEditingCommands()
+            CommandGroup(replacing: .help) {
+                Button("Welcome to Dustpan") { model.showsWelcome = true }
+                    .disabled(model.setupProblem != nil)
+            }
             CommandGroup(after: .newItem) {
                 Button("New View…") { model.editingView = ViewDraft() }
                     .keyboardShortcut("n", modifiers: [.command, .shift])
-                    .disabled(model.setupProblem != nil)
+                    .disabled(model.setupProblem != nil || model.showsWelcome)
                 Button("New Project…") { model.editingProject = ProjectDraft() }
                     .keyboardShortcut("n", modifiers: [.command, .option])
-                    .disabled(model.setupProblem != nil)
+                    .disabled(model.setupProblem != nil || model.showsWelcome)
             }
             CommandGroup(after: .pasteboard) {
                 Divider()
@@ -49,9 +56,10 @@ struct DustpanApp: App {
                 Divider()
                 CalendarButton(model: model)
                     .keyboardShortcut("k")
+                    .disabled(model.showsWelcome)
                 Button("Filter…", action: model.openFilter)
                     .keyboardShortcut("f", modifiers: [.command, .shift])
-                    .disabled(model.setupProblem != nil)
+                    .disabled(model.setupProblem != nil || model.showsWelcome)
                 ForEach(Page.optional, id: \.self) { page in
                     let hidden = model.hiddenPages.contains(page.key ?? "")
                     Button(hidden ? "Show \(page.name)" : "Hide \(page.name)") { model.setHidden(page, !hidden) }
@@ -60,7 +68,9 @@ struct DustpanApp: App {
                 Divider()
             }
             CommandGroup(after: .toolbar) {
+                #if DEBUG
                 Toggle("Outline Task List (Spike)", isOn: $outlineSpike)
+                #endif
                 Button("Sync Now") { Task { await model.sync() } }
                     .keyboardShortcut("r")
                     .disabled(!model.isConnected)

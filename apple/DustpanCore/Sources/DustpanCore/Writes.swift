@@ -161,6 +161,9 @@ public final class Writer {
                        ts: ts, device: device)
                 }
             }
+            for op in ops where op.value.data.count > maxValueBytes {
+                throw CannotEdit("\(op.field.replacingOccurrences(of: "_", with: " ").capitalized) is too long: the limit is 64 KB")
+            }
             for op in ops { try store.apply(op) }
             try store.outboxAdd(ops)
             return result

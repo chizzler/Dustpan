@@ -4,9 +4,11 @@ import AppKit
 /// Mac only; the iPhone app has no windows to reopen.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private(set) static var quitting = false
+    weak var model: AppModel?
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         Self.quitting = true
+        model?.stopServices()
         return .terminateNow
     }
 }

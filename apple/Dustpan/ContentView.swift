@@ -15,6 +15,8 @@ struct ContentView: View {
                 Text("\(problem)\n\nDustpan couldn't open its database in ~/Library/Application Support/Dustpan.")
             }
             .frame(minWidth: 480, minHeight: 320)
+        } else if model.showsWelcome {
+            WelcomeView()
         } else {
             NavigationSplitView {
                 Sidebar()
@@ -22,8 +24,10 @@ struct ContentView: View {
                 // A page of its own: selection and focus start fresh.
                 Group {
                     switch model.page ?? .today {
+                    #if DEBUG
                     case .inbox where outlineSpike: OutlinePage(page: .inbox)
                     case .project(let id) where outlineSpike: OutlinePage(page: .project(id))
+                    #endif
                     case .inbox: TaskList(page: .inbox)
                     case .project(let id): TaskList(page: .project(id))
                     case .archived(let id): ArchivedPage(projectId: id)
@@ -70,8 +74,15 @@ struct SyncStatus: View {
     var body: some View {
         switch model.status {
         case .idle:
-            Button("Sync", systemImage: "arrow.clockwise") { Task { await model.sync() } }
-                .help(idleHelp)
+            if model.held > 0 {
+                Button("\(model.held) waiting", systemImage: "hourglass") { Task { await model.sync() } }
+                    .labelStyle(.titleAndIcon)
+                    .foregroundStyle(.orange)
+                    .help("A server limit is holding back these changes. Dustpan will retry automatically. Click to retry now.")
+            } else {
+                Button("Sync", systemImage: "arrow.clockwise") { Task { await model.sync() } }
+                    .help(idleHelp)
+            }
         case .syncing:
             ProgressView().controlSize(.small).help("Syncing…")
         case .offline(let message):
@@ -131,7 +142,7 @@ struct ToastView: View {
 
     private func expire() async {
         guard let id = model.toast?.id else { return }
-        try? await Task.sleep(for: .seconds(5))
+        do { try await Task.sleep(for: .seconds(5)) } catch { return }
         if model.toast?.id == id { model.toast = nil }
     }
 }

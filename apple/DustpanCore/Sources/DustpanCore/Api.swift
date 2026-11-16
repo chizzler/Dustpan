@@ -83,6 +83,7 @@ public struct Api: SyncServer, Sendable {
         do {
             (data, response) = try await session.data(for: request, delegate: NoRedirect.shared)
         } catch let error as URLError {
+            if error.code == .cancelled && Task.isCancelled { throw CancellationError() }
             throw ApiError.offline(error.localizedDescription)
         }
         try refuseRedirect(response)

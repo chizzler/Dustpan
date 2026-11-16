@@ -9,7 +9,8 @@ Every user action becomes one batch, in one local transaction:
 1. Read the current rows inside the transaction.
 2. Plan the changes: `(entity, entityId, {field: value})`. Only fields the user changed.
 3. Stamp one timestamp for the whole batch. Every op gets it and our device id.
-4. Apply the ops to the local store (they win: the stamp is after every seen op).
+4. Check every encoded field value against the server's 64 KiB limit, then apply the ops to the local store
+   (they win: the stamp is after every seen op). A value over the limit rolls back the whole action.
 5. Add them to the outbox.
 
 Sync runs 250 ms after an edit.

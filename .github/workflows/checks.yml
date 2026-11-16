@@ -1,0 +1,42 @@
+name: Mac release checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mac:
+    # Xcode 27 toolchain; see actions/runner-images. This job never signs for distribution or uploads to Apple.
+    runs-on: xcode-27
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Fetch pinned protocol fixtures
+        run: |
+          git clone --depth 1 --branch v0.22.0 https://github.com/OpenTodoApp/OpenTodo.git "$RUNNER_TEMP/opentodo"
+          dustpan_upstream_commit=$(python3 -c 'import json; print(json.load(open("apple/DEPENDENCIES.json"))["upstream"]["OpenTodo"]["commit"])')
+          test "$(git -C "$RUNNER_TEMP/opentodo" rev-parse HEAD)" = "$dustpan_upstream_commit"
+      - name: Swift tests
+        env:
+          OPENTODO_SRC: ${{ runner.temp }}/opentodo
+        run: swift test --package-path apple/DustpanCore
+      - name: Dependency and vendored-data audit
+        run: python3 packaging/macos/audit-dependencies.py
+      - name: Universal Mac candidate and matching source
+        run: python3 packaging/macos/prepare-release.py
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mac-local-test-candidate
+          path: dist/macos/
+          if-no-files-found: error

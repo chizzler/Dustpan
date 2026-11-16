@@ -53,6 +53,53 @@ final class FakeServer: SyncServer {
 }
 
 @Suite struct SyncTests {
+    @Test @MainActor static func cancelledSyncKeepsItsOutboxAndDoesNotApplyTheResponse() async throws {
+        let store = try memoryStore()
+        try store.setMeta("user_id", "me")
+        let local = Op(json: remote("t1", "title", "Local", 10))!
+        try store.apply(local)
+        try store.outboxAdd([local])
+        let server = FakeServer(planned: [{ _ in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return ["ops": [remote("t2", "title", "Must not be applied", 20)], "cursor": 99]
+        }])
+        let task = Task { try await Syncer(store: store, server: server).run() }
+        do {
+            _ = try await task.value
+            Issue.record("A cancelled sync should throw")
+        } catch is CancellationError {
+        }
+        #expect(try store.outboxCount() == 1)
+        #expect(try store.rows("task")["t2"] == nil)
+        #expect(try store.meta("cursor").isNull)
+    }
+
+    @Test func largeValidNotesAreSplitByEncodedRequestSize() async throws {
+        try store.setMeta("user_id", "me")
+        try store.apply(Op(json: remote("t1", "title", "Task", 1))!)
+        let writer = Writer(store: store, now: { 1000 })
+        for i in 0..<100 {
+            try writer.edit("t1", TaskEdit(notes: "\(i)" + String(repeating: "x", count: 50000)))
+        }
+        let queued = try store.outboxBatch(limit: 500).map(\.op.id)
+        let server = FakeServer([])
+        _ = try await Syncer(store: store, server: server).run()
+        #expect(server.requests.count > 1)
+        for request in server.requests { #expect(request.data.count <= Syncer.maxRequestBytes) }
+        #expect(server.requests.flatMap { $0["ops"].array ?? [] }.compactMap { $0["id"].string } == queued)
+        #expect(try store.outboxCount() == 0)
+    }
+
+    @Test func byteBoundaryDoesNotSplitACompoundEntity() throws {
+        let first = Op(json: remote("t1", "description", .string(String(repeating: "x", count: 500)), 1))!
+        let reminder = [Op(id: "r-task", entity: "reminder", entityId: "r1", field: "task_id", value: "t1", ts: 1, device: "d"),
+                        Op(id: "r-kind", entity: "reminder", entityId: "r1", field: "kind", value: "relative", ts: 1, device: "d")]
+        try store.outboxAdd([first] + reminder)
+        let budget = first.json.data.count + reminder[0].json.data.count + 2
+        let batch = try Syncer(store: store, server: FakeServer([])).nextBatch(byteBudget: budget)
+        #expect(batch.map(\.op) == [first])
+    }
+
     let store: Store
 
     init() throws { store = try memoryStore() }
@@ -182,9 +229,11 @@ final class FakeServer: SyncServer {
         let result = try await Syncer(store: store, server: server).run()
         #expect(result.held == 1)
         #expect(try store.outboxCount() == 0)
+        #expect(try pendingUploadCount(store) == 1)
         #expect(try store.rows("task")["t1"]?["title"] == "A")
         let (again, _) = try await runSync()
         #expect(again.requests[0]["ops"].array?.map { $0["id"] } == ["local-title"])
+        #expect(try pendingUploadCount(store) == 0)
     }
 
     @Test func clockSkewFeatureIsAnnounced() async throws {

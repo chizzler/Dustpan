@@ -96,6 +96,7 @@ struct Toast: Identifiable, Equatable {
 
 /// The window's state: the local copy as last read, how sync is going, and the edits made here.
 @Observable
+@MainActor
 final class AppModel {
     enum Status: Equatable {
         case idle
@@ -123,6 +124,7 @@ final class AppModel {
     private(set) var lastSynced: Date?
     /// Local changes not yet accepted by the server.
     private(set) var waiting = 0
+    private(set) var held = 0
     /// The live stream is connected.
     private(set) var live = false
     var toast: Toast?
@@ -155,6 +157,7 @@ final class AppModel {
     @ObservationIgnored weak var undoManager: UndoManager?
     /// Why the app can't start: no database.
     private(set) var setupProblem: String?
+    var showsWelcome = false
     var page: Page? = .today {
         didSet {
             guard page != oldValue else { return }
@@ -206,6 +209,10 @@ final class AppModel {
     private var syncAgain = false
     private var lastSync = ContinuousClock.now
     private var editSync: Task<Void, Never>?
+    @ObservationIgnored private var pollingTask: Task<Void, Never>?
+    @ObservationIgnored private var reminderTask: Task<Void, Never>?
+    @ObservationIgnored private var syncing = false
+    @ObservationIgnored private var stopping = false
     private let notifier = Notifier()
     /// Reminders are checked once notifications are allowed.
     private var reminding = false
@@ -215,9 +222,11 @@ final class AppModel {
     init() {
         do {
             let store = try Store(path: try databasePath())
+            let (config, warning) = Config.loadOptional()
+            let welcome = try prepareWelcome(store, connected: config != nil)
             self.store = store
             writer = Writer(store: store)
-            let (config, warning) = Config.loadOptional()
+            showsWelcome = welcome
             if let config { use(config) }
             if let warning { toast = Toast(message: warning) }
             refresh()
@@ -229,6 +238,43 @@ final class AppModel {
     }
 
     // MARK: sync
+
+    /// Owned by the application, not a window's view task: closing a window keeps reminders and sync alive.
+    func startServices() {
+        #if DEBUG
+        if showsWelcome, ProcessInfo.processInfo.environment["DUSTPAN_SCREENSHOT"] != nil {
+            Task { await screenshotsIfAsked() }
+            return
+        }
+        #endif
+        guard !showsWelcome, store != nil, pollingTask == nil else { return }
+        stopping = false
+        pollingTask = Task { await start() }
+        reminderTask = Task { await remind() }
+    }
+
+    func stopServices() {
+        stopping = true
+        pollingTask?.cancel()
+        reminderTask?.cancel()
+        pollingTask = nil
+        reminderTask = nil
+        pauseSync()
+        settle?.cancel()
+        spring?.cancel()
+    }
+
+    func finishWelcome() {
+        guard let store else { return }
+        do {
+            try completeWelcome(store)
+            if snapshot.allTasks.isEmpty && !isConnected { page = .inbox }
+            showsWelcome = false
+            startServices()
+        } catch {
+            toast = Toast(message: "Couldn't save welcome settings: \(error)")
+        }
+    }
 
     var isConnected: Bool { config != nil }
 
@@ -247,7 +293,7 @@ final class AppModel {
         await screenshotsIfAsked()
         #endif
         while !Task.isCancelled {
-            try? await Task.sleep(for: Self.pollInterval)
+            do { try await Task.sleep(for: Self.pollInterval) } catch { return }
             let interval = live ? Self.livePollInterval : Self.pollInterval
             if lastSync.duration(to: .now) >= interval - .seconds(1) { await sync() }
         }
@@ -256,9 +302,10 @@ final class AppModel {
     /// Keep the live stream open while connected: sync on connecting, and when another device writes.
     private func startLive() {
         stopLive()
-        guard let api, let store, let device = try? store.transaction({ try store.device() }) else { return }
+        guard !stopping, let api, let store, let device = try? store.transaction({ try store.device() }) else { return }
         liveStream = Task {
             for await event in api.liveEvents(device: device) {
+                guard !Task.isCancelled else { return }
                 switch event {
                 case .connected:
                     live = true
@@ -280,27 +327,38 @@ final class AppModel {
 
     /// Exchange with the server. A call while one runs makes it go round again.
     func sync() async {
-        guard syncer != nil, !changingAccount else { return }
+        guard syncer != nil, !changingAccount, !stopping, !Task.isCancelled else { return }
         guard drag == nil && projectDrag == nil else {
             syncAfterDrag = true
             return
         }
-        guard status != .syncing else {
+        guard !syncing else {
             syncAgain = true
             return
         }
+        syncing = true
+        defer {
+            syncing = false
+            if status == .syncing { status = .idle }
+        }
         repeat {
             syncAgain = false
-            guard let syncer, let store, !changingAccount else { break }
+            guard let syncer, let store, !changingAccount, !Task.isCancelled else { break }
             let changes = store.changes
             status = .syncing
             do {
                 let result = try await syncer.run()
                 status = .idle
                 lastSynced = .now
+                if result.held > 0 {
+                    show(Toast(message: "\(result.held) change\(result.held == 1 ? "" : "s") waiting for a server limit to clear"))
+                }
                 if result.refused > 0 {
                     show(Toast(message: "\(result.refused) change\(result.refused == 1 ? "" : "s") not accepted by the server"))
                 }
+            } catch is CancellationError {
+                status = .idle
+                syncAgain = false
             } catch Syncer.Failure.accountChanged {
                 // Changed elsewhere, by the command line say: go again under the new account.
                 status = .idle
@@ -334,10 +392,13 @@ final class AppModel {
     /// meanwhile.
     func connect(_ config: Config, userId: String, key: JSON?, _ how: AccountJoin) async throws {
         guard let store else { throw CannotEdit("Dustpan isn't set up") }
+        guard !changingAccount else { throw CannotEdit("An account change is already in progress") }
+        try Task.checkCancellation()
         changingAccount = true
         pauseSync()
-        while status == .syncing { try? await Task.sleep(for: .milliseconds(50)) }
         do {
+            while syncing { try await Task.sleep(for: .milliseconds(50)) }
+            try Task.checkCancellation()
             try join(store, userId: userId, key: key, how)
             try config.save()
         } catch {
@@ -354,10 +415,22 @@ final class AppModel {
     }
 
     /// Stop syncing and keep everything here: Dustpan runs standalone.
-    func disconnect() throws {
-        try Config.clear()
+    func disconnect() async throws {
+        guard !changingAccount else { throw CannotEdit("An account change is already in progress") }
+        try Task.checkCancellation()
+        changingAccount = true
         pauseSync()
+        do {
+            while syncing { try await Task.sleep(for: .milliseconds(50)) }
+            try Task.checkCancellation()
+            try Config.clear()
+        } catch {
+            changingAccount = false
+            startLive()
+            throw error
+        }
         use(nil)
+        changingAccount = false
         syncAgain = false
         status = .idle
         refresh()
@@ -373,7 +446,7 @@ final class AppModel {
     private func syncSoon() {
         guard editSync == nil else { return }
         editSync = Task {
-            try? await Task.sleep(for: Self.editSyncDelay)
+            do { try await Task.sleep(for: Self.editSyncDelay) } catch { return }
             editSync = nil
             await sync()
         }
@@ -387,7 +460,8 @@ final class AppModel {
             purging = try pendingPurges(store)
             trashRetention = try DustpanCore.trashRetention(store, connected: isConnected)
             purgeMode = try DustpanCore.purgeMode(store, connected: isConnected)
-            waiting = try store.outboxCount()
+            waiting = try pendingUploadCount(store)
+            held = try store.meta("held_ops").array?.count ?? 0
             hiddenPages = Set(try store.meta(hiddenPagesKey).array?.compactMap(\.string) ?? [])
             foldedTasks = try store.meta(foldedTasksKey).array?.compactMap(\.string) ?? []
             clearedSubtasks = try store.meta(clearedSubtasksKey).object ?? [:]
@@ -419,11 +493,12 @@ final class AppModel {
 
     /// Show reminders as they come due: at the next firing or every 30 seconds, and after every change.
     func remind() async {
-        guard store != nil, await notifier.requestPermission() else { return }
+        guard store != nil, await notifier.requestPermission(), !Task.isCancelled else { return }
         reminding = true
+        defer { reminding = false }
         while !Task.isCancelled {
             let wait = checkReminders().map { Duration.milliseconds(max($0 - wallMs(), 1000)) } ?? Self.pollInterval
-            try? await Task.sleep(for: min(wait, Self.pollInterval))
+            do { try await Task.sleep(for: min(wait, Self.pollInterval)) } catch { return }
         }
     }
 
@@ -927,7 +1002,7 @@ final class AppModel {
         if settling[task.id] == nil { settling[task.id] = !task["completed_at"].isNull }
         settle?.cancel()
         settle = Task {
-            try? await Task.sleep(for: .seconds(2))
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
             guard !Task.isCancelled else { return }
             settling = [:]
         }
@@ -958,9 +1033,9 @@ final class AppModel {
         page = task["project_id"].string.map(Page.project) ?? .inbox
         saveFolds(unfoldedDownTo(foldedTasks, task.id, tasks: snapshot.allTasks))
         Task {
-            try? await Task.sleep(for: .milliseconds(100))
+            do { try await Task.sleep(for: .milliseconds(100)) } catch { return }
             flash = task.id
-            try? await Task.sleep(for: .milliseconds(700))
+            do { try await Task.sleep(for: .milliseconds(700)) } catch { return }
             if flash == task.id { flash = nil }
         }
     }
@@ -1055,7 +1130,7 @@ final class AppModel {
     func unmark() {
         let tick = markTick
         Task {
-            try? await Task.sleep(for: .milliseconds(150))
+            do { try await Task.sleep(for: .milliseconds(150)) } catch { return }
             if markTick == tick {
                 dropMark = nil
                 spring?.cancel()
@@ -1067,7 +1142,7 @@ final class AppModel {
     func springLoad(_ page: Page, from key: String) {
         spring?.cancel()
         spring = Task {
-            try? await Task.sleep(for: .milliseconds(700))
+            do { try await Task.sleep(for: .milliseconds(700)) } catch { return }
             if !Task.isCancelled && drag != nil && dropMark == .target(key) { self.page = page }
         }
     }
@@ -1091,7 +1166,7 @@ final class AppModel {
         guard done != nil else { return }
         flash = taskId
         Task {
-            try? await Task.sleep(for: .milliseconds(700))
+            do { try await Task.sleep(for: .milliseconds(700)) } catch { return }
             if flash == taskId { flash = nil }
         }
     }

@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from dustpan import trash
@@ -5,7 +6,7 @@ from dustpan.clock import HybridClock
 from dustpan.ids import default_reminder_id, occurrence_id
 from dustpan.model import CLEARED_SUBTASKS, FOLDED_TASKS
 from dustpan.store import Store
-from dustpan.sync import (AccountChanged, AccountMismatch, ClockSkew, Syncer, UnsupportedAccount, is_reserved_device,
+from dustpan.sync import (MAX_REQUEST_BYTES, AccountChanged, AccountMismatch, ClockSkew, Syncer, UnsupportedAccount, is_reserved_device,
                           migrate_account, reset_for_account)
 from dustpan.api import Offline
 from dustpan.writes import Writer
@@ -45,6 +46,31 @@ class FakeApi:
 
 
 class SyncTest(unittest.TestCase):
+    def test_large_valid_notes_are_split_by_encoded_request_size(self):
+        self.store.set_meta("user_id", "me")
+        self.store.apply(op("t1", "title", "Task", 1))
+        writer = Writer(self.store, now=lambda: 1000)
+        for i in range(100):
+            writer.edit("t1", {"description": str(i) + "x" * 50000})
+        queued = [o["id"] for _, o in self.store.outbox_batch(500)]
+        api = FakeApi([])
+        Syncer(self.store, api).run()
+        self.assertGreater(len(api.requests), 1)
+        for request in api.requests:
+            self.assertLessEqual(len(json.dumps(request).encode()), MAX_REQUEST_BYTES)
+        self.assertEqual([o["id"] for r in api.requests for o in r["ops"]], queued)
+        self.assertEqual(self.store.outbox_count(), 0)
+
+    def test_byte_boundary_does_not_split_a_compound_entity(self):
+        # Artificial small budget makes the cut fall between a reminder's task_id and kind.
+        ops = [op("t1", "description", "x" * 500, 1),
+               {**op("r1", "task_id", "t1", 1), "entity": "reminder"},
+               {**op("r1", "kind", "relative", 1), "entity": "reminder"}]
+        self.store.outbox_add(ops)
+        budget = sum(len(json.dumps(o).encode()) + 2 for o in ops[:2])
+        batch = Syncer(self.store, FakeApi([]))._next_batch(budget)
+        self.assertEqual([o for _, o in batch], ops[:1])
+
     def setUp(self):
         self.store = Store(":memory:")
         self.addCleanup(self.store.close)
