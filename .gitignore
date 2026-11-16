@@ -17,3 +17,6 @@ xcuserdata/
 
 # Local release archives and Arch packages
 /dist/
+
+# Private notes: a separate private repo, cloned here
+/notes/

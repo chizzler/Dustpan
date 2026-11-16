@@ -58,4 +58,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and [RELEASING.md](RELEASING.md
 AGPL-3.0-only; see [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md) for OpenTodo and Lucide attribution.
 Dustpan is an independent client; the OpenTodo server is not bundled.
 
-[Project history](project.md) · [Development diary](dev-diary.md) · [Protocol rules](spec/README.md)
+[Protocol rules](spec/README.md)

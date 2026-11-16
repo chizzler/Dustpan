@@ -37,11 +37,11 @@ When the pin moves, re-read the sync doc's schema table and diff the vectors.
 | 12 | Calendar, in a companion window: Month, then Week and Day, placing, repeating and multi-day tasks | [calendar.md](calendar.md) | 12a, 12b and 12c done 2026-11-04, tried and approved (12c: the keys, menu and grid settings not yet tried); 12d to come |
 | — | Fold a task's subtasks away in project and Inbox lists | [folding.md](folding.md) | done 2026-11-04, tried and approved (0.12.3) |
 | — | Subtask progress: a pie in the parent's circle, and the offer to complete the parent | [progress.md](progress.md) | built 2026-11-05 (0.12.4); pie tried and approved, prompt trial pending |
-| — | Clickable project label on grouped rows; completed subtasks settle below open siblings | [dev diary](../dev-diary.md) | built 2026-11-06 (0.12.4); project link tried and approved, settling trial pending |
+| — | Clickable project label on grouped rows; completed subtasks settle below open siblings | [progress.md](progress.md) | built 2026-11-06 (0.12.4); project link tried and approved, settling trial pending |
 | — | Project icons: all 1,854 of Lucide's, a picker with a category sidebar and suggestions from the name, shown in the sidebar and Trash; a Theme colour | [icons.md](icons.md) | built 2026-11-13 (0.12.5), owner trial pending |
 | — | Page heading: a large title on every page, so a project reads as a place; sub-projects to walk into | [pagehead.md](pagehead.md) | built 2026-11-13 (0.12.5), owner trial pending |
 | Recovery | Real-server restore/re-seed, interrupted uploads, purge boundaries, copied actual backups, GTK smoke | [recovery guide](../dev/RECOVERY.md) | passed 2026-11-12; permanent-deletion rollback and accidental-deletion limits confirmed |
-| — | Section colours and icons: editor, headings, sync and Undo | [sections](projects.md#sections), [implementation plan](section-icons-plan.md) | built 2026-11-15 (0.12.6), matching Mac commit 00879e5; owner trial pending |
+| — | Section colours and icons: editor, headings, sync and Undo | [sections](projects.md#sections) | built 2026-11-15 (0.12.6), matching Mac commit 9c0c824; owner trial pending |
 
 ## Behind the server
 
