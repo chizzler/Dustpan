@@ -1,7 +1,5 @@
 # Notes
 
-Status: built 2026-11-02 (slice 8), tried and approved.
-
 A task's notes are Markdown. OpenTodo keeps them in two fields (`docs/sync.md`, "Mergeable documents"):
 
 - `description`: the note as Markdown text.
@@ -36,7 +34,7 @@ and not yet seen loses once, as last-writer-wins.
 `dustpan/noteview.py` turns the parsed blocks into GTK labels. A task row shows the note's first line, dimmed.
 Filters already search notes (`search:`).
 
-## On the Mac (0.11.0)
+## On the Mac
 
 - `Markdown.swift` ports `markdown.py`. Inline text becomes an `AttributedString` (presentation intents and links),
   which SwiftUI's `Text` shows; `NoteView` lays out the blocks. Links open in the browser.

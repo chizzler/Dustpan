@@ -1,86 +1,17 @@
 # Drag and drop
 
-Slice 6. Drag a task to change where it lives: its place in a list, its parent, its section, its project, its date or its labels.
-Status: designed 2026-11-01. 6a built 2026-11-01, tried and approved. 6b built 2026-11-01, tried and approved. 6c partly built: the sidebar, 2026-11-02.
-The Mac client's slices 6a (2026-11-06) and 6b (2026-11-11, tried and approved) follow the same rules; see "On the Mac" at the end.
+Drag a task to change where it lives: its place in a list, its parent, its section, its project, its date or its labels.
+Every drag also has a key and a menu item. The Mac follows the same rules; see "On the Mac" at the end.
 
-## What slice 5 had
+## Prior art
 
-- Each task row in a project or the Inbox is a drag source and its own drop target.
-- The top half of a row places before it, the bottom half after it, at the row's own level.
-- A section heading places at the top of that section.
-- `Writer.move_task` writes the parent, section and position in one batch, with the web app's midpoint rule.
+OpenTodo's web app is the reference, because it writes the same data (`listDrop.ts`, `taskDrop.ts`).
+The zones and levels also follow Atlassian's Pragmatic drag and drop and dnd-kit's sortable tree.
+Feedback and the alternatives to dragging follow Apple's guidelines and WCAG 2.2 SC 2.5.7.
 
-**Problems with this:**
-- You can't nest a task under another, or pull a subtask out to a shallower level.
-- You can't drop onto a project, the Inbox or Today in the sidebar.
-- You can't drop into an empty section's end, or below the last task of a section.
-- Each row has its own target, so the marker flickers off in the gaps between rows.
-- The list doesn't scroll when you drag near its edge, so long lists can't be crossed.
-- No Undo after a drop, and nothing shows where the task landed.
-- The drag can't be done any other way, by keyboard or menu.
-
-## What the best apps do
-
-**OpenTodo's web app** is the reference, because it writes the same data.
-- **Three zones on a row** (`web/src/app/listDrop.ts`): the top quarter places before, the bottom quarter after, and the middle half nests inside, as the last subtask.
-  Below an open parent, "after" means the top of its subtasks, since that is where the line shows.
-- **Sidebar drops** (`taskDrop.ts`): onto a project or the Inbox moves the task, like Move. Onto a label adds the label.
-  If the task already has the label, nothing is written and the toast says so.
-- **Date drops** in the planner and month views: the due date changes to that day, and the time and zone are kept.
-- **Today's day-part headings**, and **board columns with an on-drop rule** (`view.on_drop`): a drop writes that rule's fields.
-- **Not draggable:** Today, Upcoming and other sorted pages don't reorder by hand. Position only breaks ties there.
-- **Feedback:** the dragged row lifts. The drop place shows as a line with a dot at its start. A drop inside rings the row.
-  In the sidebar tree, the line starts at the indent of the level the item will land on.
-- **Escape**, or a drop outside any list, cancels without writing.
-- **Keyboard:** Alt+Up and Alt+Down move one place, and with Shift to the top or bottom. Tab indents under the task above. Shift+Tab outdents.
-- **Every move is one batch with one Undo.**
-
-**Todoist.** Dragging a task right under another makes it a subtask. Dragging left makes it a parent task again.
-In Upcoming, dragging a task to another day reschedules it. Nesting by drag is off while a list is sorted.
-
-**Things 3.** Drop to-dos on a list in the sidebar to move them. Select several first and they all move together.
-
-**Workflowy.** Drag a bullet one step right to indent it. Its children travel with it.
-
-**OmniFocus.** Drop an item onto another to nest it. A line shows whether it will land beside the item or inside it.
-Rows dropped on a sidebar project join that project.
-
-**Fizzy (37signals).** Cards move only between columns, never up or down inside one.
-The lesson: where order means nothing, a drag changes a category, not a position. Dragging a card out of Done reopens it.
-
-**Atlassian Pragmatic drag and drop** has the most complete published rules.
-- **Hitbox table:** with before, inside and after all allowed, a row splits a quarter, a half and a quarter. With only before and after, it splits in half.
-  A blocked operation still shapes the zones, so they don't jump around.
-- **Reparent:** at the bottom edge of the last item in a nested group, the pointer's horizontal place picks the level to land on.
-- **Trees:** treat each level as its own list. Don't offer "after" on an open parent.
-- **Hover:** a collapsed item opens after 500 ms of hovering in its middle.
-- **Drag preview:** at most 280 × 280 px, with at most three pieces of information. Several items stack, with a count.
-- **Source row:** stays in place at 40% opacity.
-- **Line marker:** 2 px in the accent colour, with an 8 px dot at its start. It sits in the middle of the gap between items.
-  An empty list shows no line; its area is highlighted instead.
-- **After the drop:** update at once. Flash the moved item's background for 700 ms. Open any parents needed so it stays in view.
-- **Accessibility:** every drag outcome also sits in the item's menu. Announce what moved, from where and to where. Keep focus on the moved item.
-
-**dnd-kit's sortable tree** computes depth from the sideways offset: offset ÷ indent width, rounded.
-The result is clamped. It can't be deeper than the row above's depth + 1, or shallower than the row below's depth.
-
-**Apple's guidelines.**
-- Offer another way to do every drag.
-- Let people undo a drop.
-- Scroll a list when a drag nears its edge.
-- Highlight a destination only while it can accept the drop.
-- "Spring loading": hovering over a target opens it.
-- Keep the dropped item selected afterwards.
-
-**WCAG 2.2, SC 2.5.7** requires a single-pointer alternative to every drag, such as a menu or buttons. Keyboard access is a separate requirement.
-
-**GTK.** `GtkScrolledWindow` doesn't scroll during a drag; apps write it themselves.
-Nautilus used a 30 px edge with 100 ms steps. Earlier it widened the edge from 20 to 50 px, because people didn't find it.
-
-**Concurrent moves.** Kleppmann's move operation for replicated trees is the rigorous answer to two devices moving the same subtree.
-OpenTodo uses per-field last-writer-wins instead. Its display rule breaks a cycle the same way on every device: the task whose parent clock is newest goes to the top level.
-We already do the same (slice 1). The server's model is fixed, so we follow it.
+- **Concurrent moves.** OpenTodo uses per-field last-writer-wins, not a tree CRDT. Its display rule breaks a cycle
+  the same way on every device: the task whose parent clock is newest goes to the top level. We match it.
+- **GTK.** `GtkScrolledWindow` doesn't scroll during a drag, so the app does it.
 
 ## Design
 
@@ -108,6 +39,11 @@ These rules hold for every target:
 - Completed rows, and the rows of tasks you may not edit, never start a drag.
 - A date drop on a parked (Someday) task un-parks it, as editing the due does now.
 - A drop that changes nothing writes nothing. A label the task already has is shown with "Already has @x" and no Undo.
+- Rows on Today, Upcoming and saved views drag to the sidebar and to day headings, but don't reorder there.
+  Today's own "Today" heading takes drops too, so an overdue task can be dragged up to today.
+- A background sync waits until the drop, so the page isn't rebuilt under the pointer.
+- A new toast replaces the one on screen, so Undo always means the latest action.
+- Drags from other apps are ignored: text dragged in is never read as a task id.
 
 ### Where the pointer lands
 
@@ -124,7 +60,7 @@ A pure function decides the target from the visible rows and the pointer. GTK pa
    Where the gap after a row closes several levels (a last subtask with a shallower row below it), the pointer's sideways place picks the level.
    The level is the pointer's x ÷ the indent width (24 px), rounded.
    It is clamped between the depth of the row below and the depth of the row above.
-   So dragging left outdents, and dragging right stays in the group, as in Todoist and Workflowy.
+   So dragging left outdents, and dragging right stays in the group.
 4. **Map to a placement** (`Place`): project, section, parent, and before or after a sibling. `Writer.drop` writes it.
 
 ### What the user sees
@@ -165,7 +101,7 @@ same `Place` a drag would give, so both go through `Writer.drop`, with the same 
 | Ctrl+Z (anywhere) | The Undo of the toast on screen |
 | j, k (no task focused, not typing) | Focus the first or last task, as in the web app |
 
-- **A click selects a task; a double-click or Enter opens it,** as in Things and file managers. Opening on every click
+- **A click selects a task; a double-click or Enter opens it,** as in file managers. Opening on every click
   fought the keys. The selected task is the focused one, with a soft highlight whether chosen by mouse or keyboard,
   plus a ring when the keyboard is in use. A rebuilt page keeps the selected task. After a move or drop the task
   stays focused; after a completion or delete, the next task is.
@@ -192,40 +128,9 @@ same `Place` a drag would give, so both go through `Writer.drop`, with the same 
 The GTK signal handlers stay thin. They call `hover(x, y)` and `drop(x, y)` on `PageDrop` and `SidebarDrop`, and a test driver can call those too.
 That way most of the drag path runs in scripted checks, even though a script can't produce a real pointer drag.
 
-## Plan
-
-**6a, nest and place by drag.**
-- The one-target list.
-- The three zones, and level by x.
-- The overlay line and ring, the drag pill and the dimmed source.
-- Autoscroll, end-of-section drops, the flash, and the toast with Undo.
-- Sidebar drops on projects, the Inbox and Today, with spring loading.
-- Upcoming day headings.
-- Rows in Today, Upcoming and saved views drag to the sidebar and to day headings, but don't reorder there.
-
-Built 2026-11-01 as planned, with these additions:
-- Today's "Today" heading takes drops too, so an overdue task can be dragged up to today.
-- A background sync waits until the drop, so the page isn't rebuilt under the pointer.
-- A new toast replaces the one on screen, so Undo always means the latest action.
-- Drags from other apps are ignored: text dragged in is never read as a task id.
-
-**6b, without a pointer.**
-- Focusable rows, Alt+arrows, Tab and Shift+Tab.
-- The row menu with Move to, and Ctrl+Z.
-
-Built 2026-11-01 as planned, plus ↑ ↓ (j k), Enter, c and Delete on a focused task, and Due tomorrow in the menu.
-
-**6c, later.**
-- ~~Drag projects in the sidebar to reorder or nest them, with the same zones.~~ Done 2026-11-02, with labels and views:
-  see "In the sidebar" below.
-- Saved-view group headings, and `view.manual_order`.
-- ~~Labels in the sidebar as drop targets.~~ Done 2026-11-02, with slice 9 (see labels.md).
-- Several selected tasks dragged together, with a count.
-- `view.on_drop` rules, once boards exist.
-
 ## In the sidebar
 
-Built 2026-11-02. Projects, labels and views can be dragged within their own group. OpenTodo's specs:
+Projects, labels and views can be dragged within their own group. OpenTodo's specs:
 `project-organization` ("Move a project", "Cycle prevention"), `labels` ("Reorder labels by drag and by keyboard"),
 `custom-views` ("Pinned views in the sidebar").
 
@@ -254,6 +159,12 @@ Built 2026-11-02. Projects, labels and views can be dragged within their own gro
 - **Live check:** every target on the dev server. Refused must be 0, and REST must read back the same values.
 - **By hand:** the drag itself, since a script can't produce one.
 
+## Not done
+
+- Saved-view group headings, and `view.manual_order`.
+- Several selected tasks dragged together, with a count.
+- `view.on_drop` rules, once boards exist.
+
 ## Sources
 
 - OpenTodo v0.18.0: `web/src/app/listDrop.ts`, `taskDrop.ts`, `lib/dnd.ts`; OpenSpec `manual-ordering`, `subtasks`, `labels`, `task-list-presentation`, `planner-view`, `month-view`, `custom-views`, `day-parts`.
@@ -263,12 +174,6 @@ Built 2026-11-02. Projects, labels and views can be dragged within their own gro
 - [Apple HIG: drag and drop](https://developer.apple.com/design/human-interface-guidelines/drag-and-drop)
 - [W3C: Understanding SC 2.5.7 Dragging Movements](https://www.w3.org/WAI/WCAG22/Understanding/dragging-movements)
 - [Smart Interface Design Patterns: drag-and-drop UX](https://smart-interface-design-patterns.com/articles/drag-and-drop-ux/)
-- [Todoist: sub-tasks](https://todoist.com/help/articles/introduction-to-sub-tasks)
-- [Todoist: Upcoming view](https://todoist.com/help/articles/360000031019)
-- [Things support: moving to-dos](https://culturedcode.com/things/support/articles/2803582/)
-- [Workflowy: drag bullets to indent them](https://blog.workflowy.com/moving-bullets-is-now-easier-than-ever/)
-- [OmniFocus 4 manual: the outline](https://support.omnigroup.com/documentation/omnifocus/universal/4.3.3/en/the-outline/)
-- [Fizzy help: moving and prioritising](https://help.fizzy.do/3/fizzy-help-guide/50/moving-prioritizing.md)
 - [dnd-kit sortable tree utilities](https://app.unpkg.com/dnd-kit-sortable-tree@0.1.73/files/src/utilities.ts)
 - [GNOME Discourse: autoscroll during drag and drop](https://discourse.gnome.org/t/gtkscrolledwindow-auto-scroll-during-drag-n-drop/5727)
 - [Nautilus DnD cleanup (old autoscroll constants)](https://lists.gnome.org/archives/commits-list/2022-June/msg10671.html)
@@ -276,7 +181,7 @@ Built 2026-11-02. Projects, labels and views can be dragged within their own gro
 
 ## On the Mac
 
-Mac slice 6a, 2026-11-06. `DragDrop.swift` ports the rules here (`Placement` is the desktop's `Place`, which
+`DragDrop.swift` ports the rules here (`Placement` is the desktop's `Place`, which
 the Swift code already used for a project and section), and `Writer.drop` ports `Writer.drop`. The tests are ports.
 
 **The SwiftUI list** (the default):
@@ -288,8 +193,8 @@ the Swift code already used for a project and section), and `Writer.drop` ports 
 - **The grab point** comes from the pointer's last hover position over the row, since the drag doesn't give one.
 - **The drag starts** when SwiftUI asks `draggable` for its payload, and **ends** when the mouse button is up.
   `onDragSessionUpdated` doesn't fire for a plain `draggable` row.
-- **Rows drag with `draggable`, never `onDrag`, and nothing List-aware goes outside it.** Found 2026-11-09 on
-  macOS 27: after one drag, the list swallowed every other click, so selection lagged or stuck and a press-and-drag
+- **Rows drag with `draggable`, never `onDrag`, and nothing List-aware goes outside it.** On macOS 27,
+  after one drag, the list swallowed every other click, so selection lagged or stuck and a press-and-drag
   selected a range. `onDrag` does that on its own; so does `onGeometryChange` or `.badge` applied outside the drag
   modifier, even with `draggable`. Inside it, both are fine. Overlays, `onDrop`, popovers and menus outside are fine.
   A minimal app reproduces each case.
@@ -298,22 +203,22 @@ the Swift code already used for a project and section), and `Writer.drop` ports 
   pointer as below itself: a third indicator, and drops that landed one slot off. A drop line stays inside one row's
   padding (the next row draws over anything that crosses the boundary), and the nest ring just inside the row,
   from the task's own indent, so it sits the same distance from the check circle at every level.
-- **Sidebar rows too** (Mac 0.8.6): the sidebar keeps its own row height, so a row fills it (`sidebarDropArea`), and
+- **Sidebar rows too:** the sidebar keeps its own row height, so a row fills it (`sidebarDropArea`), and
   `.listRowInsets(.vertical, 0)` goes on the row's outermost view, the only place the sidebar reads it. In the inset,
   the drop's location was meaningless (y = 136 in a 25-point row), which read as "after" at the top of every row.
 - **The pointer's place in a row comes from the mouse and the row's frame**, not `DropInfo.location`: in the List's
   margin left of a row (16 points in the sidebar), SwiftUI gives the location in the List's coordinates. That margin
-  takes no drop at all; accepting one there drew the List's highlight. (Mac 0.8.7.)
+  takes no drop at all; accepting one there drew the List's highlight.
 - **A spot that leaves the item where it is shows nothing** and takes no drop (`leavesInPlace` for tasks,
   `ProjectDrag.moves(to:)` for projects): the gaps either side of it at its own level. Another level still moves it.
 - **The sidebar's projects are plain rows**, indented and with their own disclosure arrows, like the task list: an
   outline row's arrow and indent sit outside the row's view. Each gap gets one line: "before" the row below is drawn
   at the bottom of the row above, like "after" it, indented to the level the project lands on. ← and → no longer
-  fold projects. Rows are keyed by project id, so a moved project keeps its List row and its selection. (Mac 0.8.8.)
+  fold projects. Rows are keyed by project id, so a moved project keeps its List row and its selection.
 - **A drop ends its drag**, and a drag let go elsewhere ends 500 ms after mouse-up. Ending at mouse-up raced the
   drop: a drop that found no drag was refused and its preview slid back. About 350 ms after a drop, while the preview
   fades, one more `dropUpdated` arrives, so a target marks nothing unless a drag of its kind is on, and ending a drag
-  always clears the mark. `onDragSessionUpdated` doesn't fire for a List row's `draggable` (macOS 27). (Mac 0.8.8.)
+  always clears the mark. `onDragSessionUpdated` doesn't fire for a List row's `draggable` (macOS 27).
 - **The drop animation is the system's.** An accepted drop glides the preview onto the pointer and fades it; we
   keep it rather than fake a preview or own the gesture, for the iPhone app's sake. `onMove` rows (labels, views)
   settle into place instead, because the List owns those drops.
@@ -321,7 +226,7 @@ the Swift code already used for a project and section), and `Writer.drop` ports 
   goes, so no line goes with it.
 - **Autoscroll** is whatever the system list does during a drag. Not written by hand.
 
-**The `NSOutlineView` spike** (View ▸ Outline Task List, project and Inbox pages only), added 2026-11-07:
+**The `NSOutlineView` spike** (View ▸ Outline Task List, project and Inbox pages only):
 - AppKit draws the drop line or ring, proposes a parent and child index, scrolls, and opens collapsed rows on hover.
 - `resolveDrop(_:projectId:sectionId:parent:before:inside:moving:)` turns that proposal into the same `Drop`,
   so both lists share one rule. Section headings are flat group rows, and a drop on one means the top of its section.
@@ -332,19 +237,19 @@ the Swift code already used for a project and section), and `Writer.drop` ports 
 level, and nested drag and drop in a SwiftUI `List` has a poor record. `NSOutlineView` is where macOS does tree
 drag and drop. Whether the task list moves to it is still open.
 
-**The sidebar** (Mac 0.8.0, 2026-11-07), as "In the sidebar" above:
+**The sidebar**, as "In the sidebar" above:
 - **Projects** drag with their own drag, apart from the task drag. Each project row is one drop target for both:
   a task moves into the project, as before; a project lands by the row's zones through `placeItem`, with a line
   along the row's top or bottom edge or a ring to nest. Over itself or its own sub-projects it's refused.
 - **Views and labels** reorder with SwiftUI's `onMove`, which is flat and enough for them. Labels already did.
 - **Without a pointer:** Move Up and Move Down in each project's and view's menu, as labels have, and ⌥↑ ⌥↓ on the
-  selected project, view or label (through Edit ▸ Move Up and Move Down since Mac 0.9.0; see 6b below). A project's parent changes by drag only: the Mac has no project editor yet.
+  selected project, view or label (through Edit ▸ Move Up and Move Down; see below). A project's parent changes by drag only: the Mac has no project editor yet.
 - Writes: `Writer.placeProject`, `moveProject` and `moveView`; labels share their helpers. Tests: `SidebarOrderTests.swift`.
 - A project drop toasts as the desktop's does. Moves by menu, key or `onMove` have Edit ▸ Undo and no toast, as labels had.
 
 Escape and drops outside a target cancel, as before. Calendar targets don't exist on the Mac yet.
 
-**6b, without a pointer** (Mac 0.9.0 and 0.9.1, 2026-11-11, tried and approved). `nudge` in `DragDrop.swift` is the desktop's, with its tests;
+**Without a pointer.** `nudge` in `DragDrop.swift` is the desktop's, with its tests;
 every key and menu move ends in `Writer.drop`, as a drag does.
 - **Keys, Mac style:** ⌥↑ ⌥↓ move a task among its siblings, ⇧⌥↑ ⇧⌥↓ to the top or bottom, ⌘] indents (the last
   subtask of the task above) and ⌘[ outdents (right after its old parent). The desktop's Tab and Shift+Tab would trap
@@ -359,5 +264,5 @@ every key and menu move ends in `Writer.drop`, as a drag does.
   The moves show on project and Inbox pages only, as on the desktop; Due and Move To on every page. Open tasks only.
 - **Feedback:** the task stays selected and comes into view, with the flash. Key and menu moves have Edit ▸ Undo
   and no toast, as the sidebar's do; Due and Move To toast as a drop does.
-- **Focus:** a row's drag takes the click, so each list takes the focus itself when its selection changes (0.9.1).
+- **Focus:** a row's drag takes the click, so each list takes the focus itself when its selection changes.
   Without it, a clicked task stayed unfocused and its keys went to the other list.

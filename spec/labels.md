@@ -1,7 +1,5 @@
 # Labels
 
-Status: built 2026-11-02 (slice 9), tried and approved. Dropping a task on a label added the same day.
-
 OpenTodo's rules are in `openspec/specs/labels/spec.md` and `docs/sync.md` ("Task labels"). The web app's code is
 `web/src/lib/labels.ts`. A label has `name`, `color`, `position`, `created_at` and `deleted_at`.
 `task.labels` is an array of label ids, written whole: last writer wins for the array.

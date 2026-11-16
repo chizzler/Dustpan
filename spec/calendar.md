@@ -4,7 +4,7 @@ What the desktop client implements from `docs/calendar-views.md`, `docs/place-ta
 `docs/time-blocking.md`, `docs/months-and-year.md` and the web app's `calendar.ts`, `month.ts`,
 `occurrences.ts` and `span.ts` (v0.22.0).
 
-## Decided (2026-11-04)
+## The window
 
 - **A companion window, not a page.** The calendar opens in its own window, beside the main one.
   Hyprland tiles it next to the main window; on two monitors it can live on the other one.
@@ -14,32 +14,15 @@ What the desktop client implements from `docs/calendar-views.md`, `docs/place-ta
 - **Month is the default view.**
 - Both windows read the same store. A sync or an edit refreshes both.
 
-## Apple Calendar (decided 2026-11-12)
+## Parts
 
-**Keep the bespoke calendar; no Apple Calendar integration for now.** The options, for when it comes up again:
-
-- **The server's two-way sync with iCloud** (`docs/calendar-sync.md`). Tasks become events; moving or stretching one in
-  Calendar.app moves the task or changes its estimate. No client code, every device benefits. But the server holds
-  an iCloud app-specific password, it brings iCloud back in, a repeating task shows only its next date, and it's
-  another writer (`calsync:<id>`). Off on the live server.
-- **The server's read-only feed** (`docs/calendar-feeds.md`). Calendar.app subscribes to a private URL. No password,
-  can't change anything, but one-way and slow to refresh. The same feature can pull other calendars in for us to
-  draw (the "other calendars' events" Later item). Off on the live server (`404 feeds_disabled`).
-- **EventKit on the Mac and iPhone**, read-only: meetings shown in Dustpan's Week and Day. Native and offline, but
-  Apple-only and behind a permission prompt. Writing back would duel with the server's sync.
-- **Dragging between Dustpan and Calendar.app** isn't practical: at best an unlinked `.ics` copy.
-
-Turning on either server feature means a config change on the server, only with the owner's say-so.
-
-## Slices
-
-| Slice | Scope | Status |
-| --- | --- | --- |
-| 12a | The window and its toggle. Month: six weeks, open tasks per day, deadlines, day load. Drop a task on a day. | done, tried and approved |
-| 12b | Week and Day: a time grid, blocks as tall as their estimate, the Unscheduled lane, the line for now. Drops on a 15-minute slot or the lane (brought forward from 12c). | done, tried and approved |
-| 12c | Stretch a block to change its estimate, keyboard and menu moves on the grid, grid hours and day length in settings. | done; stretching tried and approved, the keys, menu and settings not yet tried |
-| 12d | Repeating tasks' coming dates (`occurrences.vectors.json`) and multi-day bars (`span`). | |
-| Later | Plan (two weeks), Year, stacked months, other calendars' events. | |
+| Part | Scope |
+| --- | --- |
+| 12a | The window and its toggle. Month: six weeks, open tasks per day, deadlines, day load. Drop a task on a day. |
+| 12b | Week and Day: a time grid, blocks as tall as their estimate, the Unscheduled lane, the line for now. Drops on a 15-minute slot or the lane. |
+| 12c | Stretch a block to change its estimate, keyboard and menu moves on the grid, grid hours and day length in settings. |
+| 12d | Not built: repeating tasks' coming dates (`occurrences.vectors.json`) and multi-day bars (`span`). |
+| Later | Not built: Plan (two weeks), Year, stacked months, other calendars' events. |
 
 ## Month (12a)
 
@@ -61,7 +44,7 @@ Ported to `calendar_rules.py`, from `month.ts` and `calendar.ts`.
 - **Keys.** `[` and `]` go back and forward a month, `t` comes back to today.
 - A click selects a task, a double-click opens its editor (as in the main window's lists, from 12c).
 
-## Completed tasks (2026-11-08)
+## Completed tasks
 
 - **A toggle.** The tick button in the header, or `h`, shows completed tasks too. Off by default.
   Remembered on this device (`meta.calendar_show_completed`). Works in Day, Week and Month.
@@ -117,65 +100,24 @@ Ported to `calendar_rules.py` from `calendar.ts` (`resizeEstimate`, `stepEstimat
   (8 hours; 4 to 12 hours). Per device, in `meta.calendar_grid`, read through `grid_prefs`, which repairs bad values.
   The grid opens at its start hour and shades the hours outside; the day length is what the load is measured against.
 
-## On the Mac (0.14.0)
+## On the Mac
 
-Mac slice 12a: the window and Month. Built 2026-11-12, tried and approved the same day.
+The same rules and parts (12a to 12c). `CalendarRules.swift` ports `calendar_rules.py` and `grid_prefs` with the
+desktop's tests; `MonthPage.swift` and `TimeGridPage.swift` gather the days. The drop targets `.slot(day, minutes:)`
+and `.stretch(estimate, start:)` are the desktop's `ToSlot` and `Stretch`. Sizes are in points. Where the Mac differs:
 
-- `CalendarRules.swift` ports the Month part of `calendar_rules.py` and `grid_prefs`, with their tests, and a check that a
-  zoned due lands on the viewer's day. `MonthPage.swift` gathers a month's days for the app.
-- **A window of its own** (`Window` scene "Calendar"), opened by the calendar button in the main window's toolbar,
-  View ▸ Show Calendar (⌘K) or the Window menu. Whether it's open is kept in `meta.calendar_open`; it reopens with
-  the app. Quitting doesn't count as closing (the app delegate's `applicationShouldTerminate` says which).
-- **Month** as on the desktop: six weeks from the week start, today marked, other months shaded, past days dimmed,
-  timed tasks first, deadlines (◆), and the load against the day length from `meta.calendar_grid`. As many lines as
-  the day's height allows, then "+N more" with the rest in a popover.
-- **Completed tasks:** the tick in the toolbar, or h, as on the desktop (`meta.calendar_show_completed`). Faded and
-  struck through, with a tick for a dot. They don't drag.
-- **Keys:** [ and ] a month back and forward, t for today, as single keys on the toolbar's buttons. Typing in the
-  task editor's fields doesn't trigger them.
-- **Tasks:** a click selects, a double-click opens the editor as a sheet on the calendar window. Open tasks drag
-  onto another day, keeping their time (`ToDay`), and from the main window's lists onto a day.
-- **Undo and toasts:** each window keeps its own Undo, as Mac windows do: an action is undone in the window it was
-  made in. The toast shows in the window in front.
-- Week and Day (12b), stretching and the grid keys (12c), and the grid settings are still to come.
-
-## On the Mac (0.15.0)
-
-Mac slice 12b: Week and Day. Built 2026-11-12, tried and approved 2026-11-13.
-
-- `CalendarRules.swift` gains `blockFor` and `layoutDay` with the desktop's LayoutTest and BlockTest; `TimeGridPage.swift`
-  gathers a week's or a day's columns. The drop target `.slot(day, minutes:)` is the desktop's `ToSlot`, with its write test.
-- **Switching:** Day, Week and Month in the toolbar's segmented control, or d, w and m (`meta.calendar_view`).
-  [ and ] step by a day, a week or a month. The title says "9–15 Nov", "Week 46, 2026" or "Thu 12 November".
-- **The grid:** 48 points an hour, opened at the grid's start hour, hours outside it and the past shaded, a line each hour.
-  The scroll position holds across refreshes and switching views, Month included.
+- **The window** is a `Window` scene, "Calendar": the toolbar's calendar button, View ▸ Show Calendar (⌘K) or the
+  Window menu. Quitting doesn't count as closing it (`applicationShouldTerminate` says which).
+- **Single keys** (`[`, `]`, `t`, `d`, `w`, `m`, `h`) sit on the toolbar's buttons, so typing in the editor doesn't
+  trigger them. The view switch is a segmented control.
+- **The title** reads "9–15 Nov", "Week 46, 2026" or "Thu 12 November".
 - **Headers** are pinned over the grid inside the same scroll view, so they stay over their columns whatever width the
-  scroll bar takes. Each has its weekday, date, load, deadlines and the Unscheduled lane (three tasks in Week, nine in
-  Day, then "+N more").
-- **Blocks** as on the desktop: estimate-tall, at least 25 minutes, project colour with a bar on the left, dashed and
-  30 minutes long without an estimate, side by side where they overlap, the fourth lane "+N more" when crowded.
-  Completed ones (with the tick on) are faded and struck through and go behind the "+N" first. A click selects,
-  a double-click opens the editor, open ones drag.
-- **Now:** a red line at the current minute on today, moved once a minute.
-- **Drops:** on the grid, a ghost at the 15-minute slot under the pointer as long as the task's estimate; the task gets
-  that date and a floating time. On a header: that date, no time. Undo for each.
-- Not yet: stretching, the grid keys and menu, and the grid settings (12c).
-
-## On the Mac (0.16.0)
-
-Mac slice 12c: stretching, keys, menu and settings. Built 2026-11-13, tried and approved the same day.
-
-- `CalendarRules.swift` gains `resizeEstimate`, `stepEstimate`, `stepStart` and `gridMoves` with the desktop's StretchTest
-  and GridMovesTest; the drop target `.stretch(estimate, start:)` is the desktop's `Stretch`, with its write tests.
-- **Stretch:** the bottom 6 points of an open block show the resize pointer; dragging follows in whole slots and
-  writes the estimate on release, with Undo.
-- **Select:** a click, or j and k through the shown tasks (each day's lane, then its blocks). Return or a double-click
-  opens, c completes or reopens, Delete deletes, Esc unselects. VoiceOver's press selects too; "Open" opens.
-  A task that leaves the view hands the selection to its neighbour.
-- **Keys:** as the desktop's, each one write with Edit ▸ Undo (no toast). A task moved off the days shown takes the
-  view with it.
-- **Menu:** right-click: Edit…, Complete or Reopen, Skip for a repeating task, the moves with their keys (greyed
-  when they'd change nothing; Month has only Day Before and Day After), Due Today, Due Tomorrow, Move To, Delete.
-  No Labels item, as on the desktop. `.` and Shift+F10 don't open it: SwiftUI can't open a context menu from a key.
-- **Settings:** the gear in the toolbar, a popover with the grid's start and end and the day length (4 to 12 hours),
-  for this Mac only (`meta.calendar_grid`). Changing the start scrolls the grid to it.
+  scroll bar takes.
+- **Opening** a task shows the editor as a sheet on the calendar window. Return opens, as Enter does on the desktop.
+  VoiceOver's press selects; its "Open" action opens.
+- **Undo** belongs to the window an action was made in, as Mac windows do; the toast shows in the window in front.
+  The grid keys use Edit ▸ Undo, with no toast.
+- **The menu** opens by right-click only: SwiftUI can't open a context menu from a key, so `.` and Shift+F10 don't.
+  It has Edit…, Complete or Reopen, Skip for a repeating task, the moves with their keys (Month has only Day Before
+  and Day After), Due Today, Due Tomorrow, Move To and Delete.
+- **Settings** are a popover from the toolbar's gear. Changing the start hour scrolls the grid to it.

@@ -1,21 +1,18 @@
 # Project icons
 
-A project can show an icon instead of its dot, in the project's colour. Like Bear's tag icons, but for projects.
-Built on the desktop 2026-11-13, in 0.12.5. On the Mac since 0.19.0 (2026-11-14).
+A project can show an icon instead of its dot, in the project's colour.
 
 ## Where the icons come from
 
 - **OpenTodo already has the field.** Projects and sections have an `icon` field (v0.22.0). It syncs like any field.
 - **We offer all of [Lucide](https://lucide.dev):** 1,854 icons, version 1.48.0, under the ISC licence.
-  Bear's variety was the aim (2026-11-13). The first build offered only OpenTodo's 411.
 - **OpenTodo's catalogue is 411 of them**, each with a category and search keywords. Its REST and MCP writes
   refuse any other name, and its web app draws only those. Sync doesn't check, and Dustpan writes through sync.
   So any of the 1,854 can be set here, and the web app shows the project's dot for the other 1,443.
 - **OpenTodo's 411 keep OpenTodo's names.** Eight are old Lucide names, such as `trash-2` for `trash`.
   Dustpan writes the old name, so the web app still draws it. Lucide's 264 old names all still draw.
 - **Copied in, not installed.** No package, and the app downloads nothing.
-- **Bear's own icons can't be used.** They're Bear's artwork. SF Symbols and the GTK icon theme can't either:
-  their names differ by platform.
+- **Not SF Symbols or the GTK icon theme.** Their names differ by platform.
 
 ## Files
 
@@ -52,7 +49,7 @@ Lucide files the briefcase under transport, the star under weather.
 ## Rules
 
 - **Drawing.** Lucide's 24-unit grid, round caps and joins, no fill, 1.5 px lines at every size: lighter than
-  Lucide's 2, closer to Bear's. The line colour is the project's colour. GTK renders the SVG at the screen's
+  Lucide's 2. The line colour is the project's colour. GTK renders the SVG at the screen's
   scale, so it stays sharp.
 - **An unknown name** (a newer client's) shows the dot. Editing the project keeps the name unless the user picks another.
 - **Writes.** `add_project(icon=…)` and `edit_project({"icon": …})`. The icon is `None` or a known name;
@@ -103,7 +100,7 @@ Lucide files the briefcase under transport, the star under weather.
   The calendar's 7 px dots stay dots: too small for a shape.
 - **Not shown in** the calendar's 7 px dots or the task editor's project list.
 
-## On the Mac (0.19.0)
+## On the Mac
 
 - **The same files and rules.** `DustpanCore/Resources/icons` holds the desktop's four files, and a test checks they're
   still byte for byte the desktop's. `Icons.swift` ports the rules, `IconPath.swift` turns an icon's SVG into a
@@ -117,12 +114,11 @@ Lucide files the briefcase under transport, the star under weather.
   the editor's sheet closed the whole window.
 - **Labels** keep SF Symbols' `tag.fill` rather than Lucide's solid tag: it's the Mac's own tag, and solid too.
   Task chips draw it at 10 pt in place of the dot.
-- **A new project's colour** is picked when the editor opens, as before, so its icon previews in that colour.
+- **A new project's colour** is picked when the editor opens, so its icon previews in that colour.
 
 ## Sections
 
-Sections show and edit colours and icons too: on the Mac since 2026-11-14 and on the desktop since 0.12.6
-(2026-11-15). They use the same picker, with suggestions from the section's name. The heading's 14 px mark
+Sections show and edit colours and icons too. They use the same picker, with suggestions from the section's name. The heading's 14 px mark
 is an icon in the section colour or theme text colour, a coloured dot when no icon can be drawn, or nothing
 when neither is present. None in the colour row is a dashed ring, unlike a project's Theme dot.
 See [the section rules](projects.md#sections).

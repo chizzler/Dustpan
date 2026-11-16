@@ -1,7 +1,6 @@
 # The page heading
 
 Every page opens with a large heading, so a project reads as a place you are in, not a list you are looking at.
-Built on the desktop 2026-11-13, in 0.12.5. On the Mac since 0.19.0 (2026-11-14).
 
 ## The parts
 
@@ -26,8 +25,7 @@ From top to bottom, all left-aligned with the tasks:
 
 - **A Theme project** ([icons.md](icons.md#the-theme-colour)) draws its mark in the theme's text colour.
 - **The accent** is the current Omarchy theme's `accent`, as everywhere in the app; Adwaita's blue without one.
-- **No rule under the title.** A bar was tried, short and then full width. The owner found it too much;
-  the name and its mark carry the heading.
+- **No rule under the title.** The name and its mark carry the heading.
 - **A sub-project's eyebrow is a link** to its parent: "HOME" above "Garden" opens Home.
 - **The counts say "Nothing open"** (or "Nothing to do" on Today) rather than zero.
 - **The Inbox counts differently from the sidebar.** The sidebar counts only true Inbox tasks: no project, no date.
@@ -44,12 +42,12 @@ Sync messages still show as the header bar's subtitle.
 `dustpan/pagehead.py` builds the widget from plain facts and holds its CSS. `Window.page_heading` in `app.py`
 gathers the facts for a page. Tests are in `tests/test_icons.py` (`PageHeadTest`).
 
-## On the Mac (0.19.0)
+## On the Mac
 
 - **The heading is the list's first row**, so it scrolls with the tasks and lines up with them. `AppModel.pageHead`
   gathers the facts (`PageHeads.swift`), `PageHeading` draws them. The title is `.largeTitle`, heavy; symbols take
   the accent colour. Sub-projects are bordered capsule buttons.
-- **The window's title** stays empty until the list has scrolled 72 pt (`pageTitle`), as Reminders does.
+- **The window's title** stays empty until the list has scrolled 72 pt (`pageTitle`).
   The Window menu still names the window "Dustpan".
 - **Trash** shows the heading above its note and items, empty or not. **An archived project** shows it above
   Unarchive and Delete.

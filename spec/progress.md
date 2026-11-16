@@ -2,8 +2,6 @@
 
 What the desktop client implements from OpenSpec `subtasks` ("Parent progress", "Completing a parent"),
 `docs/notes-and-subtasks.md` and the web app's `lib/subtasks.ts` and `TaskRow.tsx` (v0.22.0).
-Built 2026-11-05 (0.12.4). The owner tried and approved the pie on 2026-11-06;
-the parent-completion banner and its keys still need a trial.
 
 ## Upstream
 
@@ -16,7 +14,7 @@ the parent-completion banner and its keys still need a trial.
 
 ## Where we differ
 
-- **A pie in the check circle**, as in Things. The count is in the tooltip; the row also shows "3/5" during the owner trial.
+- **A pie in the check circle.** The count is in the tooltip. The row also shows "3/5", as upstream.
 
 The list behavior otherwise follows upstream.
 
@@ -54,19 +52,11 @@ Upstream's prompt, as part of this slice.
 - Only for the subtask's own parent. Accepting doesn't ask again for the grandparent.
 - The banner goes when you undo the tick, change page, or the parent stops being ready (a new subtask syncs in).
 
-## Built as
+## Code
 
-- `model.progress_map(all_tasks)`: `{parent_id: (done, total)}` in one pass, a port of `progressMap`.
-  Pure, so it's unit tested, with upstream's scenarios ("3/5", remote completion, deleted excluded).
-- `model.is_ready` and `ready_parent`, a port of `parentReadyToComplete`. The banner checks `is_ready` again on
-  every redraw, so it goes when the parent stops being ready.
-- `widgets.Pie` draws the pie with a Gsk path, under the existing tick image.
-  GTK CSS can't draw a pie for any fraction, so it's drawn, not styled. The existing `task-check` CSS keeps the border and colours.
-  No new packages.
-- `task_row` passes the parent's progress to the check.
-
-- **"3/5" on the row too, for now**, as upstream: dim text after the row's other details.
-  The owner expects to drop it once the pie has been tried.
+`model.progress_map` (a port of `progressMap`), `is_ready` and `ready_parent` (`parentReadyToComplete`) are pure,
+and tested with upstream's scenarios. `widgets.Pie` draws the pie with a Gsk path under the tick image:
+GTK CSS can't draw a pie for any fraction.
 
 ## Not done
 
@@ -74,11 +64,9 @@ Upstream's prompt, as part of this slice.
 - Progress on calendar blocks.
 - A setting to turn the pie off.
 
-## On the Mac (0.17.0)
+## On the Mac
 
-Built 2026-11-13, with the broom, the settling and the project label from the desktop's 0.12.4. Checked by script.
-The owner tried and approved the pies and the broom with Undo the same day; the offer, settling and the project label
-still need a trial. `Subtasks.swift` ports `progress_map`, `is_ready`, `ready_parent`, `sink_completed` and the broom's
+`Subtasks.swift` ports `progress_map`, `is_ready`, `ready_parent`, `sink_completed` and the broom's
 record, with their tests; `projectSections` takes the swept subtasks and the settling ones.
 
 - **The pie** as on the desktop, drawn as a SwiftUI shape over the check's circle: a faint ring for none done, a wedge,
@@ -88,7 +76,7 @@ record, with their tests; `projectSections` takes the swept subtasks and the set
   Return took the Add field's own, and the list's table keeps Return to itself. Esc dismisses it.
 - **The broom** on an open parent with completed subtasks showing, in project and Inbox lists. Undo in the toast and
   Edit ▸ Undo. Stored in the desktop's `meta.cleared_completed_subtasks`.
-- **Settling:** a ticked or reopened subtask keeps its place until 2 s after the last tick on the page (3 s before 0.18.0), then they all
+- **Settling:** a ticked or reopened subtask keeps its place until 2 s after the last tick on the page, then they all
   move together, animated. Another page settles at once.
 - **The project label** on Today, Upcoming and the other grouped pages is a button: it opens the task's project or the
   Inbox, unfolds the way down to the task, and selects and flashes it.

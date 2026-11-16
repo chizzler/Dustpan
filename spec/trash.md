@@ -49,9 +49,7 @@ In standalone mode, trashed items are kept until manually deleted for good. When
 `trashRetentionDays` is remembered locally (assuming 30 days until learned; zero means kept until manually
 purged). The page shows days remaining rounded up, never below zero. The server, not this client, enforces expiry.
 
-## On the Mac (0.13.0)
-
-The desktop's slice 11. Built 2026-11-12, tried and approved.
+## On the Mac
 
 - `Trash.swift` ports `trash.py`; `Writer.restoreTask` and `restoreProject` port the desktop's writes. The tests are
   ports of `test_trash.py`, apart from the API's URL quoting, which was checked by hand.
@@ -62,7 +60,5 @@ The desktop's slice 11. Built 2026-11-12, tried and approved.
 - **The page:** the retention line, then one row per item with Restore and Delete for Good (also in the row's menu).
   Empty Trash… is in the toolbar. Both deletes ask first; a queued row is greyed and says "deleting for good…".
 - Restore has a toast and Edit ▸ Undo. A task restored to the Inbox says so.
-- Deleting a project with open tasks still asks first on the Mac (from 0.10.0); the desktop doesn't.
-- **0.18.0:** standalone, as on the desktop. `purgeLocal` and `expandPurge` port the desktop's, with its tests.
-  Data never connected to an account is deleted at once; once it has been, Delete for Good queues for the server, even
-  disconnected. Standalone, the retention line says items are kept until deleted for good.
+- Deleting a project with open tasks still asks first on the Mac; the desktop doesn't.
+- **Standalone** works as on the desktop. `purgeLocal` and `expandPurge` port the desktop's, with its tests.

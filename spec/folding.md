@@ -1,7 +1,7 @@
 # Folding subtasks
 
 What the desktop client implements from `docs/notes-and-subtasks.md`, `docs/keyboard.md` and the web app's
-`TaskRow.tsx` and `useListModel.ts` (v0.22.0). Built 2026-11-04 (0.12.3), tried and approved.
+`TaskRow.tsx` and `useListModel.ts` (v0.22.0).
 
 ## Rules
 
@@ -30,9 +30,7 @@ What the desktop client implements from `docs/notes-and-subtasks.md`, `docs/keyb
 - Fold all and Unfold all.
 - Folding in the task editor's subtask list.
 
-## On the Mac (0.12.1)
-
-Built 2026-11-12, tried and approved.
+## On the Mac
 
 - **The same rules,** with these differences. `Folding.swift` ports `folded_after` and `unfolded_down_to`, with their
   tests, and `openSlots` leaves a folded task's subtasks out.

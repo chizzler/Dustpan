@@ -32,7 +32,7 @@ and `sections.ts` (v0.18.0). Every action is one batch, as in [writes.md](writes
 - **Undo** puts back every field the action wrote, as a new batch. Undo of a delete clears the tombstone and puts the
   sub-projects back under it.
 
-On the Mac (0.10.0), all of it. Create from the + on the sidebar's Projects heading, File ▸ New Project… (⌥⌘N), or
+On the Mac, all of it. Create from the + on the sidebar's Projects heading, File ▸ New Project… (⌥⌘N), or
 New Sub-project… in a project's menu. Edit Project… (its menu, or the pencil on its page) holds name, colour, parent,
 Archive and Delete. Delete asks first when the project has open tasks, since the Mac has no Trash yet; Undo works
 either way. A section heading's menu edits (name, colour, icon), moves and deletes it; Add Section is at the end of
@@ -61,8 +61,8 @@ The sidebar lists them under "Archived", flat, with their path. Their page offer
   null; `icon` an icon's name or null ([icons.md](icons.md)). The heading shows the icon before the name, in the
   colour, or in the text colour without one. A colour alone is a small dot. With neither, the name alone, as before.
   "No section" never has either. The editor's colour row starts with None, a dashed ring: no dot, unlike a project's
-  Theme. An icon this client can't draw survives an edit that leaves it alone. On the Mac since 2026-11-14;
-  on the desktop since 0.12.6 (2026-11-15). Add and Edit section share the project icon picker, suggesting from
+  Theme. An icon this client can't draw survives an edit that leaves it alone.
+  Add and Edit section share the project icon picker, suggesting from
   the section's name. Edits are one undoable batch; unchanged saves write nothing. New plain sections omit
   both style fields. Explicitly clearing a style writes null. The desktop's `rename_section` delegates to
   `edit_section` for callers that only change the name. The task editor's section list stays text-only.

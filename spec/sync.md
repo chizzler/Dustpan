@@ -66,33 +66,25 @@ When OpenTodo sync is enabled later:
 
 ## Account switching and disconnected deletion
 
-Two bugs were found in review on 2026-11-12 and fixed on 2026-11-13.
+- **An account change never races a sync.** Every account change in Settings goes through
+  `Window.begin_account_change`. It stops the live stream and pending sync timers, blocks new syncs, waits for any
+  running sync to finish, then changes the data and reconnects.
+- **The account epoch.** `adopt_standalone`, `migrate_account` and `reset_for_account` bump the `account_epoch` meta
+  value. A `Syncer` run pins the epoch at its start, and checks it in the same transaction that reads each batch and
+  applies each response. If it has changed, the run raises `AccountChanged` and keeps nothing. This also covers the
+  command-line `sync`, which runs in its own process.
+- **Deleting for good after disconnect still reaches the server.** Only data never connected to an account
+  (`user_id` unset or `"local"`, and no server configured) is deleted locally at once. Otherwise permanent deletion is
+  queued in `pending_purges`, even while disconnected, and sent on the next sync. See [trash.md](trash.md#permanent-deletion).
+- **Switching to a different account** deletes items still waiting for a purge, with their cascades, instead of
+  uploading them to the new account.
 
-- **P1 — Account switching raced an active sync.** Settings could migrate or replace local data while a sync
-  worker still used the old account's connection. The old response could be applied to the new data, and
-  new-account tasks could be uploaded to the old account.
-  - **Fix, in the app:** every account change in Settings goes through `Window.begin_account_change`. It stops
-    the live stream and pending sync timers, blocks new syncs, waits for any running sync to finish, then
-    changes the data and reconnects.
-  - **Fix, in the sync engine:** `adopt_standalone`, `migrate_account` and `reset_for_account` bump the
-    `account_epoch` meta value. A `Syncer` run pins the epoch at its start. It checks the epoch in the same
-    transaction that reads each batch and applies each response. If the epoch has changed, it raises
-    `AccountChanged` and keeps nothing. This also covers the command-line `sync`, which runs in its own process.
-- **P2 — Permanent deletion after disconnect lost the server deletion.** Deleting a previously synced task for
-  good while disconnected removed it locally and recorded nothing for the server. Reconnecting left the server
-  copy, and later pulls brought it back.
-  - **Fix:** only data never connected to an account (`user_id` unset or `"local"`, and no server configured)
-    is deleted locally at once. Otherwise permanent deletion is queued in `pending_purges`, even while
-    disconnected, and sent on the next sync. See [trash.md](trash.md#permanent-deletion).
-  - Switching to a different account deletes items still waiting for a purge, with their cascades, instead of
-    uploading them to the new account.
+Regression tests cover switching or replacing during a request, switching during a purge, deleting after disconnect
+then reconnecting, and switching with purges pending.
 
-Regression tests cover each case: switching during a request, replacing during a request, switching during a
-purge, deleting after disconnect then reconnecting, and switching with purges pending.
+## On the Mac
 
-## On the Mac (0.18.0)
-
-Built 2026-11-13. `Config.loadOptional`, `adoptStandalone`, `migrateAccount`, `resetForAccount`, the account epoch,
+`Config.loadOptional`, `adoptStandalone`, `migrateAccount`, `resetForAccount`, the account epoch,
 whole-entity batches, per-op skew counts and the `reseed_device` pull port the desktop's, with its tests.
 The connection's `accountKey` is the server URL and a SHA-256 of the token, as on the desktop.
 
@@ -109,7 +101,7 @@ The connection's `accountKey` is the server URL and a SHA-256 of the token, as o
 In one transaction: every stored field becomes a new op `{id: new uuid, entity, entityId, field, value, ts, device}`
 with the field's stored clock. Add them to the outbox, set `cursor = 0`, store the new generation.
 
-**Full recovery pull (2026-11-12).** The server normally omits ops authored by the requesting
+**Full recovery pull.** The server normally omits ops authored by the requesting
 device. After a restore it may hold old fields this device has since purged, including fields
 the device originally wrote itself. During re-seeding the request therefore uses a temporary
 `reseed_device` UUID, persisted in meta until the final page and an empty outbox. The real device
@@ -125,10 +117,9 @@ The web app re-sends them unchanged, so its re-seed would fail with 400 `invalid
 This client keeps the stored `ts` and replaces a reserved device with its own.
 Only the tie-break between equal timestamps changes. **Report upstream.**
 
-**Rehearsed 2026-11-12.** The real pinned server's archive restore, generation change, client re-seed,
-both reconnect orders, interrupted batches and lost upload responses pass in an isolated sandbox.
-A copied production archive and client backup recover all 949 expected fields. See
-[the recovery harness](../dev/RECOVERY.md) for the checks, evidence and repeatable command.
+**Rehearsal.** `dev/recovery.sh` runs the real pinned server's archive restore, generation change, client re-seed,
+both reconnect orders, interrupted batches and lost upload responses in an isolated sandbox.
+See [the recovery harness](../dev/RECOVERY.md).
 
 **Recovery limits.** A purge after the archive can be lost on rollback: the archive predates the
 marker and clients have discarded the entity without retaining a durable purge ledger. The old

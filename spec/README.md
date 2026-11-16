@@ -19,29 +19,29 @@ When the pin moves, re-read the sync doc's schema table and diff the vectors.
 
 ## Slices
 
-| Slice | Scope | Spec | Status |
+| Slice | Scope | Spec | Since |
 | --- | --- | --- | --- |
-| 1 | Read-only: pull, store, show projects, sections and tasks | [sync.md](sync.md) | done 2026-10-31 |
-| 2 | Basic writes: add, complete, rename, due, priority, move | [writes.md](writes.md) | done 2026-10-31 |
-| 3 | Recurrence and reminders, against the vectors | [recurrence.md](recurrence.md) | done 2026-10-31 |
-| 4a | Filters, Today, Upcoming, saved views | [views.md](views.md) | done 2026-10-31, tried and approved |
-| 4b | Quick add, against the vectors | [quickadd.md](quickadd.md) | done 2026-10-31, tried and approved |
-| 5 | Everyday editing: delete, subtasks, labels, estimates, deadlines, reorder, more reminders | [writes.md](writes.md) | done 2026-10-31, tried and approved |
-| 6 | Drag and drop: nest, place, move to projects and dates, with keyboard and menu alternatives | [dragdrop.md](dragdrop.md) | 6a done 2026-11-01, tried and approved; 6b done 2026-11-01, tried and approved; 6c to come |
-| 7 | Projects and sections: create, nest, rename, colour, archive, delete | [projects.md](projects.md) | done 2026-11-01 |
-| 8 | Task notes in Markdown: write, preview, first line on the row | [notes.md](notes.md) | done 2026-11-02, tried and approved |
-| 9 | Labels: chips, a picker, labels in the sidebar, rename, recolour, reorder, merge, delete | [labels.md](labels.md) | done 2026-11-02, tried and approved; drop on a label 2026-11-02 |
-| 10 | Built-in Anytime and Completed pages, and the Filter page (the query helper) | [views.md](views.md) | done 2026-11-02, tried and approved (Filter 2026-11-02; Anytime and Completed 2026-11-04) |
-| 11 | Trash: restore, permanent deletion, offline queue and retention | [trash.md](trash.md) | done 2026-11-03, tried and approved 2026-11-04 |
-| Server update | Catch up with v0.22.0: time sectors (show, filter, quick add, write rules), the `notes` filter terms | [sectors.md](sectors.md) | done 2026-11-04, owner trial pending |
-| 12 | Calendar, in a companion window: Month, then Week and Day, placing, repeating and multi-day tasks | [calendar.md](calendar.md) | 12a, 12b and 12c done 2026-11-04, tried and approved (12c: the keys, menu and grid settings not yet tried); 12d to come |
-| — | Fold a task's subtasks away in project and Inbox lists | [folding.md](folding.md) | done 2026-11-04, tried and approved (0.12.3) |
-| — | Subtask progress: a pie in the parent's circle, and the offer to complete the parent | [progress.md](progress.md) | built 2026-11-05 (0.12.4); pie tried and approved, prompt trial pending |
-| — | Clickable project label on grouped rows; completed subtasks settle below open siblings | [progress.md](progress.md) | built 2026-11-06 (0.12.4); project link tried and approved, settling trial pending |
-| — | Project icons: all 1,854 of Lucide's, a picker with a category sidebar and suggestions from the name, shown in the sidebar and Trash; a Theme colour | [icons.md](icons.md) | built 2026-11-13 (0.12.5), owner trial pending |
-| — | Page heading: a large title on every page, so a project reads as a place; sub-projects to walk into | [pagehead.md](pagehead.md) | built 2026-11-13 (0.12.5), owner trial pending |
-| Recovery | Real-server restore/re-seed, interrupted uploads, purge boundaries, copied actual backups, GTK smoke | [recovery guide](../dev/RECOVERY.md) | passed 2026-11-12; permanent-deletion rollback and accidental-deletion limits confirmed |
-| — | Section colours and icons: editor, headings, sync and Undo | [sections](projects.md#sections) | built 2026-11-15 (0.12.6), matching Mac commit 9c0c824; owner trial pending |
+| 1 | Read-only: pull, store, show projects, sections and tasks | [sync.md](sync.md) | 0.12.0 |
+| 2 | Basic writes: add, complete, rename, due, priority, move | [writes.md](writes.md) | 0.12.0 |
+| 3 | Recurrence and reminders, against the vectors | [recurrence.md](recurrence.md) | 0.12.0 |
+| 4a | Filters, Today, Upcoming, saved views | [views.md](views.md) | 0.12.0 |
+| 4b | Quick add, against the vectors | [quickadd.md](quickadd.md) | 0.12.0 |
+| 5 | Everyday editing: delete, subtasks, labels, estimates, deadlines, reorder, more reminders | [writes.md](writes.md) | 0.12.0 |
+| 6 | Drag and drop: nest, place, move to projects and dates, with keyboard and menu alternatives (6c partly built) | [dragdrop.md](dragdrop.md) | 0.12.0 |
+| 7 | Projects and sections: create, nest, rename, colour, archive, delete | [projects.md](projects.md) | 0.12.0 |
+| 8 | Task notes in Markdown: write, preview, first line on the row | [notes.md](notes.md) | 0.12.0 |
+| 9 | Labels: chips, a picker, labels in the sidebar, rename, recolour, reorder, merge, delete, drop on a label | [labels.md](labels.md) | 0.12.0 |
+| 10 | Built-in Anytime and Completed pages, and the Filter page (the query helper) | [views.md](views.md) | 0.12.0 |
+| 11 | Trash: restore, permanent deletion, offline queue and retention | [trash.md](trash.md) | 0.12.0 |
+| — | Time sectors (show, filter, quick add, write rules) and the `notes` filter terms, from OpenTodo v0.22.0 | [sectors.md](sectors.md) | 0.12.0 |
+| 12 | Calendar, in a companion window: Month, Week and Day, placing and stretching (12d, repeats and multi-day, not built) | [calendar.md](calendar.md) | 0.12.0–0.12.2 |
+| — | Fold a task's subtasks away in project and Inbox lists | [folding.md](folding.md) | 0.12.3 |
+| — | Subtask progress, the offer to complete the parent, clickable project labels, completed subtasks settling | [progress.md](progress.md) | 0.12.4 |
+| — | Project icons and the Theme colour | [icons.md](icons.md) | 0.12.5 |
+| — | Page heading: a large title on every page, with sub-projects to open | [pagehead.md](pagehead.md) | 0.12.5 |
+| — | Section colours and icons: editor, headings, sync and Undo | [projects.md](projects.md#sections) | 0.12.6 |
+
+The restore and re-seed rehearsal is described in [dev/RECOVERY.md](../dev/RECOVERY.md).
 
 ## Behind the server
 
