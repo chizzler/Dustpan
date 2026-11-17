@@ -1,6 +1,10 @@
-# Mac release candidates
+# Mac releases
 
-## Mac 0.19.1 — unreleased
+## Mac 0.19.1 — 2026-11-17 (preview)
+
+[Download the signed and notarized universal Mac preview](https://github.com/chizzler/Dustpan/releases/tag/mac-v0.19.1).
+Requires macOS 26 or later; supports Apple silicon and Intel. Matching source, build metadata and
+SHA-256 checksums accompany the app.
 
 - First-launch welcome describes local tasks and optional OpenTodo sync as separate choices, each with its own
   action button, and stays out of the way of existing profiles. The compact window offers **Standalone on This Mac**

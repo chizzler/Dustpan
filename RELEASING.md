@@ -1,7 +1,8 @@
-# Preparing the Mac public preview
+# Mac public preview releases
 
-Candidate: **Mac 0.19.1** (build 2), a pre-1.0 preview. Linux releases are prepared separately in the
-Linux development environment; they are not a gate for this Mac release.
+Current release: [**Mac 0.19.1** (build 2)](https://github.com/chizzler/Dustpan/releases/tag/mac-v0.19.1),
+published on 17 November 2026 as a pre-1.0 preview. Linux releases are prepared separately in the
+Linux development environment.
 
 The Mac helper builds local artifacts. CI uploads test artifacts to Actions; it does not publish releases,
 change repository visibility, create tags or send builds to Apple.
@@ -31,8 +32,16 @@ After the gates pass, prepare a GitHub **prerelease** using the Mac notes in CHA
 Update the README with the actual Mac download link. Make any repository visibility change explicitly
 and separately. Preserve the independent Linux release process and version history.
 
-## Local preparation status
+## Mac 0.19.1 validation
 
-The universal Mac build, corresponding source and local test artifacts are prepared. Developer ID
-signing/notarization, hosted Mac CI results and final clean-profile trials remain publication gates.
-Record evidence from each final run rather than carrying forward results from earlier development builds.
+The release was built from commit `12dfe10c6bdc11b945cd2e6c4a3cc8b404f5a744`. All 369 Swift tests pass
+with the pinned upstream fixtures. The universal Release build, dependency audit, Developer ID signature,
+Apple notarization, stapled ticket, Gatekeeper assessment and macOS distribution checks pass.
+
+All four release files were downloaded from GitHub and verified against SHA256SUMS. Fresh-profile checks
+of that downloaded app cover the welcome choices and sync setup navigation, task creation/editing/completion,
+keyboard Undo, and opening/closing the calendar. A real Mac/Linux round trip, actual login and final
+notification-rendering trials remain additional validation limits for this preview.
+
+Keep published versioned artifacts immutable. Record later checks and changes separately; rebuild a new
+candidate when source changes. Each future release needs its own evidence from the final downloaded artifact.

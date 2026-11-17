@@ -9,8 +9,8 @@ Nested projects, sections and subtasks, priorities, labels, recurring tasks, rem
 natural-language quick add, filters, saved views, Undo and Trash. The companion calendar has Month,
 Week and Day views with drag-and-drop scheduling and duration resizing.
 
-**Mac pre-1.0 preview:** the release candidate is **0.19.1**. Mac packaging and validation are prepared
-in this checkout; Linux releases are prepared separately in the Linux development environment.
+**Mac pre-1.0 preview:** [download Mac 0.19.1](https://github.com/chizzler/Dustpan/releases/tag/mac-v0.19.1),
+a Developer ID signed and Apple-notarized universal build for Apple silicon and Intel.
 Linux **0.12.6** is available from [ChipDust](https://chipdust.au/dustpan/), with source, setup instructions
 and checksums. AUR submission is pending while new-account registration is closed.
 The iPhone app is planned; no iPhone build is available.
@@ -20,7 +20,7 @@ The iPhone app is planned; no iPhone build is available.
 | Platform | Requirements | Install and setup |
 | --- | --- | --- |
 | Linux | Arch Linux / Omarchy; Python 3.11+, GTK 4, libadwaita 1.7+ | [Linux guide](desktop/README.md), [Arch packages](packaging/README.md) |
-| Mac | macOS 26+; Xcode 27 to build | [Mac guide](apple/README.md), [Mac packaging](packaging/macos/README.md) |
+| Mac | macOS 26+; Xcode 27 only when building from source | [Download](https://github.com/chizzler/Dustpan/releases/tag/mac-v0.19.1), [Mac guide](apple/README.md) |
 
 Open Dustpan and add a task. Settings configures reminders, date/time preferences and quick add.
 Reminders require Dustpan to stay running; each client offers an optional way to start at login.

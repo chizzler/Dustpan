@@ -5,6 +5,16 @@ Foundation, SwiftUI, CryptoKit, UserNotifications and the system's SQLite.
 
 Needs Xcode 27 and macOS 26 or later.
 
+## Download
+
+[Mac 0.19.1 preview](https://github.com/chizzler/Dustpan/releases/tag/mac-v0.19.1) is a Developer ID signed,
+Apple-notarized universal build for Apple silicon and Intel. It needs macOS 26 or later; Xcode is only
+needed to build from source.
+
+Download `dustpan-mac-0.19.1-universal.zip`, unzip it, and move `Dustpan.app` to Applications. On first
+launch choose **Standalone on This Mac** or **Sync to an OpenTodo Server…**. The release includes matching
+source, build metadata and SHA-256 checksums.
+
 ## Develop
 
 Run everything from the repo root, with the dev server going (`dev/server.sh`, see the top README).
@@ -121,7 +131,7 @@ Reminders only fire while Dustpan is running. The first time one is waiting, Dus
 Settings ▸ General ▸ Open at login changes it later. Only the copy in `/Applications` can do this, so a development
 build never opens at login on the real data.
 
-Install or update the app in `/Applications`, from the repo root. Quit Dustpan first.
+To install a locally built copy in `/Applications`, run from the repo root. Quit Dustpan first.
 
 ```sh
 xcodebuild -project apple/Dustpan.xcodeproj -scheme Dustpan -configuration Release \
@@ -129,7 +139,7 @@ xcodebuild -project apple/Dustpan.xcodeproj -scheme Dustpan -configuration Relea
 ditto dev/data/mac-build/Build/Products/Release/Dustpan.app /Applications/Dustpan.app
 ```
 
-It's signed for this Mac only (ad hoc), which is enough to run it here.
+This local build is ad-hoc signed. The public download above is Developer ID signed and notarized.
 
 ## Versions
 
@@ -138,7 +148,7 @@ Before 1.0 the minor number follows the Mac client's own slices.
 
 | Version | Date | What |
 | --- | --- | --- |
-| 0.19.1 (candidate) | Unreleased | Compact first-launch welcome with standalone and server-sync choices; app-owned background reminders and polling; cancellation and account-switch safeguards; section saves preserve unrelated synced edits; dependency audit and universal Mac packaging. Sync upload and field-size limits; held edits shown as waiting; experimental outline list restricted to Debug builds. Sections can carry a colour and an icon, as on the web: Edit Section (was Rename Section) has the same Colour and Icon rows as Edit Project, with None for no colour. The heading shows the icon in the section's colour, a dot for a colour alone, and nothing extra for neither. |
+| 0.19.1 (preview) | 2026-11-17 | Compact first-launch welcome with standalone and server-sync choices; app-owned background reminders and polling; cancellation and account-switch safeguards; section saves preserve unrelated synced edits; dependency audit and universal Mac packaging. Sync upload and field-size limits; held edits shown as waiting; experimental outline list restricted to Debug builds. Sections can carry a colour and an icon, as on the web: Edit Section (was Rename Section) has the same Colour and Icon rows as Edit Project, with None for no colour. The heading shows the icon in the section's colour, a dot for a colour alone, and nothing extra for neither. |
 | 0.19.0 | 2026-11-14 | Catching up with the desktop's 0.12.5. Projects can carry any of Lucide's 1,854 icons, in their colour, in the sidebar, Trash and headings: Edit Project has an Icon row with a picker (search, a category sidebar, and suggestions from the name). A project can take the Theme colour, drawn in the text colour. Every page opens with a large heading: the date on Today, a sub-project's parent (a link), the title with its icon or symbol, an open count, and the sub-projects to open; the window's title shows once it has scrolled away. Label chips show a small tag instead of a dot. Quick add's preview starts with the title it will save, and "sun", "sat" and "wed" are read as days only with a cue, as on the desktop ([spec](../spec/quickadd.md#where-we-differ)). Reminders only fire while Dustpan runs, so the first time one is waiting it offers to open at login; Settings ▸ General has the switch. Lighter in the background: the 30-second reminder check reads only the tasks it needs (100 ms to 5 ms at 3,000 tasks), drawing icons no longer loads the picker's catalogue, and a sync that changes nothing doesn't rebuild the pages. |
 | 0.18.0 | 2026-11-13 | Catching up with the desktop's standalone support. Dustpan opens without a server and keeps everything on this Mac; a config file that's wrong opens standalone too, with a note saying why. Settings (⌘,): default reminders (with a custom offset), time format, date order, week and day start, and quick add's language and switches, stored as the desktop stores them; Sync connects to an OpenTodo server, uploading the tasks here, and Disconnect goes back to standalone. Connecting with data from another account asks whether to upload it into the new one or replace it. An account change waits for a running sync, and a sync caught by one keeps nothing. Delete for Good deletes at once when the data has never been on a server, and otherwise waits for the server, after reconnecting if need be. Ticked subtasks settle after 2 s, not 3. |
 | 0.17.0 | 2026-11-13 | Catching up with the desktop's 0.12.4. A parent's check circle holds a pie of its done subtasks (a faint ring for none, a disc for all), with "3/5" on the row and the count in the tooltip. Completing the last open subtask offers to complete the parent in a banner: Complete (⌘Return) or Esc. Completed subtasks stay under their parent, below its open ones, until the broom on the parent clears them from this Mac's lists, with Undo; a ticked or reopened subtask keeps its place until the page has been still for 3 s. A row's project label on Today and the other grouped pages opens the task in its project, unfolded. |
